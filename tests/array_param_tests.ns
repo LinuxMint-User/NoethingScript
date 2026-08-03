@@ -1,0 +1,344 @@
+debug 0
+
+// ========== 测试1: 只读引用传递 (默认) ==========
+// 读正常, 写数组元素抛异常可捕获, 原数组不变
+:sumArr (arr:array) -> total:int
+local i:int = 0
+local s:int = 0
+while (i < len(arr))
+    s = s + arr[i]
+    i = i + 1
+endwhl
+try
+    arr[0] = 999
+catch (Exception e1)
+    print "caught readonly: " + e1
+endtry
+total = s
+return total
+:end
+global array garr[3]:int = [10, 20, 30]
+call sumArr(garr) -> s1
+print s1
+print garr[0]
+
+// ========== 测试2: mut 可变引用传递 ==========
+// 函数内修改写穿原数组
+:setFirst (mut arr:array, val:int) -> :void
+arr[0] = val
+:end
+call setFirst(mut garr, 77)
+print garr[0]
+
+// ========== 测试3: copy 副本传递 ==========
+// 函数内修改不影响原数组 (副本独立可写)
+:maxArr (arr:array) -> max:int
+local i2:int = 1
+local m:int = 0
+m = arr[0]
+while (i2 < len(arr))
+    if (arr[i2] > m)
+        m = arr[i2]
+    endif
+    i2 = i2 + 1
+endwhl
+arr[0] = -1
+max = m
+return max
+:end
+call maxArr(copy(garr)) -> m1
+print m1
+print garr[0]
+
+// ========== 测试4: 数组返回值 ==========
+:makeArr () -> res:array
+local array tmp[3]:int = [5, 6, 7]
+res = tmp
+return res
+:end
+call makeArr() -> r1
+print r1[0]
+print r1[2]
+print len(r1)
+
+// ========== 测试5: mut 匹配检查 ==========
+:needMut (mut arr:array) -> :void
+:end
+call needMut(garr)
+print "after mismatch1"
+
+:needRO (arr:array) -> :void
+:end
+call needRO(mut garr)
+print "after mismatch2"
+
+// ========== 测试6: 递归 + 数组参数 ==========
+:rsum (arr:array, idx:int) -> acc:int
+local v:int = 0
+v = arr[idx]
+local nxt:int = 0
+nxt = idx + 1
+local sub:int = 0
+if (nxt < len(arr))
+    call rsum(arr, nxt) -> sub
+    acc = v + sub
+else
+    acc = v
+endif
+return acc
+:end
+global array nums[5]:int = [1, 2, 3, 4, 5]
+call rsum(nums, 0) -> total
+print total
+
+// ========== 测试7: 局部数组实参 ==========
+:lastElem (arr:array) -> last:int
+local n:int = 0
+n = len(arr)
+local e:int = 0
+e = arr[n - 1]
+last = e
+return last
+:end
+:wrapper () -> :void
+local array la[4]:int = [7, 8, 9, 10]
+call lastElem(la) -> le
+print le
+:end
+call wrapper()
+
+// ========== 测试8: mut 嵌套传参 (两层写穿) ==========
+:doubleIt (mut arr:array) -> :void
+local i:int = 0
+while (i < len(arr))
+    arr[i] = arr[i] * 2
+    i = i + 1
+endwhl
+:end
+:applyDouble (mut arr:array) -> :void
+call doubleIt(mut arr)
+:end
+global array dd[3]:int = [1, 2, 3]
+call applyDouble(mut dd)
+print dd[0]
+print dd[1]
+print dd[2]
+
+// ========== 测试9: 返回值数组再作实参 ==========
+call lastElem(nums) -> x
+print x
+
+// ========== 测试10: 数组整体赋值 (引用赋值) ==========
+// b = a 后二者共享同一数据, 修改 b 反映到 a
+:aliasTest () -> :void
+local array a[2]:int = [1, 2]
+local array b[2]:int = [0, 0]
+b = a
+b[0] = 99
+print a[0]
+print b[0]
+:end
+call aliasTest()
+
+// 全局数组整体赋值别名
+global array ga[2]:int = [7, 8]
+global array gb[2]:int = [0, 0]
+gb = ga
+gb[1] = 77
+print ga[1]
+print gb[1]
+
+// ========== 测试11: 数组整体赋值 + 返回声明变量 ==========
+:makeArr2 () -> res:array
+local array tmp[3]:int = [5, 6, 7]
+res = tmp
+return res
+:end
+call makeArr2() -> r2
+print r2[0]
+print r2[2]
+print len(r2)
+
+// ========== 测试12: 数组字面量实参 ==========
+:firstInt (arr:array) -> first:int
+local f:int = 0
+f = arr[0]
+first = f
+return first
+:end
+call firstInt([3, 4, 5]) -> fe
+print fe
+
+:firstStr (arr:array) -> first:string
+local f:string = ""
+f = arr[1]
+first = f
+return first
+:end
+call firstStr(["x", "y"]) -> fe2
+print fe2
+
+:firstBool (arr:array) -> first:bool
+local f:bool = false
+f = arr[0]
+first = f
+return first
+:end
+call firstBool([true, false]) -> fe3
+print fe3
+
+:lenOf (arr:array) -> n:int
+local t:int = 0
+t = len(arr)
+n = t
+return n
+:end
+call lenOf([10, 20, 30, 40]) -> ln
+print ln
+
+// 字面量实参用于 mut 形参 → 报错 (执行继续)
+:mutWrite (mut arr:array) -> :void
+arr[0] = 9
+:end
+call mutWrite([1, 2])
+print "after mut literal"
+
+// ========== 测试13: return 只能返回声明变量 (数组场景) ==========
+// 违反规则: return 形参数组 → 报错 (执行继续)
+:badRet (arr:array) -> out:array
+return arr
+:end
+call badRet(nums) -> br
+print "after badRet"
+
+// 正确写法: 先整体赋值给返回变量再 return
+:goodRet (arr:array) -> out:array
+out = arr
+return out
+:end
+call goodRet(nums) -> gr
+print gr[0]
+print gr[4]
+
+// ========== 测试14: copy 深拷贝整体赋值 ==========
+// b = copy(a) 后 b 是独立副本, 修改 b 不影响 a
+global array ca[3]:int = [1, 2, 3]
+global array cb[3]:int = [0, 0, 0]
+cb = copy(ca)
+cb[0] = 99
+print ca[0]
+print cb[0]
+print len(cb)
+
+// 函数内 copy 整体赋值 + 返回
+:mkCopy () -> res:array
+local array tmp[2]:int = [5, 6]
+local array cp[2]:int = [0, 0]
+cp = copy(tmp)
+cp[0] = 77
+res = cp
+return res
+:end
+call mkCopy() -> rcp
+print rcp[0]
+print rcp[1]
+
+// ========== 测试15: copy(只读形参) 深拷贝可写 ==========
+:copyRO (arr:array) -> out:array
+out = copy(arr)
+return out
+:end
+call copyRO(garr) -> rro
+rro[0] = 555
+print rro[0]
+print garr[0]
+
+// ========== 测试16: len(copy()) 表达式内 ==========
+global glen:int = 0
+glen = len(copy(nums))
+print glen
+
+// ========== 测试17: global. 前缀整体赋值 + 元素写入 ==========
+global array gp1[2]:int = [1, 1]
+global array gp2[2]:int = [2, 2]
+global.gp2 = global.gp1
+global.gp2[1] = 33
+print global.gp1[1]
+print global.gp2[1]
+
+// ========== 测试18: 只读传播 (整体赋值/返回不泄漏写权限) ==========
+:roLeak (arr:array) -> out:array
+out = arr
+return out
+:end
+call roLeak(garr) -> rrl
+try
+    rrl[0] = 999
+catch (Exception e3)
+    print "readonly preserved: " + e3
+endtry
+print garr[0]
+
+:roLocal (arr:array) -> :void
+local array la[2]:int = [0, 0]
+la = arr
+try
+    la[0] = 77
+catch (Exception e4)
+    print "local readonly: " + e4
+endtry
+:end
+call roLocal(garr)
+print garr[0]
+
+// 预期输出:
+// caught readonly: 数组 arr 是只读引用, 不能被赋值
+// 60
+// 10
+// 77
+// 77
+// 77
+// 5
+// 7
+// 3
+// 错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字...
+// after mismatch1
+// 错误: 形参 arr 为只读引用, 实参不能使用 mut 关键字...
+// after mismatch2
+// 15
+// 10
+// 2
+// 4
+// 6
+// 5
+// 99
+// 99
+// 77
+// 77
+// 5
+// 7
+// 3
+// 3
+// y
+// true
+// 4
+// 错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字...
+// after mut literal
+// 错误: return 只能返回函数 badRet 声明的返回变量 out, 不能返回 arr...
+// after badRet
+// 1
+// 5
+// 1
+// 99
+// 3
+// 77
+// 6
+// 555
+// 77
+// 5
+// 33
+// 33
+// readonly preserved: 数组 rrl 是只读引用, 不能被赋值
+// 77
+// local readonly: 数组 la 是只读引用, 不能被赋值
+// 77

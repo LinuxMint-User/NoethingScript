@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.1.0";
+const NSIVersion: string = "2.2.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -141,12 +141,14 @@ interface Variable {
     arrayLength?: number;
     arrayElementType?: DataType;
     arrayElements?: ArrayElement[];
+    isReadonlyArray?: boolean;  // 数组只读引用视图 (只读形参), 透过该视图禁止写数组元素
 }
 
 // 函数形参接口定义
 interface FunctionParameter {
     name: string;
     type: DataType;
+    isMutable?: boolean;  // 是否为可变引用参数 (mut 关键字前置, 仅数组有效)
 }
 
 // 函数信息接口定义
@@ -400,7 +402,9 @@ class ScopeManager {
             // 1. 先检查局部变量
             for (let i = LOCAL_VARS.length - 1; i >= 0; i--) {
                 const varInfo = LOCAL_VARS[i];
-                if (varInfo.name === name && currentLine >= varInfo.startLine && currentLine <= varInfo.endLine) {
+                if (varInfo.name === name &&
+                    currentLine >= varInfo.startLine &&
+                    (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
                     return varInfo.type;
                 }
             }
@@ -750,12 +754,23 @@ class Interpreter {
                                 console.error(`函数参数格式错误: 第 ${i + 1} 行参数 ${paramMatch} 格式不正确, 应为 "参数名:类型"`);
                                 return;
                             }
-                            const paramName = parts[0].trim();
+                            // 解析 mut 前置关键字 (仅数组参数有意义)
+                            let isMutable = false;
+                            let paramName = parts[0].trim();
+                            if (paramName.startsWith('mut ')) {
+                                isMutable = true;
+                                paramName = paramName.substring(4).trim();
+                            }
                             const paramTypeStr = parts[1].trim();
                             const paramType = Interpreter.getDataTypeFromString(paramTypeStr);
+                            if (isMutable && paramType !== DataType.ARRAY) {
+                                console.error(`函数参数格式错误: 第 ${i + 1} 行参数 ${paramMatch}, mut 关键字仅适用于数组类型参数`);
+                                return;
+                            }
                             params.push({
                                 name: paramName,
-                                type: paramType
+                                type: paramType,
+                                isMutable: isMutable
                             });
                         }
                     }
@@ -1381,8 +1396,53 @@ class Interpreter {
 
         // 解析参数
         const args: any[] = [];
+        // 数组实参辅助: 支持 数组名 / mut 数组名 / copy(数组名) / [元素字面量] 四种形式
+        const parseArrayArgument = (argStr: string): { mode: 'ref' | 'mut' | 'copy' | 'literal'; name: string } | null => {
+            const trimmed = argStr.trim();
+            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+                return { mode: 'literal', name: trimmed };
+            }
+            const copyMatch = trimmed.match(/^copy\s*\(\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)$/);
+            if (copyMatch) return { mode: 'copy', name: copyMatch[1] };
+            const mutMatch = trimmed.match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/);
+            if (mutMatch) return { mode: 'mut', name: mutMatch[1] };
+            const refMatch = trimmed.match(/^([a-zA-Z_][a-zA-Z0-9_.]*)$/);
+            if (refMatch) return { mode: 'ref', name: refMatch[1] };
+            return null;
+        };
+        // 推断数组字面量元素的值与类型
+        const inferLiteralElement = (elementStr: string): ArrayElement => {
+            const es = elementStr.trim();
+            if ((es.startsWith('"') && es.endsWith('"')) || (es.startsWith("'") && es.endsWith("'"))) {
+                return { value: es.slice(1, -1), type: DataType.STRING };
+            }
+            if (es === 'true') return { value: true, type: DataType.BOOL };
+            if (es === 'false') return { value: false, type: DataType.BOOL };
+            const num = Number(es);
+            if (es !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
+            throw new Error(`数组字面量元素无法解析: ${es}`);
+        };
+        // 拆分调用实参: 正确忽略数组字面量 [...] 内部与字符串内部的逗号
+        const splitCallArguments = (s: string): string[] => {
+            const parts: string[] = [];
+            let depth = 0;
+            let cur = '';
+            let inString = false;
+            let delimiter = '';
+            for (let i = 0; i < s.length; i++) {
+                const c = s[i];
+                if (!inString && (c === '"' || c === "'")) { inString = true; delimiter = c; cur += c; }
+                else if (inString && c === delimiter) { inString = false; cur += c; }
+                else if (!inString && c === '[') { depth++; cur += c; }
+                else if (!inString && c === ']') { depth--; cur += c; }
+                else if (!inString && c === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+                else cur += c;
+            }
+            if (cur.trim()) parts.push(cur.trim());
+            return parts;
+        };
         if (argsStr.trim()) {
-            const argValues = argsStr.split(',').map(arg => arg.trim());
+            const argValues = splitCallArguments(argsStr);
             if (argValues.length < funcInfo.params.length) {
                 console.error(`错误: 传入函数 ${funcName} 的参数数量过少: 期望 ${funcInfo.params.length}, 实际 ${argValues.length} 在第 ${currentLinePointer + 1} 行`);
                 return;
@@ -1393,10 +1453,29 @@ class Interpreter {
             // 只解析前 funcInfo.params.length 个实参 (多余参数已被忽略, 避免越界)
             const argCount = Math.min(argValues.length, funcInfo.params.length);
             for (let i = 0; i < argCount; i++) {
-                const paramType = funcInfo.params[i].type;
+                const param = funcInfo.params[i];
+                const paramType = param.type;
                 try {
-                    const value = Interpreter.parseValue(argValues[i], paramType);
-                    args.push(value);
+                    if (paramType === DataType.ARRAY) {
+                        const arrArg = parseArrayArgument(argValues[i]);
+                        if (!arrArg) {
+                            console.error(`错误: 函数 ${funcName} 参数 ${i + 1} 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)" 在第 ${currentLinePointer + 1} 行`);
+                            return;
+                        }
+                        // mut 匹配检查: 形参与实参必须一致
+                        if (param.isMutable && arrArg.mode !== 'mut' && arrArg.mode !== 'copy') {
+                            console.error(`错误: 形参 ${param.name} 声明为 mut 可变引用, 实参必须使用 mut 关键字 在第 ${currentLinePointer + 1} 行`);
+                            return;
+                        }
+                        if (!param.isMutable && arrArg.mode === 'mut') {
+                            console.error(`错误: 形参 ${param.name} 为只读引用, 实参不能使用 mut 关键字 在第 ${currentLinePointer + 1} 行`);
+                            return;
+                        }
+                        args.push(arrArg);
+                    } else {
+                        const value = Interpreter.parseValue(argValues[i], paramType);
+                        args.push(value);
+                    }
                 } catch (error) {
                     console.error(`错误: 函数 ${funcName} 参数 ${i + 1} 类型错误 在第 ${currentLinePointer + 1} 行`);
                     return;
@@ -1421,11 +1500,76 @@ class Interpreter {
         debugLog(2, `函数调用: ${funcName}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
         for (let i = 0; i < funcInfo.params.length; i++) {
             debugLog(3, `循环索引: ${i}`);
-            const paramName = funcInfo.params[i].name;
-            debugLog(2, `设置参数: ${paramName} = ${args[i]} (类型: ${funcInfo.params[i].type})`);
-            // 重要修改: 参数作用域应从函数开始行到函数结束行
+            const param = funcInfo.params[i];
+            const paramName = param.name;
+            debugLog(2, `设置参数: ${paramName} (类型: ${param.type})`);
+
+            if (param.type === DataType.ARRAY) {
+                // 数组参数: 绑定引用/副本/字面量
+                const arrArg = args[i] as { mode: 'ref' | 'mut' | 'copy' | 'literal'; name: string };
+
+                if (arrArg.mode === 'literal') {
+                    // 从字面量创建临时数组 (只读视图)
+                    const elementsStr = arrArg.name.slice(1, -1);
+                    const elementStrs = Interpreter.splitArrayElements(elementsStr);
+                    let literalElements: ArrayElement[] = [];
+                    try {
+                        literalElements = elementStrs.map(es => inferLiteralElement(es));
+                    } catch (e) {
+                        console.error(`错误: 数组字面量实参解析失败 (${(e as Error).message}) 在第 ${currentLinePointer + 1} 行`);
+                        LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                        return;
+                    }
+                    const literalVar: Variable = {
+                        name: paramName,
+                        value: "请使用arrayElements属性访问数组元素",
+                        type: DataType.ARRAY,
+                        isGlobal: false,
+                        isConst: false,
+                        startLine: funcInfo.startLine + 1,
+                        endLine: funcInfo.endLine,
+                        frameId: frameId,
+                        arrayLength: literalElements.length,
+                        arrayElementType: literalElements.length > 0 ? literalElements[0].type : DataType.NUMBER,
+                        arrayElements: literalElements,
+                        isReadonlyArray: true
+                    };
+                    LOCAL_VARS.push(literalVar);
+                    debugLog(2, `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    continue;
+                }
+
+                const arrVar = ScopeManager.getVariable(arrArg.name, currentLinePointer, true, arrArg.name.startsWith('global.'));
+                if (!arrVar || arrVar.type !== DataType.ARRAY) {
+                    console.error(`错误: 实参 ${arrArg.name} 不是数组类型 在第 ${currentLinePointer + 1} 行`);
+                    LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                    return;
+                }
+                const paramVar: Variable = {
+                    name: paramName,
+                    value: "请使用arrayElements属性访问数组元素",
+                    type: DataType.ARRAY,
+                    isGlobal: false,
+                    isConst: false,
+                    startLine: funcInfo.startLine + 1,
+                    endLine: funcInfo.endLine,
+                    frameId: frameId,
+                    arrayLength: arrVar.arrayLength,
+                    arrayElementType: arrVar.arrayElementType,
+                    // copy 模式深拷贝元素; 引用模式共享同一数组对象
+                    arrayElements: arrArg.mode === 'copy'
+                        ? arrVar.arrayElements!.map((e: ArrayElement) => ({ value: e.value, type: e.type }))
+                        : arrVar.arrayElements,
+                    // copy 模式: 副本独立于调用方, 视图恒可写; 引用模式: 只读形参 → 只读视图, mut形参 → 可变视图
+                    isReadonlyArray: arrArg.mode === 'copy' ? false : !param.isMutable
+                };
+                LOCAL_VARS.push(paramVar);
+                debugLog(2, `数组参数 ${paramName} 绑定完成 (模式: ${arrArg.mode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                continue;
+            }
+
             const argValue = args[i] !== undefined ? args[i] : null;
-            const result = ScopeManager.addVariable(paramName, argValue, funcInfo.params[i].type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId);
+            const result = ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId);
             debugLog(2, `参数 ${paramName} 添加${result ? '成功' : '失败'}`);
         }
         debugLog(2, `参数传递循环结束`);
@@ -1774,6 +1918,13 @@ class Interpreter {
                 }
                 const funcInfo = FUNCTIONS[block.funcName];
 
+                // 规则: return 只能返回函数声明的返回变量
+                const defReturnVar = ScopeManager.getReturnVarName(funcInfo);
+                if (defReturnVar !== undefined && returnValueStr !== defReturnVar) {
+                    console.error(`错误: return 只能返回函数 ${block.funcName} 声明的返回变量 ${defReturnVar}, 不能返回 ${returnValueStr} 在第 ${currentLinePointer + 1} 行`);
+                    return;
+                }
+
                 let returnValue: any;
                 // 从当前作用域获取返回变量
                 // 注意: 需区分"变量不存在"与"变量存在但值为undefined"(如未赋初值的返回值变量)
@@ -1788,7 +1939,12 @@ class Interpreter {
                     debugLog(2, (`无返回值, 设置为undefined`));
                     return;
                 }
-                returnValue = returnVarInfo.value;
+                // 数组返回: 捕获整个数组结构引用 (含 arrayElements), 标量返回捕获值
+                if (returnVarInfo.type === DataType.ARRAY) {
+                    returnValue = returnVarInfo;
+                } else {
+                    returnValue = returnVarInfo.value;
+                }
                 debugLog(2, `从变量获取返回值: ${returnValue}`);
 
                 // 将返回值存储到RETURN_VALUES池中并做好标记
@@ -2820,19 +2976,30 @@ class Interpreter {
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
                 debugLog(1, `侦测到 array_assignment target:${result.target.arrayName} index:${result.target.index}`);
                 const { target, value } = result;
-                const arrayVar = ScopeManager.getVariable(target.arrayName, currentLinePointer, true);
-                debugLog(1, `获得的数组名称: ${arrayVar.name}`);
+                // 处理 global. 前缀 (与整体赋值分支一致)
+                let targetName: string = target.arrayName;
+                let isGlobal: boolean = false;
+                if (targetName.startsWith('global.')) {
+                    targetName = targetName.slice('global.'.length);
+                    isGlobal = true;
+                }
+                const arrayVar = ScopeManager.getVariable(targetName, currentLinePointer, true, isGlobal);
                 // 检查变量是否存在且是数组类型
                 if (!arrayVar) {
-                    throw { type: ExceptionType.REFERENCE_ERROR, message: `未定义的数组: ${target.arrayName}`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.REFERENCE_ERROR, message: `未定义的数组: ${targetName}`, lineNumber: currentLinePointer } as Exception;
                 }
+                debugLog(1, `获得的数组名称: ${arrayVar.name}`);
 
                 if (arrayVar.type !== DataType.ARRAY) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `该 ${target.arrayName} 不是数组类型`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: `该 ${targetName} 不是数组类型`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 if (arrayVar.isConst) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${target.arrayName} 是常量数组, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${targetName} 是常量数组, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
+                }
+
+                if (arrayVar.isReadonlyArray) {
+                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${targetName} 是只读引用, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 检查索引是否在数组范围内
@@ -2866,8 +3033,40 @@ class Interpreter {
 
                 // 检查是否为已声明变量
                 if (ScopeManager.hasVariable(newTarget, currentLinePointer, isGlobal)) {
-                    Interpreter.checkLoopVarWritable(newTarget);
-                    ScopeManager.setVariable(newTarget, value, currentLinePointer, isGlobal);
+                    const lhsVar = ScopeManager.getVariableInfo(newTarget, currentLinePointer, isGlobal);
+                    // 数组整体赋值: LHS 为数组变量且 RHS 求值为数组变量 → 引用赋值 (共享同一数组数据)
+                    if (lhsVar && lhsVar.type === DataType.ARRAY &&
+                        value && typeof value === 'object' && (value as Variable).type === DataType.ARRAY &&
+                        Array.isArray((value as Variable).arrayElements)) {
+                        if (lhsVar.isConst) {
+                            throw {
+                                type: ExceptionType.TYPE_ERROR,
+                                message: `常量数组 ${newTarget} 不能被整体赋值`,
+                                lineNumber: currentLinePointer
+                            } as Exception;
+                        }
+                        if (lhsVar.isReadonlyArray) {
+                            throw {
+                                type: ExceptionType.TYPE_ERROR,
+                                message: `数组 ${newTarget} 是只读引用, 不能被整体赋值`,
+                                lineNumber: currentLinePointer
+                            } as Exception;
+                        }
+                        Interpreter.checkLoopVarWritable(newTarget);
+                        // 引用赋值: LHS 与 RHS 共享同一数组数据
+                        const rhsVar = value as Variable;
+                        lhsVar.arrayLength = rhsVar.arrayLength;
+                        lhsVar.arrayElementType = rhsVar.arrayElementType;
+                        lhsVar.arrayElements = rhsVar.arrayElements;
+                        // 只读传播: 从只读引用视图整体赋值得到的引用同样受只读保护, 防止透过 LHS 写穿原数组
+                        if (rhsVar.isReadonlyArray) {
+                            lhsVar.isReadonlyArray = true;
+                        }
+                        debugLog(1, `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                    } else {
+                        Interpreter.checkLoopVarWritable(newTarget);
+                        ScopeManager.setVariable(newTarget, value, currentLinePointer, isGlobal);
+                    }
                 } else {
                     // 未定义变量抛引用错误 (可被try-catch捕获)
                     throw {
@@ -3733,6 +3932,34 @@ class ExpressionEvaluator {
             case 'float':
                 if (args.length !== 1) throw new Error("float 需要 exactly one argument");
                 return parseFloat(args[0]);
+            case 'copy':
+                // 数组副本: 深拷贝数组数据并返回独立副本 (可用于整体赋值 b = copy(a))
+                if (args.length !== 1) throw new Error("copy 需要 exactly one argument");
+                let copySrcArr: Variable | null = null;
+                if (args[0] && typeof args[0] === 'object' && 'type' in args[0] && args[0].type === DataType.ARRAY) {
+                    copySrcArr = args[0] as Variable;
+                } else if (typeof args[0] === 'string') {
+                    copySrcArr = ScopeManager.getVariable(args[0], this.currentLine, true);
+                }
+                if (!copySrcArr || copySrcArr.type !== DataType.ARRAY) {
+                    throw new Error(`copy 参数必须是数组类型`);
+                }
+                const copiedArr: Variable = {
+                    name: copySrcArr.name + "_copy",
+                    value: "请使用arrayElements属性访问数组元素",
+                    type: DataType.ARRAY,
+                    isGlobal: false,
+                    isConst: false,
+                    startLine: this.currentLine,
+                    endLine: -1,
+                    frameId: copySrcArr.frameId,
+                    arrayLength: copySrcArr.arrayLength,
+                    arrayElementType: copySrcArr.arrayElementType,
+                    arrayElements: copySrcArr.arrayElements!.map(e => ({ value: e.value, type: e.type })),
+                    isReadonlyArray: false
+                };
+                debugLog(1, `copy 深拷贝数组: ${copySrcArr.name} (长度 ${copiedArr.arrayLength})`);
+                return copiedArr;
             default:
                 throw new Error(`未知函数: ${funcName} at position ${this.currentTokenIndex}`);
         }
@@ -3921,6 +4148,63 @@ function main() {
 function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, resultVar: string | undefined, oldLinePointer: number): void {
     // 检查函数是否有返回值且调用时有接收变量
     if (funcInfo.returnType !== DataType.UNDEFINED && resultVar !== undefined) {
+        // 数组返回值专门路径: 结果变量绑定返回数组的结构 (引用共享)
+        if (funcInfo.returnType === DataType.ARRAY) {
+            if (RETURN_VALUES.hasOwnProperty(funcName)) {
+                const funcReturnValues = RETURN_VALUES[funcName];
+                // 获取函数定义中的返回值变量名
+                const funcDefLine = programLines[funcInfo.startLine].trim();
+                const funcMatch = funcDefLine.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]+)(?:\s*:([a-zA-Z0-9_]+))?$/);
+                let returnVarName: string | undefined;
+                if (funcMatch) {
+                    const returnVarNameOrVoid = funcMatch[3];
+                    if (returnVarNameOrVoid !== ':void') {
+                        returnVarName = returnVarNameOrVoid.startsWith(':') ? returnVarNameOrVoid.substring(1) : returnVarNameOrVoid;
+                    }
+                }
+                let arrStruct: Variable | undefined;
+                if (returnVarName && funcReturnValues.hasOwnProperty(returnVarName)) {
+                    arrStruct = funcReturnValues[returnVarName] as Variable;
+                }
+                delete RETURN_VALUES[funcName];
+                if (!arrStruct || arrStruct.type !== DataType.ARRAY || !arrStruct.arrayElements) {
+                    console.error(`错误: 函数 ${funcName} 未返回有效的数组值 在第 ${oldLinePointer + 1} 行`);
+                    return;
+                }
+                if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
+                    const newVar: Variable = {
+                        name: resultVar,
+                        value: "请使用arrayElements属性访问数组元素",
+                        type: DataType.ARRAY,
+                        isGlobal: false,
+                        isConst: false,
+                        startLine: oldLinePointer,
+                        endLine: -1,
+                        arrayLength: arrStruct.arrayLength,
+                        arrayElementType: arrStruct.arrayElementType,
+                        arrayElements: arrStruct.arrayElements,
+                        isReadonlyArray: arrStruct.isReadonlyArray
+                    };
+                    LOCAL_VARS.push(newVar);
+                    debugLog(2, `数组返回值绑定到新变量 ${resultVar}`);
+                } else {
+                    const existing = ScopeManager.getVariableInfo(resultVar, oldLinePointer);
+                    if (existing && existing.type === DataType.ARRAY) {
+                        existing.arrayLength = arrStruct.arrayLength;
+                        existing.arrayElementType = arrStruct.arrayElementType;
+                        existing.arrayElements = arrStruct.arrayElements;
+                        existing.isReadonlyArray = arrStruct.isReadonlyArray;
+                        debugLog(2, `数组返回值绑定到已有数组变量 ${resultVar}`);
+                    } else {
+                        console.error(`错误: 结果变量 ${resultVar} 不是数组类型, 无法接收数组返回值`);
+                    }
+                }
+            } else {
+                console.error(`错误: 函数 ${funcName} 未返回数组值 在第 ${oldLinePointer + 1} 行`);
+            }
+            return;
+        }
+
         // 确保结果变量在当前作用域中已声明
         // 如果变量不存在, 则添加到局部变量作用域中
         if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {

@@ -113,12 +113,19 @@ result = val + 1
 call noReturnFunc(5) -> var1
 print var1
 
-// ========== 测试8: return返回全局变量 ==========
+// ========== 测试8: return 只能返回函数声明的返回变量 ==========
 global sharedVal:string = "global_msg"
 
-:returnGlobal () -> out:string
+// 违反规则: return 返回全局变量 (非声明返回变量) → 报错 (执行继续)
+:returnGlobalBad () -> out:string
 return sharedVal
 :end
+call returnGlobalBad() -> var0str
 
-call returnGlobal() -> var0str
+// 正确写法: 先赋值给返回变量再 return
+:returnGlobalOk () -> out:string
+out = sharedVal
+return out
+:end
+call returnGlobalOk() -> var0str
 print var0str

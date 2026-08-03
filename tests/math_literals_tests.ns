@@ -90,7 +90,7 @@ call constTest()
 // 16
 // 31
 // 10
-// TypeError: Cannot assign to constant variable 'lc' at line 52
+// TypeError: Cannot assign to constant variable 'lc' at line 58
 // 10
 // caught local const arr: ...
 // 1
