@@ -906,6 +906,51 @@ class Interpreter {
         throw { type: ExceptionType.SYNTAX_ERROR, message: `无法解析值: ${valueStr}` } as Exception;
     }
 
+    // 解析声明初始化值: 支持字面量表达式 (仅允许字面量参与运算, 不允许变量引用/函数调用)
+    private static parseInitValue(valueExpr: string, expectedType: DataType): any {
+        // 纯字符串字面量直接走原逻辑 (避免字符串内部包含运算符被误判为表达式)
+        const quoteCount = (valueExpr.match(/"/g) || []).length;
+        if (valueExpr.startsWith('"') && valueExpr.endsWith('"') && quoteCount === 2) {
+            return Interpreter.parseValue(valueExpr, expectedType);
+        }
+        // 含运算符/括号 → 按字面量表达式处理
+        if (/[+\-*/%<>=!&|()]/.test(valueExpr)) {
+            // 剔除字符串字面量后检查标识符, 仅允许 true/false/null/undefined 字面量关键字
+            const stripped = valueExpr.replace(/"([^"\\]|\\.)*"/g, '""');
+            const words = stripped.match(/[a-zA-Z_]\w*/g) || [];
+            const allowedWords = ['true', 'false', 'null', 'undefined'];
+            const forbidden = words.filter(w => !allowedWords.includes(w));
+            if (forbidden.length > 0) {
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: `声明初始化仅允许字面量表达式, 不允许使用变量或函数调用 '${forbidden[0]}' (请先声明后赋值)`,
+                    lineNumber: currentLinePointer + 1
+                } as Exception;
+            }
+            // 求值纯字面量表达式并做类型验证
+            const literalValue = Interpreter.evaluateExpression(valueExpr);
+            const validation = ScopeManager.validateType(literalValue, expectedType);
+            if (!validation.isValid) {
+                throw {
+                    type: ExceptionType.TYPE_ERROR,
+                    message: `类型不匹配: 期望 ${expectedType}, 表达式 '${valueExpr}' 求值结果类型不符`,
+                    lineNumber: currentLinePointer + 1
+                } as Exception;
+            }
+            return validation.convertedValue;
+        }
+        // 无运算符 → 仅允许字面量 (数字/布尔/字符串), 不允许变量引用
+        if (/^(-?0[xX][0-9a-fA-F]+|-?0[bB][01]+|-?0[oO][0-7]+|-?\d+\.\d+|-?\d+)$|^(true|false)$/.test(valueExpr)) {
+            return Interpreter.parseValue(valueExpr, expectedType);
+        }
+        // 非字面量 (变量引用等) → 报错
+        throw {
+            type: ExceptionType.SYNTAX_ERROR,
+            message: `声明初始化仅允许字面量, 不允许使用变量或函数调用 '${valueExpr}' (请先声明后赋值)`,
+            lineNumber: currentLinePointer + 1
+        } as Exception;
+    }
+
     // 执行程序
     static run(): void {
         currentLinePointer = 0;
@@ -1223,7 +1268,7 @@ class Interpreter {
         try {
             let value: any = undefined;
             if (valueExpr !== undefined) {
-                value = Interpreter.parseValue(valueExpr, type);
+                value = Interpreter.parseInitValue(valueExpr, type);
                 if (value === undefined || value === null) {
                     throw {
                         type: ExceptionType.TYPE_ERROR,
@@ -1277,7 +1322,7 @@ class Interpreter {
         const typeStr = match[2];
         const valueExpr = match[3];
         const type = Interpreter.getDataTypeFromString(typeStr);
-        const value = valueExpr !== undefined ? Interpreter.parseValue(valueExpr, type) : undefined;
+        const value = valueExpr !== undefined ? Interpreter.parseInitValue(valueExpr, type) : undefined;
 
         const startLine = currentLinePointer;
         let endLine = startLine;
@@ -1777,7 +1822,7 @@ class Interpreter {
             // 解析每个元素
             for (let i = 0; i < elementValues.length; i++) {
                 try {
-                    const elementValue = Interpreter.parseValue(elementValues[i].trim(), elementType);
+                    const elementValue = Interpreter.parseInitValue(elementValues[i].trim(), elementType);
                     arrayElements.push({
                         value: elementValue,
                         type: elementType

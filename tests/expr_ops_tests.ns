@@ -103,6 +103,38 @@ print 2 + 3 * 4 - 1
 print -a + 10
 print 0 - a
 
+// ========== 测试10: 声明初始化字面量表达式 ==========
+global initY:int = 3 + 4
+print initY
+global initS:string = "a" + "b"
+print initS
+global initF:float = 10 / 3
+print initF
+global initK:int = 2 * (3 + 4)
+print initK
+global initQ:string = "3+4"
+print initQ
+global array initA[3]:int = [1 + 2, 3 * 4, 10 / 2]
+print initA[0]
+print initA[1]
+print initA[2]
+global initFlag:bool = 1 < 2 && true
+print initFlag
+
+// ========== 测试11: 声明初始化禁止变量引用 (单变量/表达式) ==========
+global initSrc:int = 1
+try
+    local initBadLocal:int = initSrc
+catch (Exception e4)
+    print "caught bad ref: " + e4
+endtry
+try
+    local initBadExpr:int = initSrc + 4
+catch (Exception e5)
+    print "caught bad expr: " + e5
+endtry
+print "after init var checks"
+
 // 预期输出:
 // ge true
 // ge false ok
@@ -139,3 +171,15 @@ print 0 - a
 // 13
 // 5
 // -5
+// 7
+// ab
+// 3.3333333333333335
+// 14
+// 3+4
+// 3
+// 12
+// 5
+// true
+// caught bad ref: ...
+// caught bad expr: ...
+// after init var checks
