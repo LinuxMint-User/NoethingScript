@@ -214,6 +214,12 @@ debug level
 
 通过设置不同的调试级别，可以控制解释器输出的调试信息详细程度。级别越高，输出的调试信息越详细。不使用debug关键字时，默认级别为0，不输出任何调试信息。
 
+文档内（首行 `debug level`）与命令行均可指定调试级别：
+```bash
+node dist/noethingScript-Interpreter.js program.ns --debug 2
+```
+命令行指定的级别优先级更高，文档内低于命令行的级别会被忽略。
+
 #### 示例：
 ```vbnet
 debug 1
@@ -228,7 +234,7 @@ local y:int = x + 3
 ### 断言
 ```vbnet
 assert (condition)
-toconsolemsg  // 必须是string类型
+"assertion failure message"  // 下一行必须是双引号括起的字符串, 作为断言失败时的错误消息
 endasrt
 
 // 示例
@@ -236,6 +242,7 @@ assert (x >= 0)
 "x below zero !"
 endasrt
 ```
+断言失败时抛出 `AssertionError`（可被 `try-catch` 捕获，未捕获则由解释器输出错误消息）。
 
 ### 异常处理
 ```vbnet
@@ -293,7 +300,7 @@ call functionName(arg0, arg1, ...)
     - call了指定函数后储存call所在行方便return语句返回
     - call了之后带着实参跳转至函数声明所在的第一行，然后将实参的值赋值给形参
     - 然后一直运行至函数体内的return语句后，返回调用所在行
-12. 特别的，为了兼容无返回值函数，在调用无返回值函数是解释器运行到:end标签所在行则立即返回原调用所在行
+12. 特别的，为了兼容无返回值函数，在调用无返回值函数时解释器运行到:end标签所在行则立即返回原调用所在行
 13. 函数返回值变量会被初始化为 `undefined`（在函数体对其赋值前使用会报错，用于暴露"未操作返回值变量"的问题）
 
 #### 数组作为函数参数
@@ -342,6 +349,16 @@ print r1[0]   // 5
 
 ## 表达式运算
 
+### 数值字面量
+数字支持四种进制字面量写法：
+
+| 前缀    | 进制  | 示例          |
+|---------|-------|---------------|
+| 无前缀  | 十进制| `42`          |
+| `0x`/`0X` | 十六进制 | `0xFF` (=255) |
+| `0b`/`0B` | 二进制   | `0b1010` (=10) |
+| `0o`/`0O` | 八进制   | `0o17` (=15)  |
+
 ### 条件表达式
 1. 必须返回布尔值 `true`/`false`
 2. 不能使用 `0`/`1` 替代布尔值
@@ -349,15 +366,37 @@ print r1[0]   // 5
 4. 出现 `null` 或 `undefined` 立即抛出错误
 5. 运算符两侧数据类型必须相同，否则返回 `false`（赋值表达式也必须相同，否则报错。条件表达式仅返回`false`，不报错）
 
-### 示例
+### 内置函数
+可在表达式中直接调用的内置函数：
+
+| 函数 | 参数 | 返回 | 说明 |
+|---|---|---|---|
+| `len(x)` | 字符串或数组 | int | 字符串长度或数组长度（详见"数组长度属性"） |
+| `str(x)` | 任意 | string | 转换为字符串 |
+| `int(x)` | 任意 | int | 转换为整数（`parseInt` 语义） |
+| `float(x)` | 任意 | float | 转换为浮点数 |
+| `copy(arr)` | 数组 | array | 数组深拷贝副本，用于实参副本或整体赋值（见"数组作为函数参数"/"数组整体赋值"） |
+
+#### Math 数学对象
+`Math.` 前缀调用数学函数（12 个）：
+
+| 函数 | 说明 |
+|---|---|
+| `Math.abs(x)` | 绝对值 |
+| `Math.floor(x)` / `Math.ceil(x)` / `Math.round(x)` | 向下/向上/四舍五入取整 |
+| `Math.sqrt(x)` | 平方根 |
+| `Math.pow(x, y)` | x 的 y 次幂 |
+| `Math.max(a, b, ...)` / `Math.min(a, b, ...)` | 最大值/最小值 |
+| `Math.sin(x)` / `Math.cos(x)` / `Math.tan(x)` | 三角函数 |
+| `Math.random()` | [0,1) 随机数 |
+
+#### 示例
 ```vbnet
-global x:int = 0
-global y:string = "0"
-if (x == y)
-    print "x = y"
-else
-    print "x != y"
-// 输出: "x != y"
+print str(42)       // "42"
+print int("3.9")    // 3
+print float("2.5")  // 2.5
+print Math.pow(2, 8) // 256
+print Math.floor(3.7) // 3
 ```
 
 ## 注释
@@ -408,7 +447,7 @@ while, endwhl, switch, case, default, endswc,
 break, continue, return, assert, endasrt, try, 
 catch, endtry, Exception, :functionName, :end, 
 null, undefined, void, jump, :tagname, arrfill, 
-purge, all, except
+purge, all, except, call, print, debug, mut, copy
 ```
 
 ## 异常类型
@@ -421,4 +460,6 @@ purge, all, except
 | `AssertionError`      | 断言错误     |
 | `TryBlock`            | try代码块    |
 | `CatchBlock`          | catch代码块  |
+| `LoopInitError`       | for循环初始化失败 |
+| `LoopUpdateError`     | for循环更新表达式执行失败 |
 | `UnknownError`        | 未知错误     |

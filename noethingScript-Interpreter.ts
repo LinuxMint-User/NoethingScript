@@ -19,11 +19,12 @@ function debugLog(level: number, ...args: any[]): void {
 
 // 关键字
 const keywords = ['global', 'local', 'number', 'int', 'float', 'string', 'bool', 'array', 'true', 'false',
-    'true', 'false', 'const', 'if', 'else', 'endif', 'for', 'endfor',
+    'const', 'if', 'else', 'endif', 'for', 'endfor',
     'while', 'endwhl', 'switch', 'case', 'default', 'endswc',
     'break', 'continue', 'return', 'assert', 'endasrt', 'try',
     'catch', 'endtry', 'Exception', 'null', 'undefined', 'void',
-    'jump', 'arrfill', 'purge', 'all', 'except'
+    'jump', 'arrfill', 'purge', 'all', 'except',
+    'call', 'print', 'debug', 'mut', 'copy'
 ];
 
 // 全局变量存储
