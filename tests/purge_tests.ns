@@ -20,3 +20,14 @@ purge global.var0
 //checked purge all
 //checked purge all except varname
 //checked purge global vars
+
+// ========== purge 函数外调用 → 报错并继续 ==========
+purge var1
+print "after purge outside"
+
+// ========== purge all except 全局变量 → 报错 (程序终止) ==========
+:fu2 () -> :void
+    local loc:int = 1
+    purge all except global.var1
+:end
+call fu2()

@@ -1,0 +1,132 @@
+debug 0
+
+// ========== 测试1: 循环变量只读 (赋值报错, 可捕获) ==========
+for (local i:int = 0; i < 3; i = i + 1)
+    try
+        i = 100
+    catch (Exception e1)
+        print "caught readonly: " + e1
+    endtry
+endfor
+
+// ========== 测试2: 表达式 null 字面量 (可捕获) ==========
+global x:int = 1
+try
+    if (x == null)
+        print "impossible"
+    endif
+catch (Exception e2)
+    print "caught null: " + e2
+endtry
+
+// ========== 测试3: 表达式 undefined 字面量 (可捕获) ==========
+try
+    if (x == undefined)
+        print "impossible"
+    endif
+catch (Exception e3)
+    print "caught undefined: " + e3
+endtry
+
+// ========== 测试4: 未定义变量使用 (ReferenceError, 可捕获) ==========
+try
+    print noSuchVar
+catch (Exception e4)
+    print "caught ref var: " + e4
+endtry
+
+// ========== 测试5: 断言失败被 try-catch 捕获 ==========
+try
+    assert (x == 2)
+    "assertion failed"
+    endasrt
+catch (Exception e5)
+    print "caught assert: " + e5
+endtry
+
+// ========== 测试6: 参数多于声明 → 取前 + 警告 ==========
+:twoArg (a:int, b:int) -> sum:int
+sum = a + b
+return sum
+:end
+
+global r1:int = 0
+call twoArg(1, 2, 999) -> r1
+print r1
+
+// ========== 测试7: 参数少于声明 → 报错并跳过调用 ==========
+call twoArg(1) -> r1
+print "after few args"
+
+// ========== 测试8: 参数类型不匹配 → 报错并跳过调用 ==========
+call twoArg("a", 2) -> r1
+print "after bad type"
+
+// ========== 测试9: 条件表达式类型不同 → 返回 false (doc规则5) ==========
+global sx:int = 0
+global sy:string = "0"
+if (sx == sy)
+    print "equal"
+else
+    print "not equal"
+endif
+
+// ========== 测试10: 循环变量作用域内声明同名 → 报错, 循环继续 ==========
+for (local k:int = 0; k < 2; k = k + 1)
+    local k:int = 3
+    print "loop body " + str(k)
+endfor
+
+// ========== 测试11: 多行注释就近闭合 (中间行无需 /// 前缀) ==========
+/// 多行注释开始
+print "注释内, 不应输出"
+print "也是注释内"
+/// 多行注释结束
+print "after comment"
+
+// ========== 测试12: 未初始化变量声明 (值为 undefined, 使用报错可捕获) ==========
+global uninitInt:int
+try
+    print uninitInt
+catch (Exception e12)
+    print "caught uninit var: " + e12
+endtry
+
+// ========== 测试13: 未初始化的返回值变量 → 返回 undefined, 使用报错 ==========
+:noInit (a:int) -> out:int
+return out
+:end
+global rr:int = 0
+call noInit(1) -> rr
+try
+    print rr
+catch (Exception e13)
+    print "caught undef result: " + e13
+endtry
+
+// ========== 测试14: switch 非 int/string 条件 → 报错并跳过整个块 ==========
+switch (1.5)
+case 1
+    print "case 1"
+    break
+default
+    print "default"
+    break
+endswc
+print "after switch float"
+
+// 预期输出:
+// caught readonly: ... (x3)
+// caught null: ...
+// caught undefined: ...
+// caught ref var: ...
+// caught assert: ...
+// 警告(参数多于定义) + 3
+// 错误(参数数量过少) + after few args
+// 错误(参数类型错误) + after bad type
+// not equal
+// [ERROR 4]循环变量同名 + loop body 0 + loop body 1
+// after comment
+// caught uninit var: ... (未初始化变量使用报错)
+// caught undef result: ... (未赋值的返回值变量经call传出后使用报错)
+// 类型错误(switch条件为float) + after switch float

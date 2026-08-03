@@ -49,7 +49,7 @@ global array arrName[arrLength]:type = arrfill
 ```
 
 #### 规则说明：
-1. `arrLength` 必须为 `int` 类型，可以是数字字面量或全局常量
+1. `arrLength` 必须为 `int` 类型，可以是数字字面量、全局常量或表达式（如 `ROWS * COLS`）
 2. 手动初始化时，初始化值数量必须等于数组长度，否则报错
 3. 手动初始化时，每个值的类型必须与数组声明类型一致，否则报错
 4. 禁止声明 `void` 或 `undefined` 类型的数组
@@ -108,7 +108,8 @@ len(arrName)
 ### 多维数组实现
 本语言仅原生支持一维数组，更高维数组需通过一维数组组合实现：
 ```vbnet
-global const ROWS:int = 3, COLS:int = 4
+global const ROWS:int = 3
+global const COLS:int = 4
 global array matrix[ROWS * COLS]:int = arrfill
 
 // 访问第2行第3列元素（索引从0开始）
@@ -277,7 +278,7 @@ call functionName(arg0, arg1, ...)
     - call了之后带着实参跳转至函数声明所在的第一行，然后将实参的值赋值给形参
     - 然后一直运行至函数体内的return语句后，返回调用所在行
 12. 特别的，为了兼容无返回值函数，在调用无返回值函数是解释器运行到:end标签所在行则立即返回原调用所在行
-13. 函数返回值变量豁免"未赋初值"规则，初始化为对应类型的默认值（number/int: 0，float: 0.0，string: ""，bool: false）
+13. 函数返回值变量会被初始化为 `undefined`（在函数体对其赋值前使用会报错，用于暴露"未操作返回值变量"的问题）
 
 ## 作用域规则
 

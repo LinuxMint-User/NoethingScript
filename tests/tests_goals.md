@@ -2,15 +2,20 @@
 - [x] 局部变量/常量
 - [x] 全局变量/常量
 - [x] 数组/常量数组
+- [x] 数组边界 (arrfill 各类型默认值/越界/元素类型/常量数组/多维模拟)
 - [x] 类型检查
 - [x] 跳转指令
-- [x] len() 方法
+- [x] len() 方法 (数组/字符串/表达式内使用)
 - [x] 断言测试
+- [x] 断言失败可被 try-catch 捕获
 - [x] 函数测试
+- [x] 函数参数数量/类型错误处理
 - [x] 注释测试
+- [x] 多行注释就近闭合
 - [x] 清除量测试
 - [x] switch 块测试
 - [x] for 块测试
+- [x] 循环变量只读/作用域内同名禁止
 - [x] if 块测试
 - [x] if-else 块测试
 - [x] while 块测试
@@ -18,3 +23,13 @@
 - [x] continue 行为测试
 - [x] return 语句测试
 - [x] try-catch 测试
+- [x] 表达式 null/undefined 抛错
+- [x] 未定义/未初始化变量引用
+- [x] 条件表达式类型不同返回 false
+- [x] 运算符全面覆盖 (>=, &&, ||, **, !, /, %, 除零异常, 混合优先级/结合性)
+- [x] 内置转换函数 int()/float()
+- [x] 递归函数 (阶乘/斐波那契/递归void函数/递归内for循环变量隔离)
+- [x] Math 内置函数 (sin/cos/tan/sqrt/abs/pow/floor/ceil/round/max/min/random, 参数错误可捕获)
+- [x] 进制字面量 (0x/0b/0o, 声明与表达式内使用)
+- [x] 局部常量 (local const 标量与数组, 修改报错/捕获)
+- [x] switch 字符串条件与字符串 case (含无break时fall-through到default)

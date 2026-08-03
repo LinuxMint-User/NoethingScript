@@ -1,0 +1,54 @@
+debug 0
+
+// ========== 测试1: arrfill 各类型默认值 ==========
+global array aInt[3]:int = arrfill
+global array aFloat[3]:float = arrfill
+global array aStr[3]:string = arrfill
+global array aBool[3]:bool = arrfill
+print aInt[0]
+print aFloat[0]
+print "[" + aStr[0] + "]"
+print aBool[0]
+
+// ========== 测试2: 越界读取 (RangeError, 可捕获) ==========
+try
+    print aInt[99]
+catch (Exception e1)
+    print "caught oob read: " + e1
+endtry
+
+// ========== 测试3: 越界写入 (RangeError, 可捕获) ==========
+try
+    aInt[99] = 5
+catch (Exception e2)
+    print "caught oob write: " + e2
+endtry
+
+// ========== 测试4: 元素类型不匹配赋值 (TypeError, 可捕获) ==========
+try
+    aInt[0] = "bad"
+catch (Exception e3)
+    print "caught elem type: " + e3
+endtry
+
+// ========== 测试5: 常量数组赋值 (可捕获) ==========
+global const array ca[3]:int = [1, 2, 3]
+try
+    ca[0] = 9
+catch (Exception e4)
+    print "caught const arr: " + e4
+endtry
+
+// ========== 测试6: 多维数组模拟 ==========
+global const ROWS:int = 3
+global const COLS:int = 4
+global array matrix[ROWS * COLS]:int = arrfill
+matrix[1 * COLS + 2] = 10
+print matrix[6]
+
+// ========== 测试7: 重复声明同名数组 → 报错, 保留第一个 ==========
+global array dup[3]:int = [1, 2, 3]
+global array dup[3]:int = [4, 5, 6]
+print dup[0]
+
+// 预期输出: 0, 0, [], false, caught oob read/写/类型/常量, 10

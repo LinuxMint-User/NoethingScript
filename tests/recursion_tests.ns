@@ -1,0 +1,101 @@
+debug 0
+
+// ========== 测试1: 阶乘 (单路直接递归) ==========
+:factorial (n:int) -> result:int
+if (n <= 1)
+    result = 1
+    return result
+endif
+local dec:int = 0
+local prev:int = 0
+dec = n - 1
+call factorial(dec) -> prev
+result = n * prev
+return result
+:end
+
+global fact:int = 0
+call factorial(3) -> fact
+print fact
+call factorial(5) -> fact
+print fact
+call factorial(10) -> fact
+print fact
+
+// ========== 测试2: 斐波那契 (双路递归, 多个局部变量隔离) ==========
+:fib (n:int) -> result:int
+if (n <= 1)
+    result = n
+    return result
+endif
+local n1:int = 0
+local n2:int = 0
+local r1:int = 0
+local r2:int = 0
+n1 = n - 1
+n2 = n - 2
+call fib(n1) -> r1
+call fib(n2) -> r2
+result = r1 + r2
+return result
+:end
+
+global fv:int = 0
+call fib(0) -> fv
+print fv
+call fib(1) -> fv
+print fv
+call fib(2) -> fv
+print fv
+call fib(5) -> fv
+print fv
+call fib(10) -> fv
+print fv
+
+// ========== 测试3: 递归 void 函数 (深度与局部变量清理) ==========
+:countdown (n:int) -> :void
+if (n > 0)
+    local msg:string = ""
+    msg = "tick " + str(n)
+    print msg
+    local nxt:int = 0
+    nxt = n - 1
+    call countdown(nxt)
+endif
+:end
+
+call countdown(3)
+
+// ========== 测试4: 递归内使用 for 循环变量 (不同帧循环变量不冲突) ==========
+:sumToN (n:int) -> result:int
+result = 0
+for (local i:int = 0; i <= n; i = i + 1)
+    result = result + i
+endfor
+local sub:int = 0
+if (n > 2)
+    local rec:int = 0
+    rec = n - 1
+    call sumToN(rec) -> sub
+    result = result + sub
+endif
+return result
+:end
+
+global s:int = 0
+call sumToN(4) -> s
+print s
+
+// 预期输出:
+// 6
+// 120
+// 3628800
+// 0
+// 1
+// 1
+// 5
+// 55
+// tick 3
+// tick 2
+// tick 1
+// 19

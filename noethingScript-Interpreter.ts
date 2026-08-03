@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.0.0";
+const NSIVersion: string = "2.1.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -82,6 +82,7 @@ var CONTROL_FLOW_STACK: ({
     endLine: number;              // 函数结束行 (:end 所在行)
     callFrom: number;             // 调用者地址 (call 指令所在行)
     returnVarName?: string;       // 接收返回值的变量名 (call ... -> resultVar 中的 resultVar)
+    frameId: number;              // 本次调用帧的唯一ID (递归隔离局部变量用)
 })[] = [];
 
 // 流程控制跳过块栈 (用于for/while等)
@@ -105,6 +106,9 @@ var CONTROL_FLOW_BROKEN_BLOCK_STACK: ({
 // 流程控制部分
 var currentLinePointer: number = 0;
 var programLines: string[] = [];
+
+// 函数调用帧计数器 (每次 call 分配唯一 ID, 用于递归隔离各帧局部变量)
+var CALL_FRAME_ID: number = 0;
 
 // 数据类型定义
 enum DataType {
@@ -132,6 +136,7 @@ interface Variable {
     isConst: boolean;  // 是否为常量
     startLine: number;
     endLine: number;
+    frameId?: number;  // 所属函数调用帧ID (用于递归时隔离不同调用帧的局部变量)
     // 数组特有属性
     arrayLength?: number;
     arrayElementType?: DataType;
@@ -181,10 +186,9 @@ class ScopeManager {
     // 验证数据类型
     static validateType(value: any, type: DataType): { isValid: boolean, convertedValue: any } {
         debugLog(1, `验证数据类型: 值 ${value === "" ? '""' : value}, 类型 ${type}`);
-        // 仅允许undefined值赋给无返回值函数返回值变量
-        // 无返回值函数返回值变量的类型为 DataType.UNDEFINED
-        if (value === undefined && type === DataType.UNDEFINED) {
-            debugLog(1, `无返回值函数返回值类型验证成功`);
+        // 未初始化变量 (无 = 值 的声明) 或 无返回值函数返回值变量: 值为 undefined
+        if (value === undefined) {
+            debugLog(1, `未初始化变量, 存储 undefined`);
             return { isValid: true, convertedValue: undefined };
         }
 
@@ -232,14 +236,24 @@ class ScopeManager {
         }
     }
 
-    // 添加变量 (全局或局部) 
-    static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false): boolean {
+    // 添加变量 (全局或局部)
+    static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number): boolean {
         debugLog(1, `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "lastline" : endLine + 1}, 是否全局: ${isGlobal}`);
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
             console.error(`TypeError: Cannot assign value '${value}' to variable '${name}' of type '${type}' at line ${startLine + 1}`);
             return false;
+        }
+
+        // 未显式指定帧ID时, 自动归属当前最内层函数调用帧 (递归时用于隔离不同调用帧的局部变量)
+        if (!isGlobal && frameId === undefined) {
+            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                if (CONTROL_FLOW_STACK[i].type === 'function') {
+                    frameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId;
+                    break;
+                }
+            }
         }
 
         const variable: Variable = {
@@ -249,7 +263,8 @@ class ScopeManager {
             isGlobal,
             isConst,  // 添加常量标识
             startLine,
-            endLine
+            endLine,
+            frameId
         };
 
         if (isGlobal) {
@@ -262,9 +277,9 @@ class ScopeManager {
             GLOBAL_VARS[name] = variable;
             debugLog(1, `全局变量 ${name} 添加成功`);
         } else {
-            // 检查是否存在名称和作用域完全相同的局部变量
+            // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
             for (const localVar of LOCAL_VARS) {
-                if (localVar.name === name && localVar.startLine === variable.startLine && localVar.endLine === variable.endLine) {
+                if (localVar.name === name && localVar.frameId === variable.frameId && localVar.startLine === variable.startLine && localVar.endLine === variable.endLine) {
                     console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${name}' 在相同作用域内已被定义`);
                     // currentLinePointer = programLines.length;
                     // throw { type: ExceptionType.REFERENCE_ERROR, message: `引用错误: 名称 '${name}' 在相同作用域内已被定义` } as Exception;
@@ -542,7 +557,7 @@ class ScopeManager {
     }
 
     // 清理指定局部变量 (手动管理, 必须手动指定作用域范围) 
-    static cleanupLocalVariable(cleanAll: Boolean = false, exceptMode?: Boolean, varName?: string, startLine?: number, endLine?: number) {
+    static cleanupLocalVariable(cleanAll: Boolean = false, exceptMode?: Boolean, varName?: string, startLine?: number, endLine?: number, frameId?: number) {
         if (cleanAll) {
             LOCAL_VARS = [];
             debugLog(1, `已清除所有局部变量`);
@@ -554,12 +569,12 @@ class ScopeManager {
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
             debugLog(2, `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? 'lastline' : endLine + 1}`);
-            LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine));
+            LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && exceptMode) {
             debugLog(2, `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? 'lastline' : endLine + 1}`);
-            LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine));
+            LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
         if (!cleanAll && !varName && startLine !== undefined && endLine !== undefined) {
@@ -882,6 +897,7 @@ class Interpreter {
         EXCEPTION_STACK = [];
         PENDING_EXCEPTION = null;
         IN_MULTILINE_COMMENT = false;
+        CALL_FRAME_ID = 0;
 
         // 检查第一行是否包含debug关键字
         if (programLines.length > 0) {
@@ -1164,8 +1180,8 @@ class Interpreter {
             return;
         }
 
-        // 匹配格式: 变量名:类型 = 值
-        const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
+        // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
+        const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
             console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 全局变量声明格式应为 "global [const] 变量名:类型 = 值" 在第 ${currentLinePointer + 1} 行`);
             return;
@@ -1189,13 +1205,16 @@ class Interpreter {
         }
 
         try {
-            const value = Interpreter.parseValue(valueExpr, type);
-            if (value === undefined || value === null) {
-                throw {
-                    type: ExceptionType.TYPE_ERROR,
-                    message: `类型转换失败: 无法将值'${valueExpr}'转换为${typeStr}类型`,
-                    lineNumber: currentLinePointer + 1
-                } as Exception;
+            let value: any = undefined;
+            if (valueExpr !== undefined) {
+                value = Interpreter.parseValue(valueExpr, type);
+                if (value === undefined || value === null) {
+                    throw {
+                        type: ExceptionType.TYPE_ERROR,
+                        message: `类型转换失败: 无法将值'${valueExpr}'转换为${typeStr}类型`,
+                        lineNumber: currentLinePointer + 1
+                    } as Exception;
+                }
             }
 
             ScopeManager.addVariable(varName, value, type, currentLinePointer, -1, true, isConst);
@@ -1225,8 +1244,8 @@ class Interpreter {
             return;
         }
 
-        // 匹配格式: 变量名:类型 = 值
-        const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
+        // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
+        const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
             console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 局部变量声明格式应为 "local [const] 变量名:类型 = 值" 在第 ${currentLinePointer + 1} 行`);
             return;
@@ -1242,7 +1261,7 @@ class Interpreter {
         const typeStr = match[2];
         const valueExpr = match[3];
         const type = Interpreter.getDataTypeFromString(typeStr);
-        const value = Interpreter.parseValue(valueExpr, type);
+        const value = valueExpr !== undefined ? Interpreter.parseValue(valueExpr, type) : undefined;
 
         const startLine = currentLinePointer;
         let endLine = startLine;
@@ -1371,7 +1390,9 @@ class Interpreter {
                 console.warn(`警告: 传入函数 ${funcName} 的参数多于定义, 忽略多出的传入参数`);
             }
 
-            for (let i = 0; i < argValues.length; i++) {
+            // 只解析前 funcInfo.params.length 个实参 (多余参数已被忽略, 避免越界)
+            const argCount = Math.min(argValues.length, funcInfo.params.length);
+            for (let i = 0; i < argCount; i++) {
                 const paramType = funcInfo.params[i].type;
                 try {
                     const value = Interpreter.parseValue(argValues[i], paramType);
@@ -1389,6 +1410,9 @@ class Interpreter {
         // 保存调用所在行号
         const oldLinePointer = currentLinePointer;
 
+        // 为本次调用分配唯一帧ID (递归时用于隔离各调用帧的局部变量)
+        const frameId = ++CALL_FRAME_ID;
+
         // 传递参数 - 修正行号范围
         debugLog(2, `函数 ${funcName} 开始传递参数`);
         debugLog(2, `函数信息:`, funcInfo);
@@ -1401,7 +1425,7 @@ class Interpreter {
             debugLog(2, `设置参数: ${paramName} = ${args[i]} (类型: ${funcInfo.params[i].type})`);
             // 重要修改: 参数作用域应从函数开始行到函数结束行
             const argValue = args[i] !== undefined ? args[i] : null;
-            const result = ScopeManager.addVariable(paramName, argValue, funcInfo.params[i].type, funcInfo.startLine + 1, funcInfo.endLine, false);
+            const result = ScopeManager.addVariable(paramName, argValue, funcInfo.params[i].type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId);
             debugLog(2, `参数 ${paramName} 添加${result ? '成功' : '失败'}`);
         }
         debugLog(2, `参数传递循环结束`);
@@ -1433,29 +1457,9 @@ class Interpreter {
                     returnVarName = returnVarNameOrVoid.startsWith(':') ? returnVarNameOrVoid.substring(1) : returnVarNameOrVoid;
 
                     // 将返回值变量添加到函数的局部作用域中
-                    // 初始值设为类型默认值, 类型为函数的返回类型
+                    // 初始化为 undefined (doc规则13: 函数返回值变量会被初始化为undefined)
                     // 作用域从函数体开始行到函数结束行
-                    let initialValue: any;
-                    switch (funcInfo.returnType) {
-                        case DataType.NUMBER:
-                            initialValue = 0.0; // NUMBER类型默认初始化为0.0
-                            break;
-                        case DataType.INT:
-                            initialValue = 0; // INT类型默认0
-                            break;
-                        case DataType.FLOAT:
-                            initialValue = 0.0; // FLOAT类型默认0.0
-                            break;
-                        case DataType.STRING:
-                            initialValue = ""; // STRING类型默认空字符串
-                            break;
-                        case DataType.BOOL:
-                            initialValue = false; // BOOL类型默认false
-                            break;
-                        default:
-                            initialValue = undefined;
-                    }
-                    ScopeManager.addVariable(returnVarName, initialValue, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false);
+                    ScopeManager.addVariable(returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId);
                 }
             }
         }
@@ -1513,7 +1517,8 @@ class Interpreter {
             startLine: funcInfo.startLine,
             endLine: funcInfo.endLine,
             callFrom: oldLinePointer,
-            returnVarName: resultVar
+            returnVarName: resultVar,
+            frameId: frameId
         });
         debugLog(2, `当前流程控制栈:`, CONTROL_FLOW_STACK);
     }
@@ -1543,8 +1548,8 @@ class Interpreter {
         // 获取数组长度
         let arrayLength: number;
         try {
-            // 尝试解析长度表达式
-            const lengthValue = Interpreter.parseValue(lengthExpr, DataType.INT);
+            // 尝试解析长度表达式 (支持数字字面量、全局常量或表达式, 如 ROWS * COLS)
+            const lengthValue = Interpreter.evaluateExpression(lengthExpr);
             if (typeof lengthValue !== 'number' || !Number.isInteger(lengthValue) || lengthValue < 0) {
                 debugLog(1, `错误: 数组长度必须是非负整数 在第 ${currentLinePointer + 1} 行`);
                 return;
@@ -1643,6 +1648,19 @@ class Interpreter {
         }
 
         // 创建数组变量
+        // 局部数组: 从控制流栈取最近函数帧的结束行与帧ID (递归时隔离不同调用帧; FUNCTION_SCOPES已废弃不可用)
+        let localEndLine = -1;
+        let localFrameId: number | undefined;
+        if (!isGlobal) {
+            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                const block = CONTROL_FLOW_STACK[i];
+                if (block.type === 'function') {
+                    localEndLine = block.endLine;
+                    localFrameId = block.frameId;
+                    break;
+                }
+            }
+        }
         const arrayVariable: Variable = {
             name: arrayName,
             value: "请使用arrayElements属性访问数组元素", // 数组变量的值不适用直接访问
@@ -1650,7 +1668,8 @@ class Interpreter {
             isGlobal: isGlobal,
             isConst: isConst,
             startLine: currentLinePointer,
-            endLine: isGlobal ? -1 : (ScopeManager.getCurrentFunction(currentLinePointer) ? FUNCTION_SCOPES[ScopeManager.getCurrentFunction(currentLinePointer)!].endLine : -1),
+            endLine: isGlobal ? -1 : localEndLine,
+            frameId: localFrameId,
             arrayLength: arrayLength,
             arrayElementType: elementType,
             arrayElements: arrayElements
@@ -1660,7 +1679,7 @@ class Interpreter {
         if (isGlobal) {
             // 检查全局变量是否已存在
             if (GLOBAL_VARS.hasOwnProperty(arrayName)) {
-                debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${arrayName}' 已被定义`);
+                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${arrayName}' 已被定义`);
                 return;
             }
             GLOBAL_VARS[arrayName] = arrayVariable;
@@ -1680,9 +1699,10 @@ class Interpreter {
                     return;
                 }
             }
-            // 检查相同作用域内是否已存在同名数组 (与普通局部变量一致: 同名+同作用域判定重复)
+            // 检查相同作用域与调用帧内是否已存在同名数组 (与普通局部变量一致: 同名+同作用域+同帧判定重复, 不同调用帧允许同名以支持递归)
             for (const localVar of LOCAL_VARS) {
                 if (localVar.name === arrayName &&
+                    localVar.frameId === arrayVariable.frameId &&
                     localVar.startLine === arrayVariable.startLine &&
                     localVar.endLine === arrayVariable.endLine) {
                     debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${arrayName}' 在相同作用域内已被定义`);
@@ -1755,10 +1775,11 @@ class Interpreter {
                 const funcInfo = FUNCTIONS[block.funcName];
 
                 let returnValue: any;
-                // 从当前作用域获取返回变量的值
-                const returnVar = ScopeManager.getVariable(returnValueStr, currentLinePointer);
-                if (returnVar === undefined) {
-                    // 无返回值, 但函数声明有返回类型
+                // 从当前作用域获取返回变量
+                // 注意: 需区分"变量不存在"与"变量存在但值为undefined"(如未赋初值的返回值变量)
+                const returnVarInfo = ScopeManager.getVariableInfo(returnValueStr, currentLinePointer);
+                if (returnVarInfo === null) {
+                    // 变量不存在 → 视为无返回值
                     if (!ScopeManager.isVoidFunction(funcInfo)) {
                         debugLog(1, `错误: 函数 ${block.funcName} 期望返回 ${funcInfo.returnType} 类型的值, 但未提供返回值 在第 ${currentLinePointer + 1} 行`);
                         return;
@@ -1766,10 +1787,9 @@ class Interpreter {
                     returnValue = undefined;
                     debugLog(2, (`无返回值, 设置为undefined`));
                     return;
-                } else {
-                    returnValue = returnVar;
-                    debugLog(2, `从变量获取返回值: ${returnValue}`);
                 }
+                returnValue = returnVarInfo.value;
+                debugLog(2, `从变量获取返回值: ${returnValue}`);
 
                 // 将返回值存储到RETURN_VALUES池中并做好标记
                 if (!RETURN_VALUES.hasOwnProperty(block.funcName)) {
@@ -1792,8 +1812,8 @@ class Interpreter {
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
                 CONTROL_FLOW_STACK.pop();
-                // 先清理函数中的局部变量（防止返回变量被误删）
-                ScopeManager.cleanupLocalVariable(false, false, undefined, block.startLine, block.endLine);
+                // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
+                LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
                 debugLog(2, `函数调用清理后的局部变量表`, LOCAL_VARS);
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
                 handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, currentLinePointer);
@@ -1890,6 +1910,11 @@ class Interpreter {
 
     // 执行else语句
     static executeElse(): void {
+        // 执行到else说明if条件为真且if块体已执行完毕, 弹出if帧
+        // (条件为假时由executeIf直接跳转到else行, 主循环会跳过else命令; 该帧由后续endif弹出)
+        if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'if') {
+            CONTROL_FLOW_STACK.pop();
+        }
         // 跳过else块
         let nestedLevel = 1;
         let i = currentLinePointer + 1;
@@ -2136,7 +2161,7 @@ class Interpreter {
                             }
                             const varInfo = ScopeManager.getVariableInfo(varName, currentLinePointer);
                             if (varInfo) {
-                                ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine);
+                                ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
                             }
                             break;
                         }
@@ -2460,6 +2485,13 @@ class Interpreter {
 
     // 执行endtry语句
     static executeEndTry(): void {
+        // 清理本 try-catch 块内声明的局部变量 (含 catch 异常变量), 防止重复执行时同名冲突
+        // 注意: 仅异常进入catch后执行到endtry的情况 (正常跳过catch时不会到达本行)
+        const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+        if (topFrame && topFrame.type === 'try') {
+            const blockStart = topFrame.start;
+            LOCAL_VARS = LOCAL_VARS.filter(v => !(v.startLine >= blockStart && !v.isGlobal));
+        }
         // 清除异常栈栈顶的一个try/catch标记 (一个endtry只对应一个try-catch结构, 不能弹出外层标记)
         if (EXCEPTION_STACK.length > 0) {
             const exception = EXCEPTION_STACK[EXCEPTION_STACK.length - 1];
@@ -2534,14 +2566,34 @@ class Interpreter {
             debugLog(1, `switch语句的条件表达式值: ${condition}`);
 
             // 检查类型是否为int或string
+            let typeError = false;
             if (typeof condition === 'number') {
                 // 严格检查是否为整数
                 if (!Number.isInteger(condition)) {
-                    debugLog(1, `类型错误: switch语句的条件表达式只能是int或string类型, 数字必须为整数 在第 ${currentLinePointer + 1} 行`);
-                    return;
+                    console.error(`类型错误: switch语句的条件表达式只能是int或string类型, 数字必须为整数 在第 ${currentLinePointer + 1} 行`);
+                    typeError = true;
                 }
             } else if (typeof condition !== 'string') {
-                debugLog(1, `类型错误: switch语句的条件表达式只能是int或string类型 在第 ${currentLinePointer + 1} 行`);
+                console.error(`类型错误: switch语句的条件表达式只能是int或string类型 在第 ${currentLinePointer + 1} 行`);
+                typeError = true;
+            }
+
+            if (typeError) {
+                // 跳过整个switch块, 避免后续case/break/endswc继续报错
+                let nestedLevel = 1;
+                let i = currentLinePointer + 1;
+                while (i < programLines.length && nestedLevel > 0) {
+                    const line = programLines[i].trim();
+                    if (line.startsWith('switch')) {
+                        nestedLevel++;
+                    } else if (line === 'endswc') {
+                        nestedLevel--;
+                        if (nestedLevel === 0) {
+                            currentLinePointer = i; // 主循环会+1, 落到endswc下一行
+                        }
+                    }
+                    i++;
+                }
                 return;
             }
 
@@ -2633,7 +2685,7 @@ class Interpreter {
                         nestedLevel++;
                     } else if (line === 'endswc') {
                         nestedLevel--;
-                    } else if (line === 'case' || line === 'default') {
+                    } else if ((line.toLowerCase().startsWith('case ') || line === 'case') || line === 'default') {
                         if (nestedLevel === 1) { // 只有在当前switch层级才处理
                             currentLinePointer = i; // 不减1因为主循环会加1并执行 case 或 default 而不是上一个可能的 break
                             break;
@@ -2772,20 +2824,20 @@ class Interpreter {
                 debugLog(1, `获得的数组名称: ${arrayVar.name}`);
                 // 检查变量是否存在且是数组类型
                 if (!arrayVar) {
-                    throw new Error(`未定义的数组: ${target.arrayName}`);
+                    throw { type: ExceptionType.REFERENCE_ERROR, message: `未定义的数组: ${target.arrayName}`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 if (arrayVar.type !== DataType.ARRAY) {
-                    throw new Error(`该 ${target.arrayName} 不是数组类型`);
+                    throw { type: ExceptionType.TYPE_ERROR, message: `该 ${target.arrayName} 不是数组类型`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 if (arrayVar.isConst) {
-                    throw new Error(`数组 ${target.arrayName} 是常量数组, 不能被赋值`);
+                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${target.arrayName} 是常量数组, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 检查索引是否在数组范围内
                 if (target.index >= arrayVar.arrayLength) {
-                    throw new Error(`范围错误: 数组索引 ${target.index} 超出范围, 数组长度为 ${arrayVar.arrayLength}`);
+                    throw { type: ExceptionType.RANGE_ERROR, message: `范围错误: 数组索引 ${target.index} 超出范围, 数组长度为 ${arrayVar.arrayLength}`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 更新数组元素
@@ -2793,7 +2845,7 @@ class Interpreter {
                 const elementType = arrayVar.arrayElementType;
                 const validation = ScopeManager.validateType(value, elementType);
                 if (!validation.isValid) {
-                    throw new Error(`数组元素类型错误: 期望 ${elementType} 类型, 实际 ${typeof value}`);
+                    throw { type: ExceptionType.TYPE_ERROR, message: `数组元素类型错误: 期望 ${elementType} 类型, 实际 ${typeof value}`, lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 更新数组元素
@@ -2914,12 +2966,11 @@ class Interpreter {
             } else if (beforeExcept.length === 1 && beforeExcept[0] === 'all') {
                 debugLog(1, `要排除的变量: ${afterExcept}`);
                 if (afterExcept.length === 0) {
-                    // console.error(`except关键字必须配合变量使用 在第 ${currentLinePointer + 1} 行`);
-                    throw new Error(`except关键字必须配合变量使用 在第 ${currentLinePointer + 1} 行`);
+                    throw { type: ExceptionType.SYNTAX_ERROR, message: `except关键字必须配合变量使用 在第 ${currentLinePointer + 1} 行`, lineNumber: currentLinePointer } as Exception;
                 }
                 for (let i = 0; i < afterExcept.length; i++) {
                     if (afterExcept[i].startsWith('global.')) {
-                        throw new Error(`except关键字仅适用于局部变量`);
+                        throw { type: ExceptionType.SYNTAX_ERROR, message: `except关键字仅适用于局部变量`, lineNumber: currentLinePointer } as Exception;
                     }
                 }
                 let remainedVars: Variable[] = [];
@@ -2965,7 +3016,7 @@ class Interpreter {
                     debugLog(2, `要被清除的第 ${i + 1} 个变量 ${cleanedVars[i]}`)
                     let varInfo = ScopeManager.getVariableInfo(cleanedVars[i], currentLinePointer);
                     if (varInfo && varInfo.startLine >= funcStartLine && varInfo.endLine <= funcEndLine) {
-                        ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine);
+                        ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
                         debugLog(2, `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "lastline" : varInfo.endLine + 1}`);
                     }
                 }
@@ -2987,8 +3038,8 @@ class Interpreter {
             if (block.type === 'function') {
                 // 没有显式return到达函数结束标记，先弹出函数帧再处理
                 const funcInfo = FUNCTIONS[block.funcName];
-                // 清理函数中的局部变量后弹出函数帧
-                ScopeManager.cleanupLocalVariable(false, false, undefined, block.startLine, block.endLine);
+                // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
+                LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
@@ -3045,30 +3096,47 @@ class ExpressionEvaluator {
 
     // 公共入口方法
     static evaluate(expression: string, currentLine: number): any {
-        // // 检查缓存
-        // if (this.cache.has(expression)) {
-        //     return this.cache.get(expression);
-        // }
-
         this.currentLine = currentLine;
-        this.tokens = this.tokenize(expression);
-        this.currentTokenIndex = 0;
+        try {
+            this.tokens = this.tokenize(expression);
+            this.currentTokenIndex = 0;
 
-        if (this.tokens.length === 0) {
-            return undefined;
+            if (this.tokens.length === 0) {
+                return undefined;
+            }
+
+            const result = this.parseExpression();
+
+            // 检查是否还有未处理的令牌
+            if (this.currentTokenIndex < this.tokens.length) {
+                throw new Error(`意外的标记在处理令牌阶段: ${this.tokens[this.currentTokenIndex]}`);
+            }
+
+            return result;
+        } catch (error) {
+            // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获)
+            if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
+                throw error;
+            }
+            const msg = (error as Error).message || String(error);
+            let type: ExceptionType;
+            if (/^TypeError|类型错误|类型不匹配|需要 exactly|只能用于/.test(msg)) {
+                type = ExceptionType.TYPE_ERROR;
+            } else if (/^RangeError|范围错误|越界|除零|必须是非负整数/.test(msg)) {
+                type = ExceptionType.RANGE_ERROR;
+            } else if (/未知函数|未定义的数组/.test(msg)) {
+                type = ExceptionType.REFERENCE_ERROR;
+            } else if (/意外的|缺少|无效的|未知操作|意外结束|意外字符/.test(msg)) {
+                type = ExceptionType.SYNTAX_ERROR;
+            } else {
+                type = ExceptionType.UNKNOWN_ERROR;
+            }
+            throw {
+                type: type,
+                message: msg,
+                lineNumber: currentLine
+            } as Exception;
         }
-
-        const result = this.parseExpression();
-
-        // 检查是否还有未处理的令牌
-        if (this.currentTokenIndex < this.tokens.length) {
-            throw new Error(`意外的标记在处理令牌阶段: ${this.tokens[this.currentTokenIndex]}`);
-        }
-
-        // // 将结果存入缓存
-        // this.setCache(expression, result);
-
-        return result;
     }
 
     // 词法分析: 将表达式分解为令牌
@@ -3082,10 +3150,17 @@ class ExpressionEvaluator {
             // 跳过空白字符
             if (/\s/.test(char)) {
             } else if (/\d/.test(char)) {
-                // 解析数字
+                // 解析数字 (支持 0x/0b/0o 进制字面量)
                 let numStr = char;
                 i++;
-                while (i < expression.length && /[\d.]/.test(expression[i])) {
+                if (numStr === '0' && i < expression.length && /[xXbBoO]/.test(expression[i])) {
+                    // 进制前缀
+                    numStr += expression[i];
+                    i++;
+                }
+                const prefix = numStr.length > 1 ? numStr[1].toLowerCase() : '';
+                const validChars = prefix === 'x' ? /[\da-fA-F.]/ : prefix === 'b' ? /[01.]/ : prefix === 'o' ? /[0-7.]/ : /[\d.]/;
+                while (i < expression.length && validChars.test(expression[i])) {
                     numStr += expression[i];
                     i++;
                 }
@@ -3110,7 +3185,8 @@ class ExpressionEvaluator {
                 // 解析标识符或关键字
                 let identifier = char;
                 i++;
-                while (i < expression.length && /[a-zA-Z0-9_]/.test(expression[i])) {
+                // 允许点号: 支持 Math.sin / global.var 等点分标识符作为单个token
+                while (i < expression.length && /[a-zA-Z0-9_.]/.test(expression[i])) {
                     identifier += expression[i];
                     i++;
                 }
@@ -3139,19 +3215,6 @@ class ExpressionEvaluator {
             } else if (/[()\[\]{},:]/.test(char)) {
                 // 解析分隔符
                 tokens.push(char);
-            } else if (/[.]/.test(char)) {
-                debugLog(2, `检测到前缀标志 . `);
-                tokens.pop();
-                // 匹配以一个或多个字母开头, 后跟一个点号, 再跟符合标识符规则的字符串
-                // ^[a-zA-Z]+ : 匹配字符串开头的一个或多个字母
-                // \. : 匹配一个点号
-                // ([a-zA-Z_][a-zA-Z0-9_]*) : 捕获组, 匹配以字母或下划线开头, 后续为字母、数字或下划线的标识符
-                // 整体正则用于识别类似 object.property 的结构
-                const match = expression.match(/^([a-zA-Z]+\.[a-zA-Z_][a-zA-Z0-9_]*)/);
-                if (match) {
-                    tokens.push(match[1]);
-                }
-                return tokens;
             } else {
                 throw new Error(`意外的字符: ${char} at position ${i}`);
             }
@@ -3165,7 +3228,7 @@ class ExpressionEvaluator {
         debugLog(2, `解析表达式中: ${this.tokens}`);
         // 检查是否是数组元素赋值
         if (this.currentTokenIndex + 2 < this.tokens.length &&
-            /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(this.tokens[this.currentTokenIndex]) &&
+            /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex]) &&
             this.tokens[this.currentTokenIndex + 1] === '[') {
             // 保存当前索引以备恢复
             const savedIndex = this.currentTokenIndex;
@@ -3199,7 +3262,7 @@ class ExpressionEvaluator {
 
         // 检查是否是简单变量赋值
         if (this.currentTokenIndex + 1 < this.tokens.length &&
-            /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(this.tokens[this.currentTokenIndex]) &&
+            /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex]) &&
             this.tokens[this.currentTokenIndex + 1] === '=') {
             // 这是一个简单变量赋值表达式
             const left = this.parseAssignmentTarget();
@@ -3361,6 +3424,14 @@ class ExpressionEvaluator {
         if (/^\d+(\.\d+)?$/.test(token)) {
             this.currentTokenIndex++;
             return parseFloat(token);
+        }
+
+        // 检查是否是进制字面量 (0x/0b/0o)
+        const radixMatch = /^0[xX][\da-fA-F]+$|^0[bB][01]+$|^0[oO][0-7]+$/.exec(token);
+        if (radixMatch) {
+            this.currentTokenIndex++;
+            const radix = token[1].toLowerCase() === 'x' ? 16 : token[1].toLowerCase() === 'b' ? 2 : 8;
+            return parseInt(token.slice(2), radix);
         }
 
         // 检查是否是字符串
@@ -3550,9 +3621,9 @@ class ExpressionEvaluator {
 
     // 解析赋值目标
     private static parseAssignmentTarget(): any {
-        // 检查是否是有效的标识符
+        // 检查是否是有效的标识符 (允许点号, 以支持 global.var 前缀赋值)
         if (this.currentTokenIndex >= this.tokens.length ||
-            !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(this.tokens[this.currentTokenIndex])) {
+            !/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex])) {
             throw new Error(`无效的赋值目标 at position ${this.currentTokenIndex}`);
         }
 

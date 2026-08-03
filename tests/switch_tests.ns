@@ -27,7 +27,33 @@ break
 endswc
 endfor
 
+// 字符串 switch
+// 预期: "matched b" 后无 break, fall-through 到 default 输出 "not default" (C风格语义)
+:strSwitch () -> :void
+switch ("b")
+case "a"
+print "not this"
+case "b"
+print "matched b"
+default
+print "not default"
+endswc
+:end
+call strSwitch()
+
+// 字符串 switch 不匹配时走 default
+:strSwitch2 () -> :void
+switch ("z")
+case "a"
+print "not this"
+default
+print "str default"
+endswc
+:end
+call strSwitch2()
+
 //checked switch
 //checked switch in for loop
 //checked break in switch
 //checked nested switch
+//checked switch with string condition and string case

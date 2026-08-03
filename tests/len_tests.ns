@@ -1,11 +1,26 @@
-debug 3
-//global array arr[5]:int = arrfill
-//print len(arr)
+debug 0
 
-//global str:string = "哈哈"
-//print len(str)
+// ========== 测试1: 数组长度 ==========
+global array buffer[8]:int = arrfill
+print len(buffer)
 
-//print len("666")
+// ========== 测试2: 字符串长度 ==========
+global str:string = "hello"
+print len(str)
 
-//global array arr[2]:string = ["123", "123456"]
-//print len(arr[1])
+// ========== 测试3: len 在 for 循环条件中直接使用 ==========
+global array data[3]:int = [10, 20, 30]
+for (local i:int = 0; i < len(data); i = i + 1)
+    print data[i]
+endfor
+
+// ========== 测试4: len 结果赋值给 int 变量 ==========
+global size:int = 0
+size = len(buffer)
+print size
+
+// ========== 测试5: len 的实参本身就是数组元素 ==========
+global array a2[2]:string = ["123", "123456"]
+print len(a2[1])
+
+// 预期输出: 8, 5, 10, 20, 30, 8, 6

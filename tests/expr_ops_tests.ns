@@ -1,0 +1,141 @@
+debug 0
+
+// ========== 测试1: >= 关系运算 ==========
+global a:int = 5
+if (a >= 5)
+    print "ge true"
+else
+    print "ge false"
+endif
+if (a >= 6)
+    print "bad ge"
+else
+    print "ge false ok"
+endif
+if (6 >= a)
+    print "ge rev true"
+endif
+
+// ========== 测试2: 逻辑与 && (仅接受布尔操作数) ==========
+if (a > 3 && a < 10)
+    print "and true"
+endif
+if (a > 3 && a > 10)
+    print "bad and"
+else
+    print "and false ok"
+endif
+try
+    if (a && true)
+        print "bad"
+    endif
+catch (Exception e1)
+    print "caught and type: " + e1
+endtry
+
+// ========== 测试3: 逻辑或 || (仅接受布尔操作数) ==========
+global flag:bool = false
+if (flag || a == 5)
+    print "or true"
+endif
+if (flag || a == 6)
+    print "bad or"
+else
+    print "or false ok"
+endif
+try
+    if (flag || a)
+        print "bad"
+    endif
+catch (Exception e2)
+    print "caught or type: " + e2
+endtry
+
+// ========== 测试4: 幂运算 ** (右结合) ==========
+print 2 ** 3
+print 2 ** 3 ** 2
+print 3 ** 2 * 2
+print 2 * 3 ** 2
+global base:int = 2
+print base ** 4
+
+// ========== 测试5: 逻辑非 ! ==========
+if (!false)
+    print "not ok"
+endif
+if (!true)
+    print "bad not"
+else
+    print "not false ok"
+endif
+print !(a == 5)
+
+// ========== 测试6: 除法 / 与 除零异常 ==========
+print 10 / 4
+print 9 / 2
+global dv:float = 7.0
+print dv / 2
+try
+    print 1 / 0
+catch (Exception e3)
+    print "caught div0: " + e3
+endtry
+
+// ========== 测试7: 取模 % ==========
+print 13 % 4
+print a % 3
+
+// ========== 测试8: 内置转换函数 int() / float() ==========
+print int(3.7)
+print int("42")
+print float(2)
+global fl:float = 0.0
+fl = float(3)
+print fl
+print int(fl)
+
+// ========== 测试9: 混合优先级与结合性 ==========
+print 2 + 3 * 4
+print (2 + 3) * 4
+print 10 - 4 + 2
+print 20 / 5 * 2
+print 2 + 3 * 4 - 1
+print -a + 10
+print 0 - a
+
+// 预期输出:
+// ge true
+// ge false ok
+// ge rev true
+// and true
+// and false ok
+// caught and type: ...
+// or true
+// or false ok
+// caught or type: ...
+// 8
+// 512
+// 18
+// 18
+// 16
+// not ok
+// not false ok
+// false
+// 2.5
+// 4.5
+// 3.5
+// caught div0: ...
+// 1
+// 2
+// 3
+// 42
+// 2
+// 3
+// 3
+// 14
+// 20
+// 8
+// 8
+// 13
+// 5
+// -5

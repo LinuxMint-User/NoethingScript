@@ -1,0 +1,96 @@
+debug 0
+
+// ========== 测试1: Math 内置函数 ==========
+global v:float = 0.0
+v = Math.sin(0)
+print v
+v = Math.cos(0)
+print v
+v = Math.tan(0)
+print v
+v = Math.sqrt(16)
+print v
+global vi:int = 0
+vi = Math.abs(-5)
+print vi
+vi = Math.pow(2, 10)
+print vi
+vi = Math.floor(3.7)
+print vi
+vi = Math.ceil(3.2)
+print vi
+vi = Math.round(3.5)
+print vi
+vi = Math.max(1, 5, 3)
+print vi
+vi = Math.min(1, 5, 3)
+print vi
+global r:float = 1.0
+r = Math.random()
+if (r >= 0 && r < 1)
+    print "random ok"
+endif
+
+// Math 参数数量错误可捕获
+try
+    print Math.pow(2)
+catch (Exception e1)
+    print "caught math arg: " + e1
+endtry
+
+// ========== 测试2: 进制字面量 (声明 + 表达式) ==========
+global hexV:int = 0xFF
+print hexV
+global binV:int = 0b1010
+print binV
+global octV:int = 0o17
+print octV
+print 0xFF + 1
+print 0b1111 + 1
+print 0o10 * 2
+global flHex:float = 0x1F
+print flHex
+
+// ========== 测试3: 局部常量 ==========
+:constTest () -> :void
+local const lc:int = 10
+print lc
+lc = 20
+print lc
+local const array la[2]:int = [1, 2]
+try
+    la[0] = 99
+catch (Exception e2)
+    print "caught local const arr: " + e2
+endtry
+print la[0]
+:end
+
+call constTest()
+
+// 预期输出:
+// 0
+// 1
+// 0
+// 4
+// 5
+// 1024
+// 3
+// 4
+// 4
+// 5
+// 1
+// random ok
+// caught math arg: ...
+// 255
+// 10
+// 15
+// 256
+// 16
+// 16
+// 31
+// 10
+// TypeError: Cannot assign to constant variable 'lc' at line 52
+// 10
+// caught local const arr: ...
+// 1
