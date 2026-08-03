@@ -64,9 +64,7 @@ endtry
 NoethingScript/
 ├── noethingScript-Interpreter.ts   # 解释器源码
 ├── doc.md                          # 语言规范手册
-├── tests/                          # 测试用例
-│   ├── testerrs/                   # 功能测试 (.ns)
-│   └── alpha tests/                # 早期开发测试 (.nsi)
+├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md)
 ├── dist/                           # 编译产物 (npm run build 生成)
 ├── tsconfig.json
 └── LICENSE
