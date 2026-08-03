@@ -17,14 +17,17 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 ## 快速开始
 
 ```bash
-# 编译 TypeScript 源码
-tsc
+# 安装依赖 (含 TypeScript)
+npm install
+
+# 编译到 dist/
+npm run build
 
 # 运行脚本
-node noethingScript-Interpreter.js 脚本文件名.ns
+node dist/noethingScript-Interpreter.js 脚本文件名.ns
 
 # 带调试级别运行 (0-3)
-node noethingScript-Interpreter.js 脚本文件名.ns --debug 2
+node dist/noethingScript-Interpreter.js 脚本文件名.ns --debug 2
 ```
 
 ## 示例
@@ -60,11 +63,11 @@ endtry
 ```
 NoethingScript/
 ├── noethingScript-Interpreter.ts   # 解释器源码
-├── noethingScript-Interpreter.js   # 编译产物
 ├── doc.md                          # 语言规范手册
 ├── tests/                          # 测试用例
 │   ├── testerrs/                   # 功能测试 (.ns)
 │   └── alpha tests/                # 早期开发测试 (.nsi)
+├── dist/                           # 编译产物 (npm run build 生成)
 ├── tsconfig.json
 └── LICENSE
 ```
