@@ -1,0 +1,11 @@
+debug 3
+//global array arr[5]:int = arrfill
+//print len(arr)
+
+//global str:string = "哈哈"
+//print len(str)
+
+//print len("666")
+
+//global array arr[2]:string = ["123", "123456"]
+//print len(arr[1])

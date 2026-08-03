@@ -1,0 +1,8 @@
+debug 3
+global x:int = 0
+assert (x = 0)
+"x = 0"
+endasrt
+print "x = 0"
+
+//checked assert

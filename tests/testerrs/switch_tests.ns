@@ -1,0 +1,33 @@
+debug 0
+//global cnt:int = 0 
+for (local cnt:int = 0; cnt < 5; cnt = cnt + 1)
+switch (cnt)
+case 0
+print "case 0"
+for (local cnt1:int = 0; cnt1 < 5; cnt1 = cnt1 + 1)
+switch (cnt1)
+case 0
+print "nested case 0"
+break
+case 1
+print "nested case 1"
+break
+default
+print "nested default"
+break
+endswc
+endfor
+break
+case 1
+print "case 1"
+break
+default
+print "default"
+break
+endswc
+endfor
+
+//checked switch
+//checked switch in for loop
+//checked break in switch
+//checked nested switch

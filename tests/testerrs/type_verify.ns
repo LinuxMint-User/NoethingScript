@@ -1,0 +1,15 @@
+debug 3
+
+//all checked
+//global var0:int = 0
+//global var1:float = false
+//global var2:number = 0
+//global var3:string = ""
+//global var4:bool = false
+
+global var0:int = 0
+
+//checked: var0 = 6.6
+var0 = 6
+
+print var0

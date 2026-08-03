@@ -1,0 +1,13 @@
+debug 3
+// debug level 3
+//checked no local vars outside functions: local var0:int = 0
+global var0:int = 0
+
+:func() -> :void
+local var0:int = 666
+//!!! need global access in block scope
+:end
+
+call func()
+
+print var0

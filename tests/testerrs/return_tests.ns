@@ -1,0 +1,124 @@
+debug 0
+
+// ========== 测试1: 基础return ==========
+global var0:number = 0
+global var1:number = 0
+
+:func1 (num:number) -> result:number
+local plusNum:number = 6
+result = plusNum + num
+return result
+:end
+
+if (var1 == 0)
+call func1(var0) -> var1
+print var1
+endif
+
+// ========== 测试2: void函数不应有return（扫描阶段报错，执行继续）==========
+:func0 () -> :void
+local x:int = 1
+return x
+:end
+
+call func0()
+
+// ========== 测试3: 多层块内return ==========
+global array arr[3]:int = [10, 20, 30]
+
+:findInArray (target:int) -> index:int
+local i:int = 0
+index = -1
+while (i < len(arr))
+    if (arr[i] == target)
+        index = i
+        return index
+    endif
+    i = i + 1
+endwhl
+return index
+:end
+
+call findInArray(20) -> var1
+print var1
+
+call findInArray(99) -> var1
+print var1
+
+// ========== 测试4: 多分支return ==========
+:classify (val:int) -> result:string
+if (val < 0)
+    result = "negative"
+    return result
+else
+    if (val == 0)
+        result = "zero"
+        return result
+    else
+        result = "positive"
+        return result
+    endif
+endif
+:end
+
+call classify(-5) -> var0str
+print var0str
+
+call classify(0) -> var0str
+print var0str
+
+call classify(3) -> var0str
+print var0str
+
+// ========== 测试5: return套return（函数A调函数B，B return后A继续执行再return）==========
+:adder (a:int, b:int) -> sum:int
+sum = a + b
+return sum
+:end
+
+:multiplyAndAdd (x:int, y:int, z:int) -> final:int
+local product:int = 0
+product = x * y
+call adder(product, z) -> final
+return final
+:end
+
+call multiplyAndAdd(2, 3, 4) -> var1
+print var1
+
+// ========== 测试6: for循环内return ==========
+:findInForLoop (target:int) -> found:int
+found = 0
+for (local i:int = 0; i < 5; i = i + 1)
+    if (i == target)
+        found = 1
+        return found
+    endif
+endfor
+return found
+:end
+
+call findInForLoop(3) -> var1
+print var1
+
+call findInForLoop(10) -> var1
+print var1
+
+// ========== 测试7: 非void函数没return就走到:end（扫描阶段报错）==========
+:noReturnFunc (val:int) -> result:int
+result = val + 1
+// 没有return语句
+:end
+
+call noReturnFunc(5) -> var1
+print var1
+
+// ========== 测试8: return返回全局变量 ==========
+global sharedVal:string = "global_msg"
+
+:returnGlobal () -> out:string
+return sharedVal
+:end
+
+call returnGlobal() -> var0str
+print var0str

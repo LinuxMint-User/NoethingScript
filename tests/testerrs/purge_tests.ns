@@ -1,0 +1,22 @@
+debug 3
+global var0:int = 0
+global var1:string = ""
+global var3:string = ""
+var0 = 1
+var1 = "hi"
+var3 = "global var3"
+:func () -> :void
+local var3:int = 6
+local var4:string = "hello"
+print var3
+print var4
+purge all except var4
+print var3
+print var4
+:end
+//purge var4
+call func()
+purge global.var0
+//checked purge all
+//checked purge all except varname
+//checked purge global vars

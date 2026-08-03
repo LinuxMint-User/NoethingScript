@@ -1,0 +1,26 @@
+debug 3
+
+global var0:number = 0
+//checked function return
+
+//:func1 (num:int) -> result:int
+//result = 6
+//return result
+//:end
+
+//checked void function return
+
+:func0 () -> :void
+var0 = var0 + 1
+//return "void"
+:end
+
+call func0()
+print var0
+
+//checked nested functions
+:func2 () -> :void
+//:func3 () -> :void
+:tag
+:end
+//:end

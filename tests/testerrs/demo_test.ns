@@ -1,0 +1,74 @@
+debug 1
+
+// 声明全局变量
+global counter:int = 0
+global name:string = "NoethingScript"
+global flag:bool = false
+
+// 数组声明（必须用方括号）
+global array primes[6]:int = [2, 3, 5, 7, 11, 13]
+global array buffer[10]:int = arrfill
+
+// 常量
+global const MAX_RETRIES:int = 3
+
+// 函数：计算数组元素和
+:sumArray (arrLen:int) -> total:int
+local i:int = 0
+total = 0
+while (i < arrLen)
+    total = total + primes[i]
+    i = i + 1
+endwhl
+return total
+:end
+
+// 函数：带条件判断的查找
+:findInPrimes (target:int) -> found:bool
+local i:int = 0
+found = false
+while (i < len(primes))
+    if (primes[i] == target)
+        found = true
+        return found
+    endif
+    i = i + 1
+endwhl
+return found
+:end
+
+// 主逻辑
+print "=== NoethingScript Demo ==="
+print "Language: " + name
+
+call sumArray(6) -> counter
+print "Sum of primes: " + str(counter)
+
+call findInPrimes(7) -> flag
+print "Found 7 in primes: " + str(flag)
+
+call findInPrimes(8) -> flag
+print "Found 8 in primes: " + str(flag)
+
+// switch 示例
+switch (counter % 3)
+case 0
+    print "counter divisible by 3"
+    break
+case 1
+    print "counter mod 3 = 1"
+    break
+default
+    print "counter mod 3 = 2"
+    break
+endswc
+
+// 九九乘法表
+print "--- Multiplication Table ---"
+for (local i:int = 1; i < 10; i = i + 1)
+    for (local j:int = 1; j < 10; j = j + 1)
+        if (j <= i)
+            print str(i) + "*" + str(j) + "=" + str(i * j)
+        endif
+    endfor
+endfor

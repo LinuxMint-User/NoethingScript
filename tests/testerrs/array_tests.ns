@@ -1,0 +1,48 @@
+debug 3
+//checked local outside function: local array arr[5]:int = [1, 2, 3, 4, 5]
+//checked array declearation error: global array arr[5]:int = [1, 2, 3, 4, 5
+//checked array declearation error: global array arr[5]:int = 1, 2, 3, 4, 5
+//checked array declearation error: global array arr[5]:int = 1, 2, 3, 4, 5]
+//checked array declearation error: global array arr[5]:int = {1, 2, 3, 4, 5}
+//checked array declearation error: global array arr[5]:int = (1, 2, 3, 4, 5)
+//checked array length error: global array arr[5]:int = [1, 2, 3, 4]
+//checked array length error: global array arr[5]:int = [1, 2, 3, ]
+//checked array length error: global array arr[5]:int = [1, 2, 3, 4, 5, 6]
+//checked array content type error: global array arr[5]:int = [1, 2, 3, 4, ""]
+//checked array content type error: global array arr[5]:int = [1, 2, 3, 4, 0.1]
+//checked array content type error: global array arr[5]:int = [1, 2, 3, false, true]
+//checked declearation error: array global arr[5]:int = [1, 2, 3, 4, 5]
+//checked declearation index error: global array arr[]:int = [1, 2, 3, 4, 5]
+//checked declearation type error: global array arr[5]:string = [1, 2, 3, 4, 5]
+
+//global const array arr[5]:int = [1, 2, 3, 4, 5]
+//checked arrfill
+//global array arr[5]:int = arrfill
+
+//checked array index type must int: print arr["0"]
+//checked array index value must over zero: print arr[-1]
+//checked array index var must defined: print arr[xxx]
+//checked array index error: print arr[-""]
+//checked array index hybrid error: print arr[-"2"]
+
+//print "arr[0]"
+//print arr[0]
+
+//checked array assignment type error: arr[0] = 6.6, arr[0] = "6.6", arr[0] = false
+//arr[0] = 6
+
+//checked array index outrange error: print arr[5], arr[5] = 0
+
+//checked constant array assignment error: arr[0] = 6
+
+//print arr[0]
+//print arr[1]
+//print arr[2]
+//print arr[3]
+//print arr[4]
+
+global const array arr[5]:int = [1, 2, 3, 4, 5]
+global array arr0[5]:int = [4, 3, 2, 1, 0]
+
+//checked nested array reference
+print arr[arr0[0]]

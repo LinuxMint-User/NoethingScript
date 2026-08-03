@@ -1,0 +1,13 @@
+debug 3
+// debug level 3
+global var0:int = 0
+
+//checked referenceError: global var0:int = 1
+
+//var0 = 666
+//checked typeError var0 =
+//checked typeError: var0 = ""
+
+//checked global. access
+global.var0 = 6
+print global.var0

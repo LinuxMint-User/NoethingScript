@@ -1,0 +1,8 @@
+debug 0
+print "program start"
+global cnt:int = 0
+:jumptag
+print "hello"
+cnt = cnt + 1
+print cnt
+jump (cnt < 10) :jumptag

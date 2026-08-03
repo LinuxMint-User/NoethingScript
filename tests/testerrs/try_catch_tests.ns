@@ -1,0 +1,92 @@
+debug 0
+
+// 测试1: try块内类型错误被捕获, 打印异常消息, 继续执行
+try
+    local x:int = "abc"
+    print "这段不会执行"
+catch (Exception e1)
+    print "caught1: " + e1
+endtry
+print "after try1"
+
+// 测试2: 无异常时跳过catch块体
+try
+    local y:int = 10
+    print "try2 body: " + str(y)
+catch (Exception e2)
+    print "不会执行: " + e2
+endtry
+print "after try2"
+
+// 测试3: 嵌套try, 内层异常内层捕获
+try
+    try
+        local z:int = true
+        print "不会执行"
+    catch (Exception e3)
+        print "inner caught: " + e3
+    endtry
+    print "after inner try"
+catch (Exception e4)
+    print "外层不会捕获"
+endtry
+print "after try3"
+
+// 测试4: catch块内可声明局部变量, 异常后可继续正常逻辑
+try
+    local a:int = "bad"
+catch (Exception e5)
+    local note:string = "recovered"
+    print "note: " + note + ", err: " + e5
+endtry
+// 测试5: 函数内异常被外层try捕获, 函数帧正确清理, 后续可正常声明全局变量
+:funcWithError (num:number) -> result:number
+local bad:int = "oops"
+result = 0
+return result
+:end
+
+try
+    call funcWithError(1) -> result
+    print "这段不会执行"
+catch (Exception e6)
+    print "caught func error: " + e6
+endtry
+print "after func try"
+
+global afterFunc:int = 5
+print "global after: " + str(afterFunc)
+
+// 测试6: 赋值给未定义变量被捕获 (ReferenceError)
+try
+    undefinedVar = 5
+catch (Exception e7)
+    print "caught ref assign: " + e7
+endtry
+
+// 测试7: 读取未定义变量被捕获 (ReferenceError)
+try
+    print undefinedVar2
+catch (Exception e8)
+    print "caught ref read: " + e8
+endtry
+
+// 测试8: 调用未定义函数被捕获 (ReferenceError)
+try
+    call notExistFunc(1)
+catch (Exception e9)
+    print "caught ref func: " + e9
+endtry
+
+print "done"
+
+// 未被捕获的错误照旧输出 (控制台会打印, 程序继续)
+
+//checked try-catch basic
+//checked try-catch without exception
+//checked nested try-catch
+//checked local var in catch block
+//checked exception inside function caught by outer try
+//checked ReferenceError on assignment to undefined var
+//checked ReferenceError on reading undefined var
+//checked ReferenceError on calling undefined function
