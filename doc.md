@@ -247,6 +247,18 @@ node dist/noethingScript-Interpreter.js program.ns --lang en --debug 2
 ```
 `--lang` 仅接受 `en` 或 `zh`（其他值忽略并保持默认中文），与 `--debug` 顺序可任意。运行时会用另一种语言提示当前语言及其切换方式（如默认中文时第一行显示英文 Tip）。
 
+### 帮助与版本信息
+```bash
+node dist/noethingScript-Interpreter.js --help      # 显示用法说明 (跟随 --lang 语言) 后退出
+node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
+```
+`--help`/`--version` 为独立参数，不需要提供文件名，且优先于其他检查。
+
+### 参数约定
+- 可选参数与文件名**顺序任意**，文件名必须是第一个**非 `-` 开头**的参数
+- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--help`/`--version`
+- **不支持短参数**（如 `-h`/`-v`）；未知参数（含短参数）会提示"未知参数"并退出，不会被当作文件名
+
 
 #### 示例：
 ```ns

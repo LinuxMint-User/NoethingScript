@@ -231,6 +231,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: '用法: node noethingScript-Interpreter.js <文件名>',
         cli_no_debug_level: '未指定调试参数等级, 初始化默认为 0',
         cli_invalid_lang: '无效的语言参数, 仅支持 en 或 zh, 已保持默认中文',
+        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
         cli_cannot_read: '[错误] 无法读取文件 \'{filename}\': {error}',
         cli_node_required: '[错误] 此脚本需要在Node.js环境中运行以支持文件读取',
         internal_error: '[内部错误] [行 {line}] 解释器内部发生错误: {message}',
@@ -410,6 +411,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: 'Usage: node noethingScript-Interpreter.js <filename>',
         cli_no_debug_level: 'Debug level not specified, defaulting to 0',
         cli_invalid_lang: 'Invalid language, only en or zh are supported, keeping default zh',
+        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
         cli_cannot_read: '[Error] Cannot read file \'{filename}\': {error}',
         cli_node_required: '[Error] This script needs a Node.js environment to support file reading',
         internal_error: '[Internal Error] [Line {line}] Interpreter internal error: {message}',
@@ -4647,6 +4649,33 @@ if (typeof require !== 'undefined') {
     var fs = require('fs');
 }
 
+// 打印使用帮助 (双语, 跟随当前输出语言)
+function printHelp(): void {
+    if (LANG === 'en') {
+        console.log(`NoethingScript Interpreter v${NSIVersion}`);
+        console.log('');
+        console.log('Usage: node noethingScript-Interpreter.js <filename> [options]');
+        console.log('');
+        console.log('Arguments:');
+        console.log('  <filename>      NoethingScript script file to execute');
+        console.log('  --debug N       Set debug level 0-3 (default 0)');
+        console.log('  --lang en|zh    Set output language (default zh)');
+        console.log('  --help          Show this help message');
+        console.log('  --version       Show version number');
+    } else {
+        console.log(`NoethingScript 解释器 v${NSIVersion}`);
+        console.log('');
+        console.log('用法: node noethingScript-Interpreter.js <文件名> [选项]');
+        console.log('');
+        console.log('参数:');
+        console.log('  <文件名>        要执行的 NoethingScript 脚本文件');
+        console.log('  --debug N       设置调试级别 0-3 (默认 0)');
+        console.log('  --lang en|zh    设置输出语言 (默认 zh)');
+        console.log('  --help          显示本帮助');
+        console.log('  --version       显示版本号');
+    }
+}
+
 // 主函数, 用于处理命令行参数并执行程序
 function main() {
     // 检查是否在Node.js环境中运行
@@ -4657,6 +4686,7 @@ function main() {
         let filename: string | undefined;
         let debugValue: string | undefined;
         let langArg: string | undefined;
+        const unknownArgs: string[] = [];
         for (let i = 0; i < args.length; i++) {
             if (args[i] === '--debug') {
                 debugValue = args[i + 1];
@@ -4664,6 +4694,9 @@ function main() {
             } else if (args[i] === '--lang') {
                 langArg = args[i + 1];
                 i++;
+            } else if (args[i].startsWith('-') && args[i] !== '--help' && args[i] !== '--version') {
+                // 未知可选参数兜底: 以 - 开头的未知参数 (含短参数如 -h) 记入列表, 不当作文件名处理
+                unknownArgs.push(args[i]);
             } else if (filename === undefined) {
                 filename = args[i];
             }
@@ -4683,6 +4716,22 @@ function main() {
             } else {
                 console.log(t('cli_no_debug_level'));
             }
+        }
+
+        // --help / --version: 独立参数, 显示后直接退出 (不读取脚本)
+        if (args.includes('--help')) {
+            printHelp();
+            process.exit(0);
+        }
+        if (args.includes('--version')) {
+            console.log(`NoethingScript Interpreter v${NSIVersion}`);
+            process.exit(0);
+        }
+
+        // 未知可选参数兜底: 提示后退出, 避免被误当作文件名导致"无法读取文件"
+        if (unknownArgs.length > 0) {
+            console.error(t('cli_unknown_args', { args: unknownArgs.join(', ') }));
+            process.exit(1);
         }
 
         // 检查是否有参数

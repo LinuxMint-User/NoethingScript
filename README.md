@@ -35,7 +35,13 @@ node dist/noethingScript-Interpreter.js 脚本文件名.ns --lang en
 
 # 带调试级别运行 (0-3)
 node dist/noethingScript-Interpreter.js 脚本文件名.ns --debug 2
+
+# 帮助与版本
+node dist/noethingScript-Interpreter.js --help
+node dist/noethingScript-Interpreter.js --version
 ```
+
+> 注：不支持短参数（如 `-h`）；以 `-` 开头的未知参数会提示"未知参数"而非被当作文件名。
 
 ## 示例
 
