@@ -20,7 +20,7 @@
 | `array`    | 数组类型，必须显式声明长度                                           |
 
 ### 声明格式
-```vbnet
+```ns
 global varname:type = value     // 全局变量
 local varname:type = value      // 局部变量
 global const varname:type = value  // 全局常量
@@ -35,7 +35,7 @@ local const varname:type = value   // 局部常量
 
 **不允许**在声明初始化中使用变量或函数调用（包括单变量引用）：
 
-```vbnet
+```ns
 global y:int = 3 + 4                 // 字面量表达式
 global s:string = "a" + "b"          // 字符串拼接
 global flag:bool = 1 < 2 && true     // 逻辑运算
@@ -59,7 +59,7 @@ global bad2:int = src                // 错误: 单变量引用也不允许
 ### 数组声明与初始化
 数组必须显式声明长度，支持两种初始化方式：
 
-```vbnet
+```ns
 // 手动初始化
 global array arrName[arrLength]:type = [value1, value2, ..., valueN]
 
@@ -86,7 +86,7 @@ global array arrName[arrLength]:type = arrfill
 `arrfill` 仅用于数组**声明时**的统一填充初始化（`global array buffer[32]:int = arrfill`），不能用于数组整体赋值等其他场景（会按未定义变量报错）。
 
 #### 示例：
-```vbnet
+```ns
 global array days[7]:string = ["Sun", "Mon", "Tue", "Wed", "Thur", "Fri", "Sat"]
 
 global array months[12]:int = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
@@ -98,7 +98,7 @@ local array arr0[arrLength0]:int = arrfill
 ```
 
 ### 数组读写操作
-```vbnet
+```ns
 // 读取数组元素（直接作为表达式使用，可用于 print、赋值、运算等）
 print arrName[index]
 varName = arrName[index]
@@ -108,13 +108,13 @@ arrName[index] = val
 ```
 
 ### 数组整体赋值
-```vbnet
+```ns
 arrA = arrB
 ```
 将 `arrB` 的引用整体赋值给 `arrA`（引用赋值），二者共享同一份数组数据，修改任一数组的元素会同步反映到另一个；`arrA` 的长度与元素类型随之变为与 `arrB` 一致。常量数组、只读引用数组（只读形参/字面量实参）禁止作为整体赋值目标。
 
 若需要副本赋值（深拷贝，互不影响）：
-```vbnet
+```ns
 arrA = copy(arrB)
 ```
 `arrA` 获得 `arrB` 的独立副本，此后修改 `arrA` 不影响 `arrB`。
@@ -129,7 +129,7 @@ arrA = copy(arrB)
 5. 越界访问直接报错
 
 ### 数组长度属性
-```vbnet
+```ns
 // 获取数组长度
 len(arrName)
 ```
@@ -142,7 +142,7 @@ len(arrName)
 
 ### 多维数组实现
 本语言仅原生支持一维数组，更高维数组需通过一维数组组合实现：
-```vbnet
+```ns
 global const ROWS:int = 3
 global const COLS:int = 4
 global array matrix[ROWS * COLS]:int = arrfill
@@ -154,7 +154,7 @@ matrix[1 * COLS + 2] = 10
 ## 流程控制
 
 ### 条件语句
-```vbnet
+```ns
 // 基础if
 if (condition)
     operate var, var, ...
@@ -180,7 +180,7 @@ endif
 ```
 
 ### 循环语句
-```vbnet
+```ns
 // for循环(C风格)
 for (local i:int = 0; i < 10; i = i + 1)
     operate var, var, ...
@@ -197,7 +197,7 @@ endwhl
 2. 循环变量作用域内禁止声明同名变量
 3. 循环变量在作用域内为只读状态，禁止修改其值（for 循环的更新表达式除外）
 4. 数组遍历推荐模式：
-```vbnet
+```ns
 global array data[5]:int = [10, 20, 30, 40, 50]
 for (local i:int = 0; i < len(data); i = i + 1)
     print data[i]
@@ -205,7 +205,7 @@ endfor
 ```
 
 ### switch分支
-```vbnet
+```ns
 switch (condition)  // 仅允许int或string类型
 case val0
     operate var, var, ...
@@ -226,7 +226,7 @@ endswc
 ## 调试控制
 
 ### Debug级别控制
-```vbnet
+```ns
 // 设置调试级别
 debug level
 ```
@@ -240,7 +240,7 @@ node dist/noethingScript-Interpreter.js program.ns --debug 2
 命令行指定的级别优先级更高，文档内低于命令行的级别会被忽略。
 
 #### 示例：
-```vbnet
+```ns
 debug 1
 
 // 声明一些变量并进行操作
@@ -251,7 +251,7 @@ local y:int = x + 3
 当运行以上代码时，解释器将根据设置的调试级别输出相应的调试信息。
 
 ### 断言
-```vbnet
+```ns
 assert (condition)
 "assertion failure message"  // 下一行必须是双引号括起的字符串, 作为断言失败时的错误消息
 endasrt
@@ -264,7 +264,7 @@ endasrt
 断言失败时抛出 `AssertionError`（可被 `try-catch` 捕获，未捕获则由解释器输出错误消息）。
 
 ### 异常处理
-```vbnet
+```ns
 try
     operate var, var, ...
 catch (Exception ErrorName)
@@ -277,7 +277,7 @@ catch 中的异常变量 `ErrorName` 绑定为 string 类型的局部变量（�
 
 ### 函数声明
 有返回值的函数：
-```vbnet
+```ns
 :functionName (arg0:type, arg1:type, ...) -> rtVarName:type
     // 函数体
     return result  // 非void类型必须至少有一个return
@@ -285,7 +285,7 @@ catch 中的异常变量 `ErrorName` 绑定为 string 类型的局部变量（�
 ```
 
 无返回值的函数：
-```vbnet
+```ns
 :functionName (arg0:type, arg1:type, ...) -> :void
     // 函数体
 :end
@@ -293,12 +293,12 @@ catch 中的异常变量 `ErrorName` 绑定为 string 类型的局部变量（�
 
 ### 函数调用
 有返回值的函数调用：
-```vbnet
+```ns
 call functionName(arg0, arg1, ...) -> rtVar
 ```
 
 无返回值的函数调用：
-```vbnet
+```ns
 call functionName(arg0, arg1, ...)
 ```
 
@@ -338,7 +338,7 @@ call functionName(arg0, arg1, ...)
 
 #### 数组作为函数返回值
 返回值类型声明为 `array` 时，在函数体内用 `return 数组变量` 直接返回（函数体内也可先通过整体赋值 `res = tmp` 将数组引用交给返回变量再 `return res`）：
-```vbnet
+```ns
 :makeArr () -> res:array
 local array tmp[3]:int = [5, 6, 7]
 res = tmp
@@ -410,7 +410,7 @@ print r1[0]   // 5
 | `Math.random()` | [0,1) 随机数 |
 
 #### 示例
-```vbnet
+```ns
 print str(42)       // "42"
 print int("3.9")    // 3
 print float("2.5")  // 2.5
@@ -421,12 +421,12 @@ print Math.floor(3.7) // 3
 ## 注释
 
 ### 单行注释
-```vbnet
+```ns
 // 这是单行注释
 ```
 
 ### 多行注释
-```vbnet
+```ns
 /// 多行注释起始
 注释内容（任意行，无需 /// 前缀，可包含代码）
 /// 多行注释结束
@@ -434,12 +434,12 @@ print Math.floor(3.7) // 3
 采用就近原则闭合：遇到 `///` 行进入多行注释，区间内所有行（无论内容）均被忽略，直到遇到下一个 `///` 行结束。若文件结束时仍未闭合则视为注释到文件末尾。
 
 ## 跳转指令
-```vbnet
+```ns
 jump (condition) :tagname
 ```
 
 ### 清除量指令
-```vbnet
+```ns
 purge varName
 ```
 默认清除局部变量，只能在函数体内调用。
@@ -447,13 +447,13 @@ purge varName
 
 
 ### 清除所有量指令
-```vbnet
+```ns
 purge all
 ```
 默认清除所有局部变量，全局变量不支持`all`关键字
 
 ### 排除清除指令
-```vbnet
+```ns
 purge all except varName
 ```
 默认清除所有局部变量，全局变量不支持`except`关键字
