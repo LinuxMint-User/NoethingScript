@@ -177,6 +177,42 @@ enum ExceptionType {
     LOOP_UPDATE_ERROR = 'LoopUpdateError'
 }
 
+// 错误编号映射 (与 ExceptionType 一一对应, 仅用于统一错误输出)
+const ERROR_CODES: { [key in ExceptionType]: number } = {
+    [ExceptionType.SYNTAX_ERROR]: 1,
+    [ExceptionType.TYPE_ERROR]: 2,
+    [ExceptionType.REFERENCE_ERROR]: 3,
+    [ExceptionType.RANGE_ERROR]: 4,
+    [ExceptionType.ASSERTION_ERROR]: 5,
+    [ExceptionType.UNKNOWN_ERROR]: 6,
+    [ExceptionType.LOOP_INIT_ERROR]: 7,
+    [ExceptionType.LOOP_UPDATE_ERROR]: 8,
+    [ExceptionType.TRY_BLOCK]: 9,
+    [ExceptionType.CATCH_BLOCK]: 10
+};
+
+// 错误类型中文名 (用于统一错误输出)
+const ERROR_NAMES: { [key in ExceptionType]: string } = {
+    [ExceptionType.SYNTAX_ERROR]: '语法错误',
+    [ExceptionType.TYPE_ERROR]: '类型错误',
+    [ExceptionType.REFERENCE_ERROR]: '引用错误',
+    [ExceptionType.RANGE_ERROR]: '范围错误',
+    [ExceptionType.ASSERTION_ERROR]: '断言错误',
+    [ExceptionType.UNKNOWN_ERROR]: '其他错误',
+    [ExceptionType.LOOP_INIT_ERROR]: '循环初始化错误',
+    [ExceptionType.LOOP_UPDATE_ERROR]: '循环更新错误',
+    [ExceptionType.TRY_BLOCK]: 'Try块',
+    [ExceptionType.CATCH_BLOCK]: 'Catch块'
+};
+
+// 统一错误报告入口: 输出格式为 "[ERROR N] [行 X] 类型: 消息"
+// line 缺省时取当前执行行 (currentLinePointer + 1)
+function reportError(type: ExceptionType, message: string, line?: number): void {
+    const lineNum = line !== undefined ? line : currentLinePointer + 1;
+    console.error(`[ERROR ${ERROR_CODES[type]}] [行 ${lineNum}] ${ERROR_NAMES[type]}: ${message}`);
+}
+
+
 // 异常接口定义
 interface Exception {
     type: ExceptionType;
@@ -245,7 +281,7 @@ class ScopeManager {
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
-            console.error(`TypeError: Cannot assign value '${value}' to variable '${name}' of type '${type}' at line ${startLine + 1}`);
+            reportError(ExceptionType.TYPE_ERROR, `Cannot assign value '${value}' to variable '${name}' of type '${type}'`, startLine + 1);
             return false;
         }
 
@@ -272,7 +308,7 @@ class ScopeManager {
 
         if (isGlobal) {
             if (GLOBAL_VARS.hasOwnProperty(name)) {
-                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${name}' 已被定义`);
+                reportError(ExceptionType.REFERENCE_ERROR, `名称 '${name}' 已被定义`);
                 // currentLinePointer = programLines.length;
                 // throw { type: ExceptionType.REFERENCE_ERROR, message: `引用错误: 名称 '${name}' 已被定义` } as Exception;
                 return false;
@@ -283,7 +319,7 @@ class ScopeManager {
             // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
             for (const localVar of LOCAL_VARS) {
                 if (localVar.name === name && localVar.frameId === variable.frameId && localVar.startLine === variable.startLine && localVar.endLine === variable.endLine) {
-                    console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${name}' 在相同作用域内已被定义`);
+                    reportError(ExceptionType.REFERENCE_ERROR, `名称 '${name}' 在相同作用域内已被定义`);
                     // currentLinePointer = programLines.length;
                     // throw { type: ExceptionType.REFERENCE_ERROR, message: `引用错误: 名称 '${name}' 在相同作用域内已被定义` } as Exception;
                     return false;
@@ -436,13 +472,13 @@ class ScopeManager {
                 if (varInfo.name === name && currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
                     // 检查是否为常量
                     if (varInfo.isConst) {
-                        console.error(`TypeError: Cannot assign to constant variable '${name}' at line ${currentLine + 1}`);
+                        reportError(ExceptionType.TYPE_ERROR, `Cannot assign to constant variable '${name}'`, currentLine + 1);
                         return false;
                     }
                     // 验证类型
                     const validation = ScopeManager.validateType(value, varInfo.type);
                     if (!validation.isValid) {
-                        console.error(`TypeError: Cannot assign value '${value}' to variable '${name}' of type '${varInfo.type}' at line ${currentLine + 1}`);
+                        reportError(ExceptionType.TYPE_ERROR, `Cannot assign value '${value}' to variable '${name}' of type '${varInfo.type}'`, currentLine + 1);
                         return false;
                     }
                     LOCAL_VARS[i].value = validation.convertedValue;
@@ -468,7 +504,7 @@ class ScopeManager {
             return true;
         }
 
-        console.error(`引用错误: 变量 '${name}' 在第 ${currentLine + 1} 行未定义`);
+        reportError(ExceptionType.REFERENCE_ERROR, `变量 '${name}' 未定义`, currentLine + 1);
         return false;
     }
 
@@ -569,7 +605,7 @@ class ScopeManager {
             return;
         }
         if (!cleanAll && exceptMode === undefined) {
-            console.error("未指定清除模式");
+            reportError(ExceptionType.SYNTAX_ERROR, "未指定清除模式");
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
@@ -590,7 +626,7 @@ class ScopeManager {
             return;
         }
         else {
-            console.error("未指定清除所有变量且未指定要清除的变量");
+            reportError(ExceptionType.SYNTAX_ERROR, "未指定清除所有变量且未指定要清除的变量");
             return;
         }
     }
@@ -661,7 +697,7 @@ class Interpreter {
                 // 检查是否是函数结束标记
                 if (line === ':end') {
                     if (!inFunction) {
-                        console.error(`函数结束标记错误: 第 ${i + 1} 行发现函数结束标记, 但没有对应的函数定义`);
+                        reportError(ExceptionType.SYNTAX_ERROR, `函数结束标记错误: 发现函数结束标记, 但没有对应的函数定义`, i + 1);
                         return;
                     }
                     if (currentFunction) {
@@ -682,7 +718,7 @@ class Interpreter {
                                 }
                             }
                             if (!hasReturn) {
-                                console.error(`错误: 函数 ${currentFunction.name} 期望返回 ${currentFunction.returnType} 类型的值, 但未找到return语句 直到第 ${i + 1} 行`);
+                                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${currentFunction.name} 期望返回 ${currentFunction.returnType} 类型的值, 但未找到return语句`, i + 1);
                             }
                         } else {
                             // void函数, 检查是否有return语句
@@ -697,7 +733,7 @@ class Interpreter {
                                 }
                             }
                             if (hasReturn) {
-                                console.error(`错误: 函数 ${currentFunction.name} 期望无返回值, 但找到return语句 在第 ${returnLine + 1} 行`);
+                                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${currentFunction.name} 期望无返回值, 但找到return语句`, returnLine + 1);
                             }
                         }
                     }
@@ -707,7 +743,7 @@ class Interpreter {
                 }
                 // 检查是否是其他函数相关标记
                 if (inFunction) {
-                    console.error(`函数定义错误: 第 ${i + 1} 行发现函数内嵌套函数定义`);
+                    reportError(ExceptionType.SYNTAX_ERROR, `函数定义错误: 发现函数内嵌套函数定义`, i + 1);
                     return;
                 }
 
@@ -721,7 +757,7 @@ class Interpreter {
 
                     // 检查函数名是否符合C语言命名规则
                     if (!Interpreter.isValidIdentifier(funcName)) {
-                        console.error(`[ERROR 4] [Line ${i + 1}]命名错误: 函数名 '${funcName}' 不符合命名规则 (参考C语言规则)  在第 ${i + 1} 行`);
+                        reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 函数名 '${funcName}' 不符合命名规则 (参考C语言规则)`, i + 1);
                         return;
                     }
                     const paramsStr = funcMatch[2];
@@ -737,7 +773,7 @@ class Interpreter {
                     } else {
                         // 有返回值函数, returnVarNameOrVoid是返回值变量名, returnTypeStr是返回值类型
                         if (!returnTypeStr) {
-                            console.error(`函数返回值格式错误: 第 ${i + 1} 行, 有返回值的函数必须指定返回值类型`);
+                            reportError(ExceptionType.SYNTAX_ERROR, `函数返回值格式错误: 有返回值的函数必须指定返回值类型`, i + 1);
                             return;
                         }
                         returnType = Interpreter.getDataTypeFromString(returnTypeStr);
@@ -752,7 +788,7 @@ class Interpreter {
                         for (const paramMatch of paramMatches) {
                             const parts = paramMatch.trim().split(':');
                             if (parts.length !== 2) {
-                                console.error(`函数参数格式错误: 第 ${i + 1} 行参数 ${paramMatch} 格式不正确, 应为 "参数名:类型"`);
+                                reportError(ExceptionType.SYNTAX_ERROR, `函数参数格式错误: 参数 ${paramMatch} 格式不正确, 应为 "参数名:类型"`, i + 1);
                                 return;
                             }
                             // 解析 mut 前置关键字 (仅数组参数有意义)
@@ -765,7 +801,7 @@ class Interpreter {
                             const paramTypeStr = parts[1].trim();
                             const paramType = Interpreter.getDataTypeFromString(paramTypeStr);
                             if (isMutable && paramType !== DataType.ARRAY) {
-                                console.error(`函数参数格式错误: 第 ${i + 1} 行参数 ${paramMatch}, mut 关键字仅适用于数组类型参数`);
+                                reportError(ExceptionType.SYNTAX_ERROR, `函数参数格式错误: 参数 ${paramMatch}, mut 关键字仅适用于数组类型参数`, i + 1);
                                 return;
                             }
                             params.push({
@@ -792,7 +828,7 @@ class Interpreter {
         }
 
         if (inFunction) {
-            console.error(`函数定义错误: 程序结束时仍有未结束的函数`);
+            reportError(ExceptionType.SYNTAX_ERROR, `函数定义错误: 程序结束时仍有未结束的函数`);
         }
         debugLog(1, `扫描标签和函数定义结束`);
     }
@@ -813,7 +849,7 @@ class Interpreter {
             case 'array':
                 return DataType.ARRAY;
             default:
-                console.error(`不支持的数据类型: ${typeStr}`);
+                reportError(ExceptionType.SYNTAX_ERROR, `不支持的数据类型: ${typeStr}`);
                 return DataType.UNDEFINED;
         }
     }
@@ -1073,7 +1109,7 @@ class Interpreter {
                 }
 
                 // 未被捕获的异常: 必须对用户可见 (不受 debug 级别控制)
-                console.error(`错误: ${exception.message} (行 ${currentLinePointer + 1})`);
+                reportError(exception.type, exception.message);
                 // 根据异常类型决定继续执行还是终止
                 if (Object.values(ExceptionType).includes(exception.type)) {
                     currentLinePointer = programLines.length; // 终止执行
@@ -1103,7 +1139,7 @@ class Interpreter {
         if (cmd === 'const' && parts.length > 1) {
             const nextCmd = parts[1].toLowerCase();
             if (nextCmd === 'global' || nextCmd === 'local') {
-                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 全局/局部变量声明格式应为 "[global/local] [const] 变量名:类型 = 值"`);
+                reportError(ExceptionType.SYNTAX_ERROR, `全局/局部变量声明格式应为 "[global/local] [const] 变量名:类型 = 值"`);
                 return;
             }
         }
@@ -1116,12 +1152,12 @@ class Interpreter {
                 } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
                     // 检查parts[1]是否以const开头, 如果是则报语法错误
                     if (parts[1].toLowerCase().startsWith('const')) {
-                        console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
+                        reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
                         return;
                     }
                     Interpreter.executeGlobal(parts.slice(1).join(' '));
                 } else {
-                    console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
+                    reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
                     return;
                 }
                 break;
@@ -1132,12 +1168,12 @@ class Interpreter {
                 } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
                     // 检查parts[1]是否以const开头, 如果是则报语法错误
                     if (parts[1].toLowerCase().startsWith('const')) {
-                        console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
+                        reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
                         return;
                     }
                     Interpreter.executeLocal(parts.slice(1).join(' '));
                 } else {
-                    console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
+                    reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
                     return;
                 }
                 break;
@@ -1244,7 +1280,7 @@ class Interpreter {
         // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
         const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 全局变量声明格式应为 "global [const] 变量名:类型 = 值" 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
             return;
         }
 
@@ -1252,7 +1288,7 @@ class Interpreter {
 
         // 检查变量名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(varName)) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 命名错误: 变量名 '${varName}' 不符合命名规则`);
+            reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 变量名 '${varName}' 不符合命名规则`);
             return;
         }
         const typeStr = match[2];
@@ -1261,7 +1297,7 @@ class Interpreter {
 
         // 检查是否在代码块内
         if (CONTROL_FLOW_STACK.length !== 0) {
-            console.error(`不可在代码块内声明全局变量`);
+            reportError(ExceptionType.REFERENCE_ERROR, `不可在代码块内声明全局变量`);
             return;
         }
 
@@ -1281,7 +1317,7 @@ class Interpreter {
             ScopeManager.addVariable(varName, value, type, currentLinePointer, -1, true, isConst);
         } catch (error) {
             const exception = error as Exception;
-            debugLog(1, `${exception.message} 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `${exception.message}`);
             return;
         }
     }
@@ -1308,7 +1344,7 @@ class Interpreter {
         // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
         const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 局部变量声明格式应为 "local [const] 变量名:类型 = 值" 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
             return;
         }
 
@@ -1316,7 +1352,7 @@ class Interpreter {
 
         // 检查变量名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(varName)) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 命名错误: 变量名 '${varName}' 不符合命名规则`);
+            reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 变量名 '${varName}' 不符合命名规则`);
             return;
         }
         const typeStr = match[2];
@@ -1329,7 +1365,7 @@ class Interpreter {
         // 检查所在的代码块
         let targetEndTag: string;
         if (CONTROL_FLOW_STACK.length === 0) {
-            console.error(`不可在代码块外声明局部变量`);
+            reportError(ExceptionType.REFERENCE_ERROR, `不可在代码块外声明局部变量`);
             return;
         }
         const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -1355,7 +1391,7 @@ class Interpreter {
                 break;
             default:
                 targetEndTag = '';
-                console.error(`switch 分支 运行至 default`);
+                debugLog(1, 'switch 分支 运行至 default');
                 break;
         }
         let j = currentLinePointer + 1;
@@ -1379,7 +1415,7 @@ class Interpreter {
             const block = CONTROL_FLOW_STACK[i];
             if (block.type === 'function') break;
             if (block.type === 'for' && block.varName === varName) {
-                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 循环变量 '${varName}' 作用域内禁止声明同名变量`);
+                reportError(ExceptionType.REFERENCE_ERROR, `循环变量 '${varName}' 作用域内禁止声明同名变量`);
                 return;
             }
         }
@@ -1413,7 +1449,7 @@ class Interpreter {
             argsStr = matchWithoutResult[2];
             resultVar = undefined;
         } else {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 函数调用格式应为 "call 函数名(参数1, 参数2, ...) -> 结果变量" 或 "call 函数名(参数1, 参数2, ...)" 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `函数调用格式应为 "call 函数名(参数1, 参数2, ...) -> 结果变量" 或 "call 函数名(参数1, 参数2, ...)"`);
             return;
         }
 
@@ -1431,12 +1467,12 @@ class Interpreter {
 
         // 检查返回值变量
         if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) {
-            console.error(`错误: 函数 ${funcName} 有返回值, 但未指定结果变量 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 有返回值, 但未指定结果变量`);
             return;
         }
 
         if (resultVar !== undefined && funcInfo.returnType === DataType.UNDEFINED) {
-            console.error(`错误: 函数 ${funcName} 无返回值, 但指定了结果变量 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 无返回值, 但指定了结果变量`);
             return;
         }
 
@@ -1490,7 +1526,7 @@ class Interpreter {
         if (argsStr.trim()) {
             const argValues = splitCallArguments(argsStr);
             if (argValues.length < funcInfo.params.length) {
-                console.error(`错误: 传入函数 ${funcName} 的参数数量过少: 期望 ${funcInfo.params.length}, 实际 ${argValues.length} 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.TYPE_ERROR, `传入函数 ${funcName} 的参数数量过少: 期望 ${funcInfo.params.length}, 实际 ${argValues.length}`);
                 return;
             } else if (argValues.length > funcInfo.params.length) {
                 console.warn(`警告: 传入函数 ${funcName} 的参数多于定义, 忽略多出的传入参数`);
@@ -1505,16 +1541,16 @@ class Interpreter {
                     if (paramType === DataType.ARRAY) {
                         const arrArg = parseArrayArgument(argValues[i]);
                         if (!arrArg) {
-                            console.error(`错误: 函数 ${funcName} 参数 ${i + 1} 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)" 在第 ${currentLinePointer + 1} 行`);
+                            reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 参数 ${i + 1} 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)"`);
                             return;
                         }
                         // mut 匹配检查: 形参与实参必须一致
                         if (param.isMutable && arrArg.mode !== 'mut' && arrArg.mode !== 'copy') {
-                            console.error(`错误: 形参 ${param.name} 声明为 mut 可变引用, 实参必须使用 mut 关键字 在第 ${currentLinePointer + 1} 行`);
+                            reportError(ExceptionType.TYPE_ERROR, `形参 ${param.name} 声明为 mut 可变引用, 实参必须使用 mut 关键字`);
                             return;
                         }
                         if (!param.isMutable && arrArg.mode === 'mut') {
-                            console.error(`错误: 形参 ${param.name} 为只读引用, 实参不能使用 mut 关键字 在第 ${currentLinePointer + 1} 行`);
+                            reportError(ExceptionType.TYPE_ERROR, `形参 ${param.name} 为只读引用, 实参不能使用 mut 关键字`);
                             return;
                         }
                         args.push(arrArg);
@@ -1523,12 +1559,12 @@ class Interpreter {
                         args.push(value);
                     }
                 } catch (error) {
-                    console.error(`错误: 函数 ${funcName} 参数 ${i + 1} 类型错误 在第 ${currentLinePointer + 1} 行`);
+                    reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 参数 ${i + 1} 类型错误`);
                     return;
                 }
             }
         } else if (funcInfo.params.length > 0) {
-            console.error(`错误: 函数 ${funcName} 需要 ${funcInfo.params.length} 个参数, 但未提供 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 需要 ${funcInfo.params.length} 个参数, 但未提供`);
             return;
         }
 
@@ -1562,7 +1598,7 @@ class Interpreter {
                     try {
                         literalElements = elementStrs.map(es => inferLiteralElement(es));
                     } catch (e) {
-                        console.error(`错误: 数组字面量实参解析失败 (${(e as Error).message}) 在第 ${currentLinePointer + 1} 行`);
+                        reportError(ExceptionType.TYPE_ERROR, `数组字面量实参解析失败 (${(e as Error).message})`);
                         LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
                         return;
                     }
@@ -1587,7 +1623,7 @@ class Interpreter {
 
                 const arrVar = ScopeManager.getVariable(arrArg.name, currentLinePointer, true, arrArg.name.startsWith('global.'));
                 if (!arrVar || arrVar.type !== DataType.ARRAY) {
-                    console.error(`错误: 实参 ${arrArg.name} 不是数组类型 在第 ${currentLinePointer + 1} 行`);
+                    reportError(ExceptionType.TYPE_ERROR, `实参 ${arrArg.name} 不是数组类型`);
                     LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
                     return;
                 }
@@ -1719,7 +1755,7 @@ class Interpreter {
         // 匹配格式: arrName[arrLength]:type = {...} 或 arrName[arrLength]:type = arrfill
         const arrayMatch = params.match(/^([a-zA-Z0-9_]+)\[([^\]]+)\]:([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
         if (!arrayMatch) {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 数组声明格式应为 "array arrName[arrLength]:type = [...]" 或 "array arrName[arrLength]:type = arrfill" 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `语法错误: 数组声明格式应为 "array arrName[arrLength]:type = [...]" 或 "array arrName[arrLength]:type = arrfill"`);
             return;
         }
 
@@ -1727,7 +1763,7 @@ class Interpreter {
 
         // 检查数组名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(arrayName)) {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 命名错误: 数组名 '${arrayName}' 不符合命名规则`);
+            debugLog(1, `命名错误: 数组名 '${arrayName}' 不符合命名规则`);
             return;
         }
 
@@ -1741,12 +1777,12 @@ class Interpreter {
             // 尝试解析长度表达式 (支持数字字面量、全局常量或表达式, 如 ROWS * COLS)
             const lengthValue = Interpreter.evaluateExpression(lengthExpr);
             if (typeof lengthValue !== 'number' || !Number.isInteger(lengthValue) || lengthValue < 0) {
-                debugLog(1, `错误: 数组长度必须是非负整数 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `错误: 数组长度必须是非负整数`);
                 return;
             }
             arrayLength = lengthValue;
         } catch (error) {
-            debugLog(1, `错误: 无法解析数组长度表达式 '${lengthExpr}' 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 无法解析数组长度表达式 '${lengthExpr}'`);
             return;
         }
 
@@ -1755,13 +1791,13 @@ class Interpreter {
 
         // 检查元素类型是否有效
         if (elementType === DataType.UNDEFINED) {
-            debugLog(1, `错误: 不支持的数组元素类型 '${elementTypeStr}' 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 不支持的数组元素类型 '${elementTypeStr}'`);
             return;
         }
 
         // 检查元素类型是否为不允许的类型
         if (elementType === DataType.ARRAY) {
-            debugLog(1, `错误: 不允许声明数组的数组 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 不允许声明数组的数组`);
             return;
         }
 
@@ -1774,7 +1810,7 @@ class Interpreter {
             let fillValue: any;
             switch (elementType) {
                 case DataType.NUMBER:
-                    debugLog(1, `警告: number类型数组统一填充为0.0, 建议明确声明为int或float类型 在第 ${currentLinePointer + 1} 行`);
+                    debugLog(1, `警告: number类型数组统一填充为0.0, 建议明确声明为int或float类型`);
                     fillValue = 0.0;
                     break;
                 case DataType.INT:
@@ -1790,7 +1826,7 @@ class Interpreter {
                     fillValue = false;
                     break;
                 default:
-                    debugLog(1, `错误: 不支持的数组元素类型 '${elementTypeStr}' 在第 ${currentLinePointer + 1} 行`);
+                    debugLog(1, `错误: 不支持的数组元素类型 '${elementTypeStr}'`);
                     return;
             }
 
@@ -1815,7 +1851,7 @@ class Interpreter {
 
             // 检查元素数量是否匹配
             if (elementValues.length !== arrayLength) {
-                debugLog(1, `错误: 数组初始化元素数量(${elementValues.length})与声明长度(${arrayLength})不匹配 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `错误: 数组初始化元素数量(${elementValues.length})与声明长度(${arrayLength})不匹配`);
                 return;
             }
 
@@ -1828,12 +1864,12 @@ class Interpreter {
                         type: elementType
                     });
                 } catch (error) {
-                    debugLog(1, `错误: 无法解析数组元素[${i}]的值 '${elementValues[i]}' 在第 ${currentLinePointer + 1} 行`);
+                    debugLog(1, `错误: 无法解析数组元素[${i}]的值 '${elementValues[i]}'`);
                     return;
                 }
             }
         } else {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 数组初始化应使用 '[...]' 或 'arrfill' 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `语法错误: 数组初始化应使用 '[...]' 或 'arrfill'`);
             return;
         }
 
@@ -1869,7 +1905,7 @@ class Interpreter {
         if (isGlobal) {
             // 检查全局变量是否已存在
             if (GLOBAL_VARS.hasOwnProperty(arrayName)) {
-                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${arrayName}' 已被定义`);
+                reportError(ExceptionType.REFERENCE_ERROR, `名称 '${arrayName}' 已被定义`);
                 return;
             }
             GLOBAL_VARS[arrayName] = arrayVariable;
@@ -1877,7 +1913,7 @@ class Interpreter {
             // 检查是否在函数内
             const currentFunc = ScopeManager.getCurrentFunction(currentLinePointer);
             if (!currentFunc) {
-                debugLog(1, `错误: 不能在函数外部声明局部数组 '${arrayName}' 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `错误: 不能在函数外部声明局部数组 '${arrayName}'`);
                 return;
             }
             // 循环变量作用域内禁止声明同名数组 (doc规则2, 与普通局部变量一致)
@@ -1885,7 +1921,7 @@ class Interpreter {
                 const block = CONTROL_FLOW_STACK[i];
                 if (block.type === 'function') break;
                 if (block.type === 'for' && block.varName === arrayName) {
-                    debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 循环变量 '${arrayName}' 作用域内禁止声明同名变量`);
+                    debugLog(1, `引用错误: 循环变量 '${arrayName}' 作用域内禁止声明同名变量`);
                     return;
                 }
             }
@@ -1895,7 +1931,7 @@ class Interpreter {
                     localVar.frameId === arrayVariable.frameId &&
                     localVar.startLine === arrayVariable.startLine &&
                     localVar.endLine === arrayVariable.endLine) {
-                    debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 名称 '${arrayName}' 在相同作用域内已被定义`);
+                    debugLog(1, `引用错误: 名称 '${arrayName}' 在相同作用域内已被定义`);
                     return;
                 }
             }
@@ -1945,7 +1981,7 @@ class Interpreter {
 
         // 检查是否有返回值
         if (returnValueStr === '') {
-            console.error(`错误: return语句后必须跟一个变量 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `return语句后必须跟一个变量`);
             return;
         }
 
@@ -1956,10 +1992,10 @@ class Interpreter {
             if (block.type === 'function') {
                 const funcName = ScopeManager.getCurrentFunction(currentLinePointer);
                 if (funcName === null) {
-                    console.error(`当前返回语句所在行不在函数内`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, `当前返回语句所在行不在函数内`);
                     return;
                 } else if (funcName !== block.funcName) {
-                    console.error(`当前返回语句所在行不在控制流栈顶函数中`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, `当前返回语句所在行不在控制流栈顶函数中`);
                     return;
                 }
                 const funcInfo = FUNCTIONS[block.funcName];
@@ -1967,7 +2003,7 @@ class Interpreter {
                 // 规则: return 只能返回函数声明的返回变量
                 const defReturnVar = ScopeManager.getReturnVarName(funcInfo);
                 if (defReturnVar !== undefined && returnValueStr !== defReturnVar) {
-                    console.error(`错误: return 只能返回函数 ${block.funcName} 声明的返回变量 ${defReturnVar}, 不能返回 ${returnValueStr} 在第 ${currentLinePointer + 1} 行`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, `return 只能返回函数 ${block.funcName} 声明的返回变量 ${defReturnVar}, 不能返回 ${returnValueStr}`);
                     return;
                 }
 
@@ -1978,7 +2014,7 @@ class Interpreter {
                 if (returnVarInfo === null) {
                     // 变量不存在 → 视为无返回值
                     if (!ScopeManager.isVoidFunction(funcInfo)) {
-                        debugLog(1, `错误: 函数 ${block.funcName} 期望返回 ${funcInfo.returnType} 类型的值, 但未提供返回值 在第 ${currentLinePointer + 1} 行`);
+                        debugLog(1, `错误: 函数 ${block.funcName} 期望返回 ${funcInfo.returnType} 类型的值, 但未提供返回值`);
                         return;
                     }
                     returnValue = undefined;
@@ -2006,7 +2042,7 @@ class Interpreter {
                         RETURN_VALUES[block.funcName][defReturnVar] = returnValue;
                     }
                 } else {
-                    console.error(`函数运行时返回值与流程控制栈中的返回值名称不同`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, `函数运行时返回值与流程控制栈中的返回值名称不同`);
                     return;
                 }
                 debugLog(2, `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
@@ -2042,7 +2078,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 错误: print 无法计算表达式 '${params}' 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.TYPE_ERROR, `print 无法计算表达式 '${params}'`);
             // 如果表达式计算失败, 则返回
             return;
         }
@@ -2053,7 +2089,7 @@ class Interpreter {
         // 检查条件表达式是否用括号括起
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 条件表达式必须用括号括起 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式必须用括号括起`);
             return;
         }
 
@@ -2067,7 +2103,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
-                console.error(`类型错误: 条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.TYPE_ERROR, `条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型`);
                 return;
             }
 
@@ -2105,7 +2141,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            debugLog(1, `错误: 无效的条件表达式: ${conditionExpr} 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 无效的条件表达式: ${conditionExpr}`);
             debugLog(1, `错误详情: ${error}`);
         }
     }
@@ -2140,7 +2176,7 @@ class Interpreter {
         // 检查条件表达式是否用括号括起
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 条件表达式必须用括号括起 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `语法错误: 条件表达式必须用括号括起`);
             return;
         }
 
@@ -2157,7 +2193,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
-                debugLog(1, `类型错误: 条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `类型错误: 条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型`);
                 return;
             }
 
@@ -2216,7 +2252,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            console.error(`错误: 无效的条件表达式: ${conditionExpr} 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `无效的条件表达式: ${conditionExpr}`);
         }
         debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
     }
@@ -2250,7 +2286,7 @@ class Interpreter {
         let match = params.match(/^local\s+([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)\s*;\s*(.+)\s*;\s*(.+)$/);
 
         if (!match) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: for循环格式应为 "for (local 变量名:类型 = 初始值; 条件; 更新表达式)" 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `for循环格式应为 "for (local 变量名:类型 = 初始值; 条件; 更新表达式)"`);
             return;
         }
 
@@ -2295,7 +2331,7 @@ class Interpreter {
 
             if (conflictForStart !== null && conflictForStart !== currentLinePointer) {
                 // 循环变量作用域内禁止声明同名变量 (如内层for与外层for同名循环变量)
-                console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 引用错误: 循环变量 '${varName}' 作用域内禁止声明同名变量`);
+                reportError(ExceptionType.REFERENCE_ERROR, `循环变量 '${varName}' 作用域内禁止声明同名变量`);
                 return;
             }
 
@@ -2320,7 +2356,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof result !== 'boolean') {
-                console.error(`类型错误: 条件表达式必须返回布尔值, 但实际返回了 ${typeof result} 类型 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.TYPE_ERROR, `条件表达式必须返回布尔值, 但实际返回了 ${typeof result} 类型`);
                 return;
             }
 
@@ -2394,7 +2430,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            // console.error(`错误: for循环初始化失败 在第 ${currentLinePointer + 1} 行`);
+            // console.error(`错误: for循环初始化失败`);
             throw { type: ExceptionType.LOOP_INIT_ERROR, message: `for循环初始化失败 在第 ${currentLinePointer + 1} 行` } as Exception;
         }
         debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
@@ -2425,7 +2461,7 @@ class Interpreter {
                 if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                     throw error;
                 }
-                // console.error(`错误: for循环更新表达式执行失败 在第 ${currentLinePointer + 1} 行`);
+                // console.error(`错误: for循环更新表达式执行失败`);
                 // 跳过循环
                 throw { type: ExceptionType.LOOP_UPDATE_ERROR, message: `for循环更新表达式执行失败 在第 ${currentLinePointer + 1} 行` } as Exception;
             }
@@ -2436,7 +2472,7 @@ class Interpreter {
     static executeBreak(): void {
         // 1. 检查是否在合法的控制块内
         if (CONTROL_FLOW_STACK.length === 0) {
-            console.error(`[ERROR] break语句不在循环或switch内`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `break语句不在循环或switch内`);
             return;
         }
 
@@ -2459,7 +2495,7 @@ class Interpreter {
                         CONTROL_FLOW_BROKEN_BLOCK_STACK.push(block);
                         break;
                     default:
-                        console.error(`[ERROR] 不支持的break上下文`);
+                        reportError(ExceptionType.UNKNOWN_ERROR, `不支持的break上下文`);
                         return;
                 }
                 debugLog(2, `跳转目标: ${targetEndTag}`);
@@ -2486,7 +2522,7 @@ class Interpreter {
 
                     i++;
                 }
-                console.error(`[ERROR] 未找到匹配的${targetEndTag}`);
+                reportError(ExceptionType.SYNTAX_ERROR, `未找到匹配的${targetEndTag}`);
             } else {
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
@@ -2498,7 +2534,7 @@ class Interpreter {
     static executeContinue(): void {
         // 1. 检查是否在合法的控制块内
         if (CONTROL_FLOW_STACK.length === 0) {
-            console.error(`[ERROR] continue语句不在循环内`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `continue语句不在循环内`);
             return;
         }
 
@@ -2517,7 +2553,7 @@ class Interpreter {
                         targetEndTag = 'endwhl';
                         break;
                     default:
-                        console.error(`[ERROR] 不支持的continue上下文`);
+                        reportError(ExceptionType.UNKNOWN_ERROR, `不支持的continue上下文`);
                         return;
                 }
                 debugLog(2, `跳转目标: ${targetEndTag}`);
@@ -2543,7 +2579,7 @@ class Interpreter {
 
                     i++;
                 }
-                console.error(`[ERROR] 未找到匹配的${targetEndTag}`);
+                reportError(ExceptionType.SYNTAX_ERROR, `未找到匹配的${targetEndTag}`);
             } else {
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
@@ -2551,7 +2587,7 @@ class Interpreter {
         }
 
         // 如果没有找到循环, 输出错误信息
-        console.error(`[ERROR] continue语句不在循环内`);
+        reportError(ExceptionType.UNKNOWN_ERROR, `continue语句不在循环内`);
     }
 
     // 执行try语句
@@ -2595,7 +2631,7 @@ class Interpreter {
         // 解析catch参数, 格式为 (Exception ErrorName)
         const match = params.match(/^\(\s*Exception\s+([a-zA-Z0-9_]+)\s*\)$/);
         if (!match) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: catch语句格式应为 "catch (Exception ErrorName)" 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `catch语句格式应为 "catch (Exception ErrorName)"`);
             return;
         }
 
@@ -2666,7 +2702,7 @@ class Interpreter {
         }
 
         // 情况三: 没有匹配的try块
-        console.error(`错误: catch语句没有匹配的try块 在第 ${currentLinePointer + 1} 行`);
+        reportError(ExceptionType.UNKNOWN_ERROR, `catch语句没有匹配的try块`);
         // 跳过catch块
         let nestedLevel = 1;
         let i = currentLinePointer + 1;
@@ -2716,7 +2752,7 @@ class Interpreter {
         // endasrt
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 断言表达式必须用括号括起 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `断言表达式必须用括号括起`);
             return;
         }
 
@@ -2732,7 +2768,7 @@ class Interpreter {
 
                 // 检查消息是否用引号括起
                 if (!messageLine.startsWith('"') || !messageLine.endsWith('"')) {
-                    console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: 断言消息必须用双引号括起 在第 ${currentLinePointer + 1} 行`);
+                    reportError(ExceptionType.SYNTAX_ERROR, `断言消息必须用双引号括起`);
                     return;
                 }
 
@@ -2745,7 +2781,7 @@ class Interpreter {
                     lineNumber: currentLinePointer
                 } as Exception;
             } else {
-                debugLog(1, `断言条件为真: ${conditionExpr} 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `断言条件为真: ${conditionExpr}`);
                 // 跳过断言体
                 currentLinePointer += 2;
             }
@@ -2754,7 +2790,7 @@ class Interpreter {
                 // 断言失败: 抛出异常交由主循环处理 (可被try-catch捕获; 未捕获时由主循环console.error输出并终止)
                 throw error;
             } else {
-                console.error(`错误: 断言条件无效: ${conditionExpr} 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.SYNTAX_ERROR, `断言条件无效: ${conditionExpr}`);
             }
         }
     }
@@ -2772,11 +2808,11 @@ class Interpreter {
             if (typeof condition === 'number') {
                 // 严格检查是否为整数
                 if (!Number.isInteger(condition)) {
-                    console.error(`类型错误: switch语句的条件表达式只能是int或string类型, 数字必须为整数 在第 ${currentLinePointer + 1} 行`);
+                    reportError(ExceptionType.TYPE_ERROR, `switch语句的条件表达式只能是int或string类型, 数字必须为整数`);
                     typeError = true;
                 }
             } else if (typeof condition !== 'string') {
-                console.error(`类型错误: switch语句的条件表达式只能是int或string类型 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.TYPE_ERROR, `switch语句的条件表达式只能是int或string类型`);
                 typeError = true;
             }
 
@@ -2811,7 +2847,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            debugLog(1, `错误: 无效的switch条件表达式: ${params} 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 无效的switch条件表达式: ${params}`);
         }
     }
 
@@ -2820,7 +2856,7 @@ class Interpreter {
         debugLog(1, `处理 case 语句`);
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            console.error(`[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: case语句必须在switch块内使用 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `case语句必须在switch块内使用`);
             return;
         }
 
@@ -2864,7 +2900,7 @@ class Interpreter {
 
             // 检查类型是否与switch条件类型匹配
             if (switchInfo.type === 'switch' && typeof caseValue !== typeof switchInfo.condition) {
-                debugLog(1, `类型错误: case值的类型必须与switch条件类型相同 在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, `类型错误: case值的类型必须与switch条件类型相同`);
                 // throw {
                 //     type: ExceptionType.TYPE_ERROR,
                 //     message: `类型错误: case值的类型必须与switch条件类型相同 在第 ${currentLinePointer + 1} 行`,
@@ -2906,7 +2942,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            debugLog(1, `错误: 无效的case值: ${params} 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `错误: 无效的case值: ${params}`);
         }
     }
 
@@ -2914,7 +2950,7 @@ class Interpreter {
     static executeDefault(): void {
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: default语句必须在switch块内使用 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `语法错误: default语句必须在switch块内使用`);
             return;
         }
 
@@ -2956,7 +2992,7 @@ class Interpreter {
     static executeEndSwitch(): void {
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            debugLog(1, `[ERROR 4] [Line ${currentLinePointer + 1}] 语法错误: endswc语句必须在switch块内使用 在第 ${currentLinePointer + 1} 行`);
+            debugLog(1, `语法错误: endswc语句必须在switch块内使用`);
             return;
         }
 
@@ -2970,7 +3006,7 @@ class Interpreter {
         // 1. 格式校验
         const match = params.match(/^\(([^)]+)\)\s*:\s*([a-zA-Z_]\w*)$/);
         if (!match) {
-            console.error(`错误: 必须使用 jump (condition) :标签名 格式 (标签需以字母/下划线开头)  在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `必须使用 jump (condition) :标签名 格式 (标签需以字母/下划线开头)`);
             return;
         }
 
@@ -2979,7 +3015,7 @@ class Interpreter {
         const tagName = match[2].trim();
 
         if (!conditionExpr) {
-            console.error(`错误: 条件表达式不能为空 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式不能为空`);
             return;
         }
 
@@ -2991,7 +3027,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            console.error(`错误: 条件表达式无效: ${conditionExpr} 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式无效: ${conditionExpr}`);
             return;
         }
 
@@ -3003,7 +3039,7 @@ class Interpreter {
 
         // 4. 标签跳转 (仅支持标签, 不再检查行号) 
         if (TAGS[tagName] === undefined) {
-            console.error(`错误: 未定义的标签: ${tagName} 在第 ${currentLinePointer + 1} 行`);
+            reportError(ExceptionType.REFERENCE_ERROR, `未定义的标签: ${tagName}`);
             return;
         }
 
@@ -3206,7 +3242,7 @@ class Interpreter {
             const beforeExcept = match[1].trim().split(/\s+/);
             const afterExcept = match[2].trim().split(/\s+/);
             if (beforeExcept.length !== 1 || beforeExcept[0] !== 'all') {
-                console.error(`except关键字必须正确配合all关键字使用 在第 ${currentLinePointer + 1} 行`);
+                reportError(ExceptionType.SYNTAX_ERROR, `except关键字必须正确配合all关键字使用`);
                 return;
             } else if (beforeExcept.length === 1 && beforeExcept[0] === 'all') {
                 debugLog(1, `要排除的变量: ${afterExcept}`);
@@ -3268,7 +3304,7 @@ class Interpreter {
                 debugLog(1, `变量清除完成`);
             }
             else {
-                console.error(`函数外不可声明局部变量, 若要清除全局变量请用global关键字`);
+                reportError(ExceptionType.SYNTAX_ERROR, `函数外不可声明局部变量, 若要清除全局变量请用global关键字`);
             }
         }
     }
@@ -3276,7 +3312,7 @@ class Interpreter {
     // 执行遇到没有return语句的函数的善后工作
     static executeFunctionEndTag(): void {
         if (CONTROL_FLOW_STACK.length === 0) {
-            console.error(`检测到单独的的函数闭合标记`);
+            reportError(ExceptionType.SYNTAX_ERROR, `检测到单独的的函数闭合标记`);
             return;
         } else {
             const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -3297,7 +3333,7 @@ class Interpreter {
                     return;
                 }
             } else {
-                console.error(`未知的函数闭合标记`);
+                reportError(ExceptionType.SYNTAX_ERROR, `未知的函数闭合标记`);
                 return;
             }
         }
@@ -4182,11 +4218,11 @@ function main() {
             Interpreter.loadProgram(code);
             Interpreter.run();
         } catch (error) {
-            console.error(`错误: 无法读取文件 '${filename}': 未知错误类型 - ${error instanceof Error ? error.message : String(error)}`);
+            reportError(ExceptionType.UNKNOWN_ERROR, `无法读取文件 '${filename}': 未知错误类型 - ${error instanceof Error ? error.message : String(error)}`, 0);
             process.exit(1);
         }
     } else {
-        console.error('此脚本需要在Node.js环境中运行以支持文件读取');
+        reportError(ExceptionType.UNKNOWN_ERROR, '此脚本需要在Node.js环境中运行以支持文件读取');
     }
 }
 
@@ -4214,7 +4250,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                 }
                 delete RETURN_VALUES[funcName];
                 if (!arrStruct || arrStruct.type !== DataType.ARRAY || !arrStruct.arrayElements) {
-                    console.error(`错误: 函数 ${funcName} 未返回有效的数组值 在第 ${oldLinePointer + 1} 行`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 未返回有效的数组值`, oldLinePointer + 1);
                     return;
                 }
                 if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
@@ -4242,11 +4278,11 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         existing.isReadonlyArray = arrStruct.isReadonlyArray;
                         debugLog(2, `数组返回值绑定到已有数组变量 ${resultVar}`);
                     } else {
-                        console.error(`错误: 结果变量 ${resultVar} 不是数组类型, 无法接收数组返回值`);
+                        reportError(ExceptionType.TYPE_ERROR, `结果变量 ${resultVar} 不是数组类型, 无法接收数组返回值`);
                     }
                 }
             } else {
-                console.error(`错误: 函数 ${funcName} 未返回数组值 在第 ${oldLinePointer + 1} 行`);
+                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 未返回数组值`, oldLinePointer + 1);
             }
             return;
         }
