@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.2.0";
+const NSIVersion: string = "2.3.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -205,17 +205,421 @@ const ERROR_NAMES: { [key in ExceptionType]: string } = {
     [ExceptionType.CATCH_BLOCK]: 'Catch块'
 };
 
-// 统一错误报告入口: 输出格式为 "[ERROR N] [行 X] 类型: 消息"
+// ========== 国际化 (i18n) ==========
+// 当前输出语言: 'zh' (中文, 默认) 或 'en' (英文)。通过命令行 --lang en|zh 切换。
+var LANG: 'zh' | 'en' = 'zh';
+
+// 错误类型英文名 (英文输出时使用, 与中文 ERROR_NAMES 对应)
+const ERROR_NAMES_EN: { [key in ExceptionType]: string } = {
+    [ExceptionType.SYNTAX_ERROR]: 'SyntaxError',
+    [ExceptionType.TYPE_ERROR]: 'TypeError',
+    [ExceptionType.REFERENCE_ERROR]: 'ReferenceError',
+    [ExceptionType.RANGE_ERROR]: 'RangeError',
+    [ExceptionType.ASSERTION_ERROR]: 'AssertionError',
+    [ExceptionType.UNKNOWN_ERROR]: 'Error',
+    [ExceptionType.LOOP_INIT_ERROR]: 'LoopInitError',
+    [ExceptionType.LOOP_UPDATE_ERROR]: 'LoopUpdateError',
+    [ExceptionType.TRY_BLOCK]: 'TryBlock',
+    [ExceptionType.CATCH_BLOCK]: 'CatchBlock'
+};
+
+// 语言包: 消息模板键 → 各语言文本。占位符使用 {name} 形式, 由 t() 填充。
+// 新增语言时只需在此增加一个语言包条目 (l10n 友好), 无需改动业务代码。
+const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
+    zh: {
+        // 错误/警告/提示消息的简体中文文案 (占位符 {name} 由 t() 替换)
+        cli_usage: '用法: node noethingScript-Interpreter.js <文件名>',
+        cli_no_debug_level: '未指定调试参数等级, 初始化默认为 0',
+        cli_invalid_lang: '无效的语言参数, 仅支持 en 或 zh, 已保持默认中文',
+        cli_cannot_read: '[错误] 无法读取文件 \'{filename}\': {error}',
+        cli_node_required: '[错误] 此脚本需要在Node.js环境中运行以支持文件读取',
+        internal_error: '[内部错误] [行 {line}] 解释器内部发生错误: {message}',
+        internal_error_hint: '   这不是脚本本身的错误, 属于解释器缺陷, 请向开发者反馈',
+
+        // ===== 脚本运行期错误/警告消息 (由 t() 填充 {name} 占位符) =====
+        // 变量声明/赋值
+        assign_type_mismatch: '不能将值 \'{value}\' 赋值给变量 \'{name}\', 类型为 \'{type}\'',
+        name_already_defined: '名称 \'{name}\' 已被定义',
+        name_defined_same_scope: '名称 \'{name}\' 在相同作用域内已被定义',
+        var_declared_uninitialized: '变量 \'{name}\' 声明但未初始化',
+        const_assignment_forbidden: '不能将常量 \'{name}\' 赋值',
+        var_undefined: '变量 \'{name}\' 未定义',
+        var_decl_global_local_format: '全局/局部变量声明格式应为 "[global/local] [const] 变量名:类型 = 值"',
+        var_decl_global_format: '全局变量声明格式应为 "global [const] 变量名:类型 = 值"',
+        var_decl_local_format: '局部变量声明格式应为 "local [const] 变量名:类型 = 值"',
+        var_name_invalid: '命名错误: 变量名 \'{name}\' 不符合命名规则',
+        global_var_in_block: '不可在代码块内声明全局变量',
+        local_var_outside_block: '不可在代码块外声明局部变量',
+        type_conversion_failed: '类型转换失败: 无法将值\'{value}\'转换为{type}类型',
+        loop_var_shadow_forbidden: '循环变量 \'{name}\' 作用域内禁止声明同名变量',
+        var_undefined_scope: '未定义的{scope}变量 {name}',
+        var_undefined_expr_global: '未定义的全局变量 {name}',
+        var_undefined_expr_local: '未定义的变量 {name}',
+        expr_null_not_allowed: '表达式中出现 null 值, 不被允许',
+        expr_undefined_not_allowed: '表达式中出现 undefined 值, 不被允许',
+        var_value_undefined: '变量 {name} 的值为 undefined, 不能被使用',
+        loop_var_readonly: '循环变量 {name} 是只读的, 禁止修改',
+        // 清除 (purge)
+        purge_mode_not_specified: '未指定清除模式',
+        purge_scope_no_except: '作用域清除模式不支持排除方法',
+        purge_target_not_specified: '未指定清除所有变量且未指定要清除的变量',
+        purge_local_outside_func: '函数外不可声明局部变量, 若要清除全局变量请用global关键字',
+        except_format_error: 'except关键字使用格式错误',
+        except_requires_all: 'except关键字必须正确配合all关键字使用',
+        except_requires_var: 'except关键字必须配合变量使用',
+        except_local_only: 'except关键字仅适用于局部变量',
+        // 函数定义/调用
+        func_end_without_def: '函数结束标记错误: 发现函数结束标记, 但没有对应的函数定义',
+        func_no_return_stmt: '函数 {name} 期望返回 {type} 类型的值, 但未找到return语句',
+        func_unexpected_return: '函数 {name} 期望无返回值, 但找到return语句',
+        func_nested_def: '函数定义错误: 发现函数内嵌套函数定义',
+        func_name_invalid: '命名错误: 函数名 \'{name}\' 不符合命名规则 (参考C语言规则)',
+        func_return_type_required: '函数返回值格式错误: 有返回值的函数必须指定返回值类型',
+        func_param_format: '函数参数格式错误: 参数 {param} 格式不正确, 应为 "参数名:类型"',
+        func_param_mut_array_only: '函数参数格式错误: 参数 {param}, mut 关键字仅适用于数组类型参数',
+        func_unclosed_at_eof: '函数定义错误: 程序结束时仍有未结束的函数',
+        unsupported_data_type: '不支持的数据类型: {type}',
+        func_undefined: '函数 \'{name}\' 未定义',
+        func_result_var_missing: '函数 {name} 有返回值, 但未指定结果变量',
+        func_result_var_unexpected: '函数 {name} 无返回值, 但指定了结果变量',
+        func_arg_count_insufficient: '传入函数 {name} 的参数数量过少: 期望 {expected}, 实际 {actual}',
+        func_extra_args_ignored: '传入函数 {name} 的参数多于定义, 忽略多出的传入参数',
+        func_array_arg_format: '函数 {name} 参数 {argIndex} 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)"',
+        func_mut_param_requires_mut: '形参 {name} 声明为 mut 可变引用, 实参必须使用 mut 关键字',
+        func_readonly_param_no_mut: '形参 {name} 为只读引用, 实参不能使用 mut 关键字',
+        func_arg_type_error: '函数 {name} 参数 {argIndex} 类型错误',
+        func_arg_count_missing: '函数 {name} 需要 {expected} 个参数, 但未提供',
+        call_format: '函数调用格式应为 "call 函数名(参数1, 参数2, ...) -> 结果变量" 或 "call 函数名(参数1, 参数2, ...)"',
+        // 类型/值解析
+        type_mismatch_str: '类型不匹配: 期望 {expected}, 实际是字符串',
+        type_mismatch_bool: '类型不匹配: 期望 {expected}, 实际是布尔值',
+        type_mismatch_int: '类型不匹配: 期望整数, 实际是 {value}',
+        type_mismatch_num: '类型不匹配: 期望 {expected}, 实际是数字',
+        type_mismatch_var_type: '类型不匹配: 期望 {expected}, 实际是 {actual}',
+        type_mismatch_expr_result: '类型不匹配: 期望 {expected}, 表达式 \'{expr}\' 求值结果类型不符',
+        value_unresolvable: '无法解析值: {value}',
+        init_expr_no_var_call: '声明初始化仅允许字面量表达式, 不允许使用变量或函数调用 \'{name}\' (请先声明后赋值)',
+        init_literal_only: '声明初始化仅允许字面量, 不允许使用变量或函数调用 \'{expr}\' (请先声明后赋值)',
+        // 数组
+        array_decl_format: '数组声明格式应为 "array arrName[arrLength]:type = [...]" 或 "array arrName[arrLength]:type = arrfill"',
+        array_name_invalid: '命名错误: 数组名 \'{name}\' 不符合命名规则',
+        array_length_non_negative: '数组长度必须是非负整数',
+        array_length_expr_unresolvable: '无法解析数组长度表达式 \'{expr}\'',
+        array_element_type_unsupported: '不支持的数组元素类型 \'{type}\'',
+        array_of_array_forbidden: '不允许声明数组的数组',
+        array_number_fill_0: 'number类型数组统一填充为0.0, 建议明确声明为int或float类型',
+        array_init_count_mismatch: '数组初始化元素数量({actual})与声明长度({expected})不匹配',
+        array_element_unresolvable: '无法解析数组元素[{index}]的值 \'{value}\'',
+        array_init_format: '数组初始化应使用 \'[...]\' 或 \'arrfill\'',
+        local_array_outside_func: '不能在函数外部声明局部数组 \'{name}\'',
+        array_literal_element_unresolvable: '数组字面量元素无法解析: {value}',
+        array_literal_arg_parse_failed: '数组字面量实参解析失败 ({error})',
+        arr_arg_not_array: '实参 {name} 不是数组类型',
+        array_undefined: '未定义的数组: {name}',
+        not_array_type: '该 {name} 不是数组类型',
+        const_array_assignment: '数组 {name} 是常量数组, 不能被赋值',
+        readonly_array_assignment: '数组 {name} 是只读引用, 不能被赋值',
+        arr_index_out_of_range: '范围错误: 数组索引 {index} 超出范围, 数组长度为 {length}',
+        array_element_type_mismatch: '数组元素类型错误: 期望 {expected} 类型, 实际 {actual}',
+        const_array_whole_assignment: '常量数组 {name} 不能被整体赋值',
+        readonly_array_whole_assignment: '数组 {name} 是只读引用, 不能被整体赋值',
+        // return / print
+        return_requires_var: 'return语句后必须跟一个变量',
+        return_outside_function: '当前返回语句所在行不在函数内',
+        return_stack_top_mismatch: '当前返回语句所在行不在控制流栈顶函数中',
+        return_var_mismatch: 'return 只能返回函数 {funcName} 声明的返回变量 {defReturnVar}, 不能返回 {returnValue}',
+        func_return_value_missing: '函数 {name} 期望返回 {type} 类型的值, 但未提供返回值',
+        func_reached_end_no_return: '函数 {name} 期望返回 {type} 类型的值, 但最终执行到函数结束标记',
+        return_value_name_mismatch: '函数运行时返回值与流程控制栈中的返回值名称不同',
+        print_expr_failed: 'print 无法计算表达式 \'{expr}\'',
+        // 条件表达式 / if / while / for
+        cond_need_parentheses: '条件表达式必须用括号括起',
+        cond_must_be_bool: '条件表达式必须返回布尔值, 但实际返回了 {actualType} 类型',
+        cond_invalid: '无效的条件表达式: {expr}',
+        for_format: 'for循环格式应为 "for (local 变量名:类型 = 初始值; 条件; 更新表达式)"',
+        for_init_failed: 'for循环初始化失败',
+        for_update_failed: 'for循环更新表达式执行失败',
+        // break / continue
+        break_outside_loop_switch: 'break语句不在循环或switch内',
+        break_context_unsupported: '不支持的break上下文',
+        continue_outside_loop: 'continue语句不在循环内',
+        continue_context_unsupported: '不支持的continue上下文',
+        matching_end_tag_not_found: '未找到匹配的{tag}',
+        // try / catch
+        catch_format: 'catch语句格式应为 "catch (Exception ErrorName)"',
+        catch_no_try: 'catch语句没有匹配的try块',
+        // assert
+        assert_need_parentheses: '断言表达式必须用括号括起',
+        assert_message_quoted: '断言消息必须用双引号括起',
+        assert_condition_invalid: '断言条件无效: {expr}',
+        // switch / case
+        switch_cond_int_only: 'switch语句的条件表达式只能是int或string类型, 数字必须为整数',
+        switch_cond_type: 'switch语句的条件表达式只能是int或string类型',
+        switch_cond_invalid: '无效的switch条件表达式: {expr}',
+        case_outside_switch: 'case语句必须在switch块内使用',
+        case_type_mismatch: 'case值的类型必须与switch条件类型相同',
+        case_value_invalid: '无效的case值: {expr}',
+        default_outside_switch: 'default语句必须在switch块内使用',
+        endswc_outside_switch: 'endswc语句必须在switch块内使用',
+        // jump
+        jump_format: '必须使用 jump (condition) :标签名 格式 (标签需以字母/下划线开头)',
+        cond_expr_empty: '条件表达式不能为空',
+        cond_expr_invalid: '条件表达式无效: {expr}',
+        tag_undefined: '未定义的标签: {name}',
+        // 函数闭合标记
+        stray_func_end_tag: '检测到单独的的函数闭合标记',
+        unknown_func_end_tag: '未知的函数闭合标记',
+        // 其他
+        execute_operation_failed: '无法执行操作 \'{command}\': {error}',
+        // 表达式求值 (ExpressionEvaluator)
+        expr_eval_error: '计算表达式时出错 \'{expr}\': {inner}',
+        unexpected_token_after_parse: '意外的标记在处理令牌阶段: {token}',
+        unexpected_char: '意外的字符: {char} 位置 {pos}',
+        assignment_op_in_call_context: '赋值运算符应在调用上下文中处理 在 {pos} 位置',
+        expr_unexpected_end: '表达式意外结束 第 {pos} 个标记',
+        missing_right_paren: '缺少右括号 位置 {pos}',
+        unexpected_token_primary: '意外的标记在解析基本元素阶段: {token} 位置 {pos}',
+        array_index_not_number: '数组索引必须是数字类型 位置 {pos}',
+        array_index_not_nonneg_int: '数组索引必须是非负整数 位置 {pos}',
+        array_missing_right_bracket: '数组访问缺少右方括号: {name} 位置 {pos}',
+        array_var_not_array: '变量 \'{name}\' 不是数组类型 位置 {pos}',
+        array_index_out_of_range_access: '数组索引越界: 索引 {index} 超出数组 \'{name}\' 的范围 [0, {max}] 位置 {pos}',
+        array_element_access_error: '数组元素访问错误: 无法访问数组 \'{name}\' 的元素 {index} 位置 {pos}',
+        invalid_assignment_target: '无效的赋值目标 位置 {pos}',
+        func_call_missing_right_paren: '函数调用缺少右括号: {name} 位置 {pos}',
+        func_needs_1_arg: '{func} 需要 1 个参数',
+        func_needs_2_args: '{func} 需要 2 个参数',
+        func_no_arg_expected: '{func} 不需要参数',
+        len_only_str_or_array: 'len 只能用于字符串或数组',
+        copy_arg_must_be_array: 'copy 参数必须是数组类型',
+        unknown_function: '未知函数: {name} 位置 {pos}',
+        op_left_operand_not_number: '运算符 {op} 要求左操作数是数字类型',
+        op_right_operand_not_number: '运算符 {op} 要求右操作数是数字类型',
+        logic_op_left_operand_not_bool: '逻辑运算符 {op} 要求左操作数是布尔类型',
+        logic_op_right_operand_not_bool: '逻辑运算符 {op} 要求右操作数是布尔类型',
+        division_by_zero: '除零错误',
+        unknown_operator: '未知操作符: {op} 位置 {pos}',
+        unknown_unary_operator: '未知一元操作符: {op} 位置 {pos}',
+        // 数组返回值绑定 (handleReturnValueAssignment)
+        func_no_valid_array_return: '函数 {name} 未返回有效的数组值',
+        result_var_not_array: '结果变量 {name} 不是数组类型, 无法接收数组返回值',
+        func_no_array_return: '函数 {name} 未返回数组值'
+    },
+    en: {
+        // English messages. Placeholders {name} are filled by t().
+        cli_usage: 'Usage: node noethingScript-Interpreter.js <filename>',
+        cli_no_debug_level: 'Debug level not specified, defaulting to 0',
+        cli_invalid_lang: 'Invalid language, only en or zh are supported, keeping default zh',
+        cli_cannot_read: '[Error] Cannot read file \'{filename}\': {error}',
+        cli_node_required: '[Error] This script needs a Node.js environment to support file reading',
+        internal_error: '[Internal Error] [Line {line}] Interpreter internal error: {message}',
+        internal_error_hint: '   This is NOT a script error. It is an interpreter defect, please report it to the developer.',
+
+        // ===== Script runtime error/warning messages (placeholders {name} filled by t()) =====
+        // Variable declaration/assignment
+        assign_type_mismatch: 'Cannot assign value \'{value}\' to variable \'{name}\', type is \'{type}\'',
+        name_already_defined: 'Name \'{name}\' is already defined',
+        name_defined_same_scope: 'Name \'{name}\' is already defined in the same scope',
+        var_declared_uninitialized: 'Variable \'{name}\' is declared but not initialized',
+        const_assignment_forbidden: 'Cannot assign to constant \'{name}\'',
+        var_undefined: 'Variable \'{name}\' is not defined',
+        var_decl_global_local_format: 'Global/local variable declaration should be "[global/local] [const] name:type = value"',
+        var_decl_global_format: 'Global variable declaration should be "global [const] name:type = value"',
+        var_decl_local_format: 'Local variable declaration should be "local [const] name:type = value"',
+        var_name_invalid: 'Naming error: variable name \'{name}\' does not follow naming rules',
+        global_var_in_block: 'Global variables cannot be declared inside a code block',
+        local_var_outside_block: 'Local variables cannot be declared outside a code block',
+        type_conversion_failed: 'Type conversion failed: cannot convert value \'{value}\' to type {type}',
+        loop_var_shadow_forbidden: 'Declaring a variable with the same name \'{name}\' as a loop variable is forbidden in its scope',
+        var_undefined_scope: 'Undefined {scope} variable \'{name}\'',
+        var_undefined_expr_global: 'Undefined global variable \'{name}\'',
+        var_undefined_expr_local: 'Undefined variable \'{name}\'',
+        expr_null_not_allowed: 'null value is not allowed in expression',
+        expr_undefined_not_allowed: 'undefined value is not allowed in expression',
+        var_value_undefined: 'Variable \'{name}\' has the value undefined and cannot be used',
+        loop_var_readonly: 'Loop variable {name} is readonly and cannot be modified',
+        // Purge
+        purge_mode_not_specified: 'No purge mode specified',
+        purge_scope_no_except: 'Scope purge mode does not support the except clause',
+        purge_target_not_specified: 'Neither "purge all" nor a target variable was specified',
+        purge_local_outside_func: 'Local variables cannot be declared outside a function; use the global keyword to purge global variables',
+        except_format_error: 'Incorrect usage of the except keyword',
+        except_requires_all: 'The except keyword must be used together with the all keyword',
+        except_requires_var: 'The except keyword must be used with a variable',
+        except_local_only: 'The except keyword only applies to local variables',
+        // Function definition/call
+        func_end_without_def: 'Function end tag error: found an end tag without a matching function definition',
+        func_no_return_stmt: 'Function {name} expects a value of type {type} but no return statement was found',
+        func_unexpected_return: 'Function {name} expects no return value but a return statement was found',
+        func_nested_def: 'Function definition error: nested function definitions are not allowed',
+        func_name_invalid: 'Naming error: function name \'{name}\' does not follow naming rules (C language rules)',
+        func_return_type_required: 'Function return value format error: functions with a return value must specify a return type',
+        func_param_format: 'Function parameter format error: parameter {param} is invalid, expected "name:type"',
+        func_param_mut_array_only: 'Function parameter format error: parameter {param}, the mut keyword only applies to array parameters',
+        func_unclosed_at_eof: 'Function definition error: an unclosed function remains at the end of the program',
+        unsupported_data_type: 'Unsupported data type: {type}',
+        func_undefined: 'Function \'{name}\' is not defined',
+        func_result_var_missing: 'Function {name} has a return value but no result variable was specified',
+        func_result_var_unexpected: 'Function {name} has no return value but a result variable was specified',
+        func_arg_count_insufficient: 'Too few arguments passed to function {name}: expected {expected}, got {actual}',
+        func_extra_args_ignored: 'More arguments passed to function {name} than defined; extra arguments are ignored',
+        func_array_arg_format: 'Function {name} argument {argIndex} has an invalid array argument format; expected "arrayName", "mut arrayName" or "copy(arrayName)"',
+        func_mut_param_requires_mut: 'Parameter {name} is declared as a mutable reference (mut); the argument must use the mut keyword',
+        func_readonly_param_no_mut: 'Parameter {name} is a readonly reference; the argument cannot use the mut keyword',
+        func_arg_type_error: 'Function {name} argument {argIndex} has a type error',
+        func_arg_count_missing: 'Function {name} requires {expected} arguments but none were provided',
+        call_format: 'Function call should be "call funcName(arg1, arg2, ...) -> resultVar" or "call funcName(arg1, arg2, ...)"',
+        // Type/value resolution
+        type_mismatch_str: 'Type mismatch: expected {expected} but got a string',
+        type_mismatch_bool: 'Type mismatch: expected {expected} but got a boolean',
+        type_mismatch_int: 'Type mismatch: expected an integer but got {value}',
+        type_mismatch_num: 'Type mismatch: expected {expected} but got a number',
+        type_mismatch_var_type: 'Type mismatch: expected {expected} but got {actual}',
+        type_mismatch_expr_result: 'Type mismatch: expected {expected}, the result of expression \'{expr}\' has an incompatible type',
+        value_unresolvable: 'Cannot resolve value: {value}',
+        init_expr_no_var_call: 'Initialization only allows literal expressions; variables or function calls are not allowed \'{name}\' (declare first, then assign)',
+        init_literal_only: 'Initialization only allows literals; variables or function calls are not allowed \'{expr}\' (declare first, then assign)',
+        // Arrays
+        array_decl_format: 'Array declaration should be "array arrName[arrLength]:type = [...]" or "array arrName[arrLength]:type = arrfill"',
+        array_name_invalid: 'Naming error: array name \'{name}\' does not follow naming rules',
+        array_length_non_negative: 'Array length must be a non-negative integer',
+        array_length_expr_unresolvable: 'Cannot resolve array length expression \'{expr}\'',
+        array_element_type_unsupported: 'Unsupported array element type \'{type}\'',
+        array_of_array_forbidden: 'Arrays of arrays are not allowed',
+        array_number_fill_0: 'number arrays are uniformly filled with 0.0; declaring int or float explicitly is recommended',
+        array_init_count_mismatch: 'Array initializer element count ({actual}) does not match the declared length ({expected})',
+        array_element_unresolvable: 'Cannot resolve value \'{value}\' of array element [{index}]',
+        array_init_format: 'Array initialization should use \'[...]\' or \'arrfill\'',
+        local_array_outside_func: 'Local arrays cannot be declared outside a function',
+        array_literal_element_unresolvable: 'Cannot resolve array literal element: {value}',
+        array_literal_arg_parse_failed: 'Array literal argument parse failed ({error})',
+        arr_arg_not_array: 'Argument {name} is not an array type',
+        array_undefined: 'Undefined array: {name}',
+        not_array_type: '{name} is not an array type',
+        const_array_assignment: 'Array {name} is a constant array and cannot be assigned',
+        readonly_array_assignment: 'Array {name} is a readonly reference and cannot be assigned',
+        arr_index_out_of_range: 'Range error: array index {index} out of range, array length is {length}',
+        array_element_type_mismatch: 'Array element type error: expected {expected} type but got {actual}',
+        const_array_whole_assignment: 'Constant array {name} cannot be assigned as a whole',
+        readonly_array_whole_assignment: 'Array {name} is a readonly reference and cannot be assigned as a whole',
+        // return / print
+        return_requires_var: 'The return statement must be followed by a variable',
+        return_outside_function: 'The current return statement is not inside a function',
+        return_stack_top_mismatch: 'The current return statement is not in the top function of the control flow stack',
+        return_var_mismatch: 'return can only return the declared return variable {defReturnVar} of function {funcName}, not {returnValue}',
+        func_return_value_missing: 'Function {name} expects a value of type {type} but no return value was provided',
+        func_reached_end_no_return: 'Function {name} expects a value of type {type} but reached the end tag without returning',
+        return_value_name_mismatch: 'The runtime return value name does not match the return value name in the control flow stack',
+        print_expr_failed: 'print cannot evaluate expression \'{expr}\'',
+        // Condition expression / if / while / for
+        cond_need_parentheses: 'The condition expression must be wrapped in parentheses',
+        cond_must_be_bool: 'The condition expression must return a boolean, but it returned type {actualType}',
+        cond_invalid: 'Invalid condition expression: {expr}',
+        for_format: 'for loop should be "for (local name:type = initialValue; condition; updateExpr)"',
+        for_init_failed: 'for loop initialization failed',
+        for_update_failed: 'for loop update expression failed',
+        // break / continue
+        break_outside_loop_switch: 'break statement is not inside a loop or switch',
+        break_context_unsupported: 'Unsupported break context',
+        continue_outside_loop: 'continue statement is not inside a loop',
+        continue_context_unsupported: 'Unsupported continue context',
+        matching_end_tag_not_found: 'No matching {tag} found',
+        // try / catch
+        catch_format: 'catch statement should be "catch (Exception ErrorName)"',
+        catch_no_try: 'catch statement has no matching try block',
+        // assert
+        assert_need_parentheses: 'The assertion expression must be wrapped in parentheses',
+        assert_message_quoted: 'The assertion message must be wrapped in double quotes',
+        assert_condition_invalid: 'Invalid assertion condition: {expr}',
+        // switch / case
+        switch_cond_int_only: 'The switch condition expression can only be int or string; numbers must be integers',
+        switch_cond_type: 'The switch condition expression can only be int or string',
+        switch_cond_invalid: 'Invalid switch condition expression: {expr}',
+        case_outside_switch: 'case statement must be used inside a switch block',
+        case_type_mismatch: 'The type of the case value must match the switch condition type',
+        case_value_invalid: 'Invalid case value: {expr}',
+        default_outside_switch: 'default statement must be used inside a switch block',
+        endswc_outside_switch: 'endswc statement must be used inside a switch block',
+        // jump
+        jump_format: 'Must use the format "jump (condition) :labelName" (label must start with a letter or underscore)',
+        cond_expr_empty: 'The condition expression cannot be empty',
+        cond_expr_invalid: 'Invalid condition expression: {expr}',
+        tag_undefined: 'Undefined label: {name}',
+        // Function end tag
+        stray_func_end_tag: 'Detected a stray function end tag',
+        unknown_func_end_tag: 'Unknown function end tag',
+        // Others
+        execute_operation_failed: 'Cannot execute operation \'{command}\': {error}',
+        // Expression evaluation (ExpressionEvaluator)
+        expr_eval_error: 'Error evaluating expression \'{expr}\': {inner}',
+        unexpected_token_after_parse: 'Unexpected token during token processing: {token}',
+        unexpected_char: 'Unexpected character: {char} at position {pos}',
+        assignment_op_in_call_context: 'The assignment operator should be handled in the calling context at position {pos}',
+        expr_unexpected_end: 'Expression ended unexpectedly at token {pos}',
+        missing_right_paren: 'Missing right parenthesis at position {pos}',
+        unexpected_token_primary: 'Unexpected token in primary expression parsing: {token} at position {pos}',
+        array_index_not_number: 'Array index must be a number at position {pos}',
+        array_index_not_nonneg_int: 'Array index must be a non-negative integer at position {pos}',
+        array_missing_right_bracket: 'Missing right bracket in array access: {name} at position {pos}',
+        array_var_not_array: 'Variable \'{name}\' is not an array type at position {pos}',
+        array_index_out_of_range_access: 'Array index out of range: index {index} exceeds the range [0, {max}] of array \'{name}\' at position {pos}',
+        array_element_access_error: 'Array element access error: cannot access element {index} of array \'{name}\' at position {pos}',
+        invalid_assignment_target: 'Invalid assignment target at position {pos}',
+        func_call_missing_right_paren: 'Missing right parenthesis in function call: {name} at position {pos}',
+        func_needs_1_arg: '{func} expects 1 argument',
+        func_needs_2_args: '{func} expects 2 arguments',
+        func_no_arg_expected: '{func} expects no arguments',
+        len_only_str_or_array: 'len can only be used on strings or arrays',
+        copy_arg_must_be_array: 'The copy argument must be an array type',
+        unknown_function: 'Unknown function: {name} at position {pos}',
+        op_left_operand_not_number: 'Operator {op} requires the left operand to be a number',
+        op_right_operand_not_number: 'Operator {op} requires the right operand to be a number',
+        logic_op_left_operand_not_bool: 'Logical operator {op} requires the left operand to be a boolean',
+        logic_op_right_operand_not_bool: 'Logical operator {op} requires the right operand to be a boolean',
+        division_by_zero: 'Division by zero',
+        unknown_operator: 'Unknown operator: {op} at position {pos}',
+        unknown_unary_operator: 'Unknown unary operator: {op} at position {pos}',
+        // Array return value binding (handleReturnValueAssignment)
+        func_no_valid_array_return: 'Function {name} did not return a valid array value',
+        result_var_not_array: 'Result variable {name} is not an array type and cannot receive an array return value',
+        func_no_array_return: 'Function {name} did not return an array value'
+    }
+};
+
+// 消息翻译函数: t('key', {name: value}) → 当前语言的模板填充文本
+// 目标语言缺失时自动回退到中文, 中文缺失时回退为 key 本身 (便于发现遗漏)
+function t(key: string, vars?: { [k: string]: any }): string {
+    const pack = LANG_PACKS[LANG] || LANG_PACKS.zh;
+    let msg = pack[key];
+    if (msg === undefined) msg = LANG_PACKS.zh[key];
+    if (msg === undefined) msg = key;
+    if (vars) {
+        for (const k in vars) {
+            msg = msg.split(`{${k}}`).join(String(vars[k]));
+        }
+    }
+    return msg;
+}
+
+// 统一错误报告入口: 输出格式为 "[ERROR N] [行 X] 类型: 消息" (英文时 [Line X] + 英文类型名)
 // line 缺省时取当前执行行 (currentLinePointer + 1)
 function reportError(type: ExceptionType, message: string, line?: number): void {
     const lineNum = line !== undefined ? line : currentLinePointer + 1;
-    console.error(`[ERROR ${ERROR_CODES[type]}] [行 ${lineNum}] ${ERROR_NAMES[type]}: ${message}`);
+    if (LANG === 'en') {
+        console.error(`[ERROR ${ERROR_CODES[type]}] [Line ${lineNum}] ${ERROR_NAMES_EN[type]}: ${message}`);
+    } else {
+        console.error(`[ERROR ${ERROR_CODES[type]}] [行 ${lineNum}] ${ERROR_NAMES[type]}: ${message}`);
+    }
 }
 
-// 统一警告报告入口: 输出格式为 "[WARN] [行 X] 警告: 消息" (区别于错误)
+// 统一警告报告入口: 输出格式为 "[WARN] [行 X] 警告: 消息" (英文时 [Line X] + Warning), 区别于错误
 function reportWarn(message: string, line?: number): void {
     const lineNum = line !== undefined ? line : currentLinePointer + 1;
-    console.warn(`[WARN] [行 ${lineNum}] 警告: ${message}`);
+    if (LANG === 'en') {
+        console.warn(`[WARN] [Line ${lineNum}] Warning: ${message}`);
+    } else {
+        console.warn(`[WARN] [行 ${lineNum}] 警告: ${message}`);
+    }
 }
 
 
@@ -283,11 +687,11 @@ class ScopeManager {
 
     // 添加变量 (全局或局部)
     static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number): boolean {
-        debugLog(1, `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "lastline" : endLine + 1}, 是否全局: ${isGlobal}`);
+        debugLog(1, `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
-            reportError(ExceptionType.TYPE_ERROR, `Cannot assign value '${value}' to variable '${name}' of type '${type}'`, startLine + 1);
+            reportError(ExceptionType.TYPE_ERROR, t('assign_type_mismatch', {value: value, name: name, type: type}), startLine + 1);
             return false;
         }
 
@@ -314,7 +718,7 @@ class ScopeManager {
 
         if (isGlobal) {
             if (GLOBAL_VARS.hasOwnProperty(name)) {
-                reportError(ExceptionType.REFERENCE_ERROR, `名称 '${name}' 已被定义`);
+                reportError(ExceptionType.REFERENCE_ERROR, t('name_already_defined', {name: name}));
                 // currentLinePointer = programLines.length;
                 // throw { type: ExceptionType.REFERENCE_ERROR, message: `引用错误: 名称 '${name}' 已被定义` } as Exception;
                 return false;
@@ -325,7 +729,7 @@ class ScopeManager {
             // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
             for (const localVar of LOCAL_VARS) {
                 if (localVar.name === name && localVar.frameId === variable.frameId && localVar.startLine === variable.startLine && localVar.endLine === variable.endLine) {
-                    reportError(ExceptionType.REFERENCE_ERROR, `名称 '${name}' 在相同作用域内已被定义`);
+                    reportError(ExceptionType.REFERENCE_ERROR, t('name_defined_same_scope', {name: name}));
                     // currentLinePointer = programLines.length;
                     // throw { type: ExceptionType.REFERENCE_ERROR, message: `引用错误: 名称 '${name}' 在相同作用域内已被定义` } as Exception;
                     return false;
@@ -337,7 +741,7 @@ class ScopeManager {
 
         // 如果未赋初值, 发出警告
         if (value === undefined) {
-            reportWarn(`变量 '${name}' 声明但未初始化`, startLine + 1);
+            reportWarn(t('var_declared_uninitialized', {name: name}), startLine + 1);
         }
 
         return true;
@@ -361,7 +765,7 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "lastline" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
+                debugLog(3, `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
 
                 if (varInfo.name === name && inScope) {
                     debugLog(1, `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
@@ -416,7 +820,7 @@ class ScopeManager {
                     // 对于函数参数, 作用域从startLine到endLine
                     // 特殊处理: 如果endLine为-1, 表示这是一个函数返回值变量, 作用域从startLine到函数结束
                     if (currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
-                        debugLog(1, `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? 'lastline' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
+                        debugLog(1, `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
                         return varInfo;
                     }
                 }
@@ -425,7 +829,7 @@ class ScopeManager {
 
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            debugLog(1, `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? 'lastline' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
+            debugLog(1, `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
             return GLOBAL_VARS[name];
         }
 
@@ -478,13 +882,13 @@ class ScopeManager {
                 if (varInfo.name === name && currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
                     // 检查是否为常量
                     if (varInfo.isConst) {
-                        reportError(ExceptionType.TYPE_ERROR, `Cannot assign to constant variable '${name}'`, currentLine + 1);
+                        reportError(ExceptionType.TYPE_ERROR, t('const_assignment_forbidden', {name: name}), currentLine + 1);
                         return false;
                     }
                     // 验证类型
                     const validation = ScopeManager.validateType(value, varInfo.type);
                     if (!validation.isValid) {
-                        reportError(ExceptionType.TYPE_ERROR, `Cannot assign value '${value}' to variable '${name}' of type '${varInfo.type}'`, currentLine + 1);
+                        reportError(ExceptionType.TYPE_ERROR, t('assign_type_mismatch', {value: value, name: name, type: varInfo.type}), currentLine + 1);
                         return false;
                     }
                     LOCAL_VARS[i].value = validation.convertedValue;
@@ -497,20 +901,20 @@ class ScopeManager {
         if (GLOBAL_VARS.hasOwnProperty(name)) {
             // 检查是否为常量
             if (GLOBAL_VARS[name].isConst) {
-                reportError(ExceptionType.TYPE_ERROR, `不能将常量 '${name}' 赋值`, currentLine + 1);
+                reportError(ExceptionType.TYPE_ERROR, t('const_assignment_forbidden', {name: name}), currentLine + 1);
                 return false;
             }
             // 验证类型
             const validation = ScopeManager.validateType(value, GLOBAL_VARS[name].type);
             if (!validation.isValid) {
-                reportError(ExceptionType.TYPE_ERROR, `不能将值 '${value}' 赋值给变量 '${name}', 类型为 '${GLOBAL_VARS[name].type}'`, currentLine + 1);
+                reportError(ExceptionType.TYPE_ERROR, t('assign_type_mismatch', {value: value, name: name, type: GLOBAL_VARS[name].type}), currentLine + 1);
                 return false;
             }
             GLOBAL_VARS[name].value = validation.convertedValue;
             return true;
         }
 
-        reportError(ExceptionType.REFERENCE_ERROR, `变量 '${name}' 未定义`, currentLine + 1);
+        reportError(ExceptionType.REFERENCE_ERROR, t('var_undefined', {name: name}), currentLine + 1);
         return false;
     }
 
@@ -532,7 +936,7 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, `  检查 ${varInfo.name}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "lastline" : varInfo.endLine + 1} ` +
+                debugLog(3, `  检查 ${varInfo.name}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} ` +
                     `当前行${currentLine + 1} 在范围内: ${inScope}`);
 
                 if (varInfo.name === name && inScope) {
@@ -554,7 +958,7 @@ class ScopeManager {
     // 注册函数
     static registerFunction(funcInfo: FunctionInfo): void {
         debugLog(2, `${funcInfo.endLine === -1 ? '未完整注册的函数' : '已完整注册的函数'}: ${funcInfo.name}`);
-        debugLog(3, `注册函数作用域: ${funcInfo.name} (行 ${funcInfo.startLine + 1}-${funcInfo.endLine === -1 ? 'lastline' : funcInfo.endLine + 1})`);
+        debugLog(3, `注册函数作用域: ${funcInfo.name} (行 ${funcInfo.startLine + 1}-${funcInfo.endLine === -1 ? '末行' : funcInfo.endLine + 1})`);
 
         FUNCTIONS[funcInfo.name] = funcInfo; // 直接覆盖同名函数定义，不支持函数重载
         debugLog(2, `当前注册的函数:`, FUNCTIONS);
@@ -611,28 +1015,28 @@ class ScopeManager {
             return;
         }
         if (!cleanAll && exceptMode === undefined) {
-            reportError(ExceptionType.SYNTAX_ERROR, "未指定清除模式");
+            reportError(ExceptionType.SYNTAX_ERROR, t('purge_mode_not_specified'));
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
-            debugLog(2, `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? 'lastline' : endLine + 1}`);
+            debugLog(2, `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && exceptMode) {
-            debugLog(2, `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? 'lastline' : endLine + 1}`);
+            debugLog(2, `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
         if (!cleanAll && !varName && startLine !== undefined && endLine !== undefined) {
             if (exceptMode) {
-                reportWarn(`作用域清除模式不支持排除方法`);
+                reportWarn(t('purge_scope_no_except'));
             }
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.startLine >= startLine && varInfo.endLine <= endLine));
             return;
         }
         else {
-            reportError(ExceptionType.SYNTAX_ERROR, "未指定清除所有变量且未指定要清除的变量");
+            reportError(ExceptionType.SYNTAX_ERROR, t('purge_target_not_specified'));
             return;
         }
     }
@@ -703,7 +1107,7 @@ class Interpreter {
                 // 检查是否是函数结束标记
                 if (line === ':end') {
                     if (!inFunction) {
-                        reportError(ExceptionType.SYNTAX_ERROR, `函数结束标记错误: 发现函数结束标记, 但没有对应的函数定义`, i + 1);
+                        reportError(ExceptionType.SYNTAX_ERROR, t('func_end_without_def'), i + 1);
                         return;
                     }
                     if (currentFunction) {
@@ -724,7 +1128,7 @@ class Interpreter {
                                 }
                             }
                             if (!hasReturn) {
-                                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${currentFunction.name} 期望返回 ${currentFunction.returnType} 类型的值, 但未找到return语句`, i + 1);
+                                reportError(ExceptionType.TYPE_ERROR, t('func_no_return_stmt', {name: currentFunction.name, type: currentFunction.returnType}), i + 1);
                             }
                         } else {
                             // void函数, 检查是否有return语句
@@ -739,7 +1143,7 @@ class Interpreter {
                                 }
                             }
                             if (hasReturn) {
-                                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${currentFunction.name} 期望无返回值, 但找到return语句`, returnLine + 1);
+                                reportError(ExceptionType.TYPE_ERROR, t('func_unexpected_return', {name: currentFunction.name}), returnLine + 1);
                             }
                         }
                     }
@@ -749,7 +1153,7 @@ class Interpreter {
                 }
                 // 检查是否是其他函数相关标记
                 if (inFunction) {
-                    reportError(ExceptionType.SYNTAX_ERROR, `函数定义错误: 发现函数内嵌套函数定义`, i + 1);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('func_nested_def'), i + 1);
                     return;
                 }
 
@@ -763,7 +1167,7 @@ class Interpreter {
 
                     // 检查函数名是否符合C语言命名规则
                     if (!Interpreter.isValidIdentifier(funcName)) {
-                        reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 函数名 '${funcName}' 不符合命名规则 (参考C语言规则)`, i + 1);
+                        reportError(ExceptionType.REFERENCE_ERROR, t('func_name_invalid', {name: funcName}), i + 1);
                         return;
                     }
                     const paramsStr = funcMatch[2];
@@ -779,7 +1183,7 @@ class Interpreter {
                     } else {
                         // 有返回值函数, returnVarNameOrVoid是返回值变量名, returnTypeStr是返回值类型
                         if (!returnTypeStr) {
-                            reportError(ExceptionType.SYNTAX_ERROR, `函数返回值格式错误: 有返回值的函数必须指定返回值类型`, i + 1);
+                            reportError(ExceptionType.SYNTAX_ERROR, t('func_return_type_required'), i + 1);
                             return;
                         }
                         returnType = Interpreter.getDataTypeFromString(returnTypeStr);
@@ -794,7 +1198,7 @@ class Interpreter {
                         for (const paramMatch of paramMatches) {
                             const parts = paramMatch.trim().split(':');
                             if (parts.length !== 2) {
-                                reportError(ExceptionType.SYNTAX_ERROR, `函数参数格式错误: 参数 ${paramMatch} 格式不正确, 应为 "参数名:类型"`, i + 1);
+                                reportError(ExceptionType.SYNTAX_ERROR, t('func_param_format', {param: paramMatch}), i + 1);
                                 return;
                             }
                             // 解析 mut 前置关键字 (仅数组参数有意义)
@@ -807,7 +1211,7 @@ class Interpreter {
                             const paramTypeStr = parts[1].trim();
                             const paramType = Interpreter.getDataTypeFromString(paramTypeStr);
                             if (isMutable && paramType !== DataType.ARRAY) {
-                                reportError(ExceptionType.SYNTAX_ERROR, `函数参数格式错误: 参数 ${paramMatch}, mut 关键字仅适用于数组类型参数`, i + 1);
+                                reportError(ExceptionType.SYNTAX_ERROR, t('func_param_mut_array_only', {param: paramMatch}), i + 1);
                                 return;
                             }
                             params.push({
@@ -834,7 +1238,7 @@ class Interpreter {
         }
 
         if (inFunction) {
-            reportError(ExceptionType.SYNTAX_ERROR, `函数定义错误: 程序结束时仍有未结束的函数`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('func_unclosed_at_eof'));
         }
         debugLog(1, `扫描标签和函数定义结束`);
     }
@@ -855,7 +1259,7 @@ class Interpreter {
             case 'array':
                 return DataType.ARRAY;
             default:
-                reportError(ExceptionType.SYNTAX_ERROR, `不支持的数据类型: ${typeStr}`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('unsupported_data_type', {type: typeStr}));
                 return DataType.UNDEFINED;
         }
     }
@@ -887,7 +1291,7 @@ class Interpreter {
             const strValue = valueStr.substring(1, valueStr.length - 1);
 
             if (expectedType !== DataType.STRING) {
-                throw { type: ExceptionType.TYPE_ERROR, message: `类型不匹配: 期望 ${expectedType}, 实际是字符串` } as Exception;
+                throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_str', {expected: expectedType}) } as Exception;
             }
             return strValue;
         }
@@ -896,7 +1300,7 @@ class Interpreter {
         if (valueStr === 'true' || valueStr === 'false') {
             const boolValue = valueStr === 'true';
             if (expectedType !== DataType.BOOL) {
-                throw { type: ExceptionType.TYPE_ERROR, message: `类型不匹配: 期望 ${expectedType}, 实际是布尔值` } as Exception;
+                throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_bool', {expected: expectedType}) } as Exception;
             }
             return boolValue;
         }
@@ -924,14 +1328,14 @@ class Interpreter {
                 return numValue;
             } else if (expectedType === DataType.INT) {
                 if (!Number.isInteger(numValue)) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `类型不匹配: 期望整数, 实际是 ${numValue}` } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_int', {value: numValue}) } as Exception;
                 }
                 // 直接返回整数值, 不需要Math.floor
                 return numValue;
             } else if (expectedType === DataType.FLOAT) {
                 return numValue;
             } else {
-                throw { type: ExceptionType.TYPE_ERROR, message: `类型不匹配: 期望 ${expectedType}, 实际是数字` } as Exception;
+                throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_num', {expected: expectedType}) } as Exception;
             }
         }
 
@@ -940,12 +1344,12 @@ class Interpreter {
         if (varValue !== undefined) {
             const varType = ScopeManager.getVariableType(valueStr, currentLinePointer);
             if (varType !== expectedType) {
-                throw { type: ExceptionType.TYPE_ERROR, message: `类型不匹配: 期望 ${expectedType}, 实际是 ${varType}` } as Exception;
+                throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_var_type', {expected: expectedType, actual: varType}) } as Exception;
             }
             return varValue;
         }
 
-        throw { type: ExceptionType.SYNTAX_ERROR, message: `无法解析值: ${valueStr}` } as Exception;
+        throw { type: ExceptionType.SYNTAX_ERROR, message: t('value_unresolvable', {value: valueStr}) } as Exception;
     }
 
     // 解析声明初始化值: 支持字面量表达式 (仅允许字面量参与运算, 不允许变量引用/函数调用)
@@ -965,7 +1369,7 @@ class Interpreter {
             if (forbidden.length > 0) {
                 throw {
                     type: ExceptionType.SYNTAX_ERROR,
-                    message: `声明初始化仅允许字面量表达式, 不允许使用变量或函数调用 '${forbidden[0]}' (请先声明后赋值)`,
+                    message: t('init_expr_no_var_call', {name: forbidden[0]}),
                     lineNumber: currentLinePointer + 1
                 } as Exception;
             }
@@ -975,7 +1379,7 @@ class Interpreter {
             if (!validation.isValid) {
                 throw {
                     type: ExceptionType.TYPE_ERROR,
-                    message: `类型不匹配: 期望 ${expectedType}, 表达式 '${valueExpr}' 求值结果类型不符`,
+                    message: t('type_mismatch_expr_result', {expected: expectedType, expr: valueExpr}),
                     lineNumber: currentLinePointer + 1
                 } as Exception;
             }
@@ -988,7 +1392,7 @@ class Interpreter {
         // 非字面量 (变量引用等) → 报错
         throw {
             type: ExceptionType.SYNTAX_ERROR,
-            message: `声明初始化仅允许字面量, 不允许使用变量或函数调用 '${valueExpr}' (请先声明后赋值)`,
+            message: t('init_literal_only', {expr: valueExpr}),
             lineNumber: currentLinePointer + 1
         } as Exception;
     }
@@ -1115,12 +1519,16 @@ class Interpreter {
                 }
 
                 // 未被捕获的异常: 必须对用户可见 (不受 debug 级别控制)
-                reportError(exception.type, exception.message);
-                // 根据异常类型决定继续执行还是终止
                 if (Object.values(ExceptionType).includes(exception.type)) {
+                    // 脚本抛出的异常: 统一错误格式输出并终止
+                    reportError(exception.type, exception.message);
                     currentLinePointer = programLines.length; // 终止执行
                 } else {
-                    currentLinePointer++;
+                    // 解释器内部错误 (原生 JS 异常/未识别的异常): 与脚本错误明确区分
+                    const nativeMsg = error instanceof Error ? error.message : String(error);
+                    console.error(t('internal_error', { line: currentLinePointer + 1, message: nativeMsg }));
+                    console.error(t('internal_error_hint'));
+                    currentLinePointer = programLines.length; // 内部错误终止, 避免级联执行
                 }
             }
         }
@@ -1145,7 +1553,7 @@ class Interpreter {
         if (cmd === 'const' && parts.length > 1) {
             const nextCmd = parts[1].toLowerCase();
             if (nextCmd === 'global' || nextCmd === 'local') {
-                reportError(ExceptionType.SYNTAX_ERROR, `全局/局部变量声明格式应为 "[global/local] [const] 变量名:类型 = 值"`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_local_format'));
                 return;
             }
         }
@@ -1158,12 +1566,12 @@ class Interpreter {
                 } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
                     // 检查parts[1]是否以const开头, 如果是则报语法错误
                     if (parts[1].toLowerCase().startsWith('const')) {
-                        reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
+                        reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_format'));
                         return;
                     }
                     Interpreter.executeGlobal(parts.slice(1).join(' '));
                 } else {
-                    reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_format'));
                     return;
                 }
                 break;
@@ -1174,12 +1582,12 @@ class Interpreter {
                 } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
                     // 检查parts[1]是否以const开头, 如果是则报语法错误
                     if (parts[1].toLowerCase().startsWith('const')) {
-                        reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
+                        reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_local_format'));
                         return;
                     }
                     Interpreter.executeLocal(parts.slice(1).join(' '));
                 } else {
-                    reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_local_format'));
                     return;
                 }
                 break;
@@ -1286,7 +1694,7 @@ class Interpreter {
         // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
         const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
-            reportError(ExceptionType.SYNTAX_ERROR, `全局变量声明格式应为 "global [const] 变量名:类型 = 值"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_format'));
             return;
         }
 
@@ -1294,7 +1702,7 @@ class Interpreter {
 
         // 检查变量名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(varName)) {
-            reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 变量名 '${varName}' 不符合命名规则`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('var_name_invalid', {name: varName}));
             return;
         }
         const typeStr = match[2];
@@ -1303,7 +1711,7 @@ class Interpreter {
 
         // 检查是否在代码块内
         if (CONTROL_FLOW_STACK.length !== 0) {
-            reportError(ExceptionType.REFERENCE_ERROR, `不可在代码块内声明全局变量`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('global_var_in_block'));
             return;
         }
 
@@ -1314,7 +1722,7 @@ class Interpreter {
                 if (value === undefined || value === null) {
                     throw {
                         type: ExceptionType.TYPE_ERROR,
-                        message: `类型转换失败: 无法将值'${valueExpr}'转换为${typeStr}类型`,
+                        message: t('type_conversion_failed', {value: valueExpr, type: typeStr}),
                         lineNumber: currentLinePointer + 1
                     } as Exception;
                 }
@@ -1350,7 +1758,7 @@ class Interpreter {
         // 匹配格式: 变量名:类型 = 值 (值可选, 未赋初值则为 undefined)
         const match = remainingParams.match(/^([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*(?:=\s*(.+))?$/);
         if (!match) {
-            reportError(ExceptionType.SYNTAX_ERROR, `局部变量声明格式应为 "local [const] 变量名:类型 = 值"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_local_format'));
             return;
         }
 
@@ -1358,7 +1766,7 @@ class Interpreter {
 
         // 检查变量名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(varName)) {
-            reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 变量名 '${varName}' 不符合命名规则`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('var_name_invalid', {name: varName}));
             return;
         }
         const typeStr = match[2];
@@ -1371,7 +1779,7 @@ class Interpreter {
         // 检查所在的代码块
         let targetEndTag: string;
         if (CONTROL_FLOW_STACK.length === 0) {
-            reportError(ExceptionType.REFERENCE_ERROR, `不可在代码块外声明局部变量`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('local_var_outside_block'));
             return;
         }
         const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -1421,7 +1829,7 @@ class Interpreter {
             const block = CONTROL_FLOW_STACK[i];
             if (block.type === 'function') break;
             if (block.type === 'for' && block.varName === varName) {
-                reportError(ExceptionType.REFERENCE_ERROR, `循环变量 '${varName}' 作用域内禁止声明同名变量`);
+                reportError(ExceptionType.REFERENCE_ERROR, t('loop_var_shadow_forbidden', {name: varName}));
                 return;
             }
         }
@@ -1455,7 +1863,7 @@ class Interpreter {
             argsStr = matchWithoutResult[2];
             resultVar = undefined;
         } else {
-            reportError(ExceptionType.SYNTAX_ERROR, `函数调用格式应为 "call 函数名(参数1, 参数2, ...) -> 结果变量" 或 "call 函数名(参数1, 参数2, ...)"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('call_format'));
             return;
         }
 
@@ -1463,7 +1871,7 @@ class Interpreter {
             // 函数未定义: 抛引用错误 (可被try-catch捕获)
             throw {
                 type: ExceptionType.REFERENCE_ERROR,
-                message: `函数 '${funcName}' 未定义`,
+                message: t('func_undefined', {name: funcName}),
                 lineNumber: currentLinePointer
             } as Exception;
         }
@@ -1473,12 +1881,12 @@ class Interpreter {
 
         // 检查返回值变量
         if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) {
-            reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 有返回值, 但未指定结果变量`);
+            reportError(ExceptionType.TYPE_ERROR, t('func_result_var_missing', {name: funcName}));
             return;
         }
 
         if (resultVar !== undefined && funcInfo.returnType === DataType.UNDEFINED) {
-            reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 无返回值, 但指定了结果变量`);
+            reportError(ExceptionType.TYPE_ERROR, t('func_result_var_unexpected', {name: funcName}));
             return;
         }
 
@@ -1508,7 +1916,7 @@ class Interpreter {
             if (es === 'false') return { value: false, type: DataType.BOOL };
             const num = Number(es);
             if (es !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
-            throw new Error(`数组字面量元素无法解析: ${es}`);
+            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: es}) } as Exception;
         };
         // 拆分调用实参: 正确忽略数组字面量 [...] 内部与字符串内部的逗号
         const splitCallArguments = (s: string): string[] => {
@@ -1532,10 +1940,10 @@ class Interpreter {
         if (argsStr.trim()) {
             const argValues = splitCallArguments(argsStr);
             if (argValues.length < funcInfo.params.length) {
-                reportError(ExceptionType.TYPE_ERROR, `传入函数 ${funcName} 的参数数量过少: 期望 ${funcInfo.params.length}, 实际 ${argValues.length}`);
+                reportError(ExceptionType.TYPE_ERROR, t('func_arg_count_insufficient', {name: funcName, expected: funcInfo.params.length, actual: argValues.length}));
                 return;
             } else if (argValues.length > funcInfo.params.length) {
-                reportWarn(`传入函数 ${funcName} 的参数多于定义, 忽略多出的传入参数`);
+                reportWarn(t('func_extra_args_ignored', {name: funcName}));
             }
 
             // 只解析前 funcInfo.params.length 个实参 (多余参数已被忽略, 避免越界)
@@ -1547,16 +1955,16 @@ class Interpreter {
                     if (paramType === DataType.ARRAY) {
                         const arrArg = parseArrayArgument(argValues[i]);
                         if (!arrArg) {
-                            reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 参数 ${i + 1} 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)"`);
+                            reportError(ExceptionType.TYPE_ERROR, t('func_array_arg_format', {name: funcName, argIndex: i + 1}));
                             return;
                         }
                         // mut 匹配检查: 形参与实参必须一致
                         if (param.isMutable && arrArg.mode !== 'mut' && arrArg.mode !== 'copy') {
-                            reportError(ExceptionType.TYPE_ERROR, `形参 ${param.name} 声明为 mut 可变引用, 实参必须使用 mut 关键字`);
+                            reportError(ExceptionType.TYPE_ERROR, t('func_mut_param_requires_mut', {name: param.name}));
                             return;
                         }
                         if (!param.isMutable && arrArg.mode === 'mut') {
-                            reportError(ExceptionType.TYPE_ERROR, `形参 ${param.name} 为只读引用, 实参不能使用 mut 关键字`);
+                            reportError(ExceptionType.TYPE_ERROR, t('func_readonly_param_no_mut', {name: param.name}));
                             return;
                         }
                         args.push(arrArg);
@@ -1565,12 +1973,12 @@ class Interpreter {
                         args.push(value);
                     }
                 } catch (error) {
-                    reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 参数 ${i + 1} 类型错误`);
+                    reportError(ExceptionType.TYPE_ERROR, t('func_arg_type_error', {name: funcName, argIndex: i + 1}));
                     return;
                 }
             }
         } else if (funcInfo.params.length > 0) {
-            reportError(ExceptionType.TYPE_ERROR, `函数 ${funcName} 需要 ${funcInfo.params.length} 个参数, 但未提供`);
+            reportError(ExceptionType.TYPE_ERROR, t('func_arg_count_missing', {name: funcName, expected: funcInfo.params.length}));
             return;
         }
 
@@ -1604,7 +2012,7 @@ class Interpreter {
                     try {
                         literalElements = elementStrs.map(es => inferLiteralElement(es));
                     } catch (e) {
-                        reportError(ExceptionType.TYPE_ERROR, `数组字面量实参解析失败 (${(e as Error).message})`);
+                        reportError(ExceptionType.TYPE_ERROR, t('array_literal_arg_parse_failed', {error: (e as Error).message}));
                         LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
                         return;
                     }
@@ -1629,7 +2037,7 @@ class Interpreter {
 
                 const arrVar = ScopeManager.getVariable(arrArg.name, currentLinePointer, true, arrArg.name.startsWith('global.'));
                 if (!arrVar || arrVar.type !== DataType.ARRAY) {
-                    reportError(ExceptionType.TYPE_ERROR, `实参 ${arrArg.name} 不是数组类型`);
+                    reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArg.name}));
                     LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
                     return;
                 }
@@ -1723,7 +2131,7 @@ class Interpreter {
             let paramFound = false;
             for (let j = 0; j < LOCAL_VARS.length; j++) {
                 if (LOCAL_VARS[j].name === paramName) {
-                    debugLog(3, `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "lastline" : LOCAL_VARS[j].endLine + 1}`);
+                    debugLog(3, `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
                     // 验证类型是否匹配
                     if (LOCAL_VARS[j].type !== paramType) {
                         debugLog(3, `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
@@ -1741,8 +2149,8 @@ class Interpreter {
         debugLog(2, `函数体开始行: ${functionBodyStartLine + 1}`);
         // 添加作用域调试信息
         debugLog(2, `函数 ${funcName} 变量作用域详情:`);
-        debugLog(2, `  返回值变量: ${returnVarName}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "lastline" : funcInfo.endLine + 1}`);
-        debugLog(2, `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "lastline" : funcInfo.endLine + 1}`);
+        debugLog(2, `  返回值变量: ${returnVarName}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        debugLog(2, `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
         CONTROL_FLOW_STACK.push({
             type: 'function',
             funcName: funcInfo.name,
@@ -1761,7 +2169,7 @@ class Interpreter {
         // 匹配格式: arrName[arrLength]:type = {...} 或 arrName[arrLength]:type = arrfill
         const arrayMatch = params.match(/^([a-zA-Z0-9_]+)\[([^\]]+)\]:([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
         if (!arrayMatch) {
-            reportError(ExceptionType.SYNTAX_ERROR, `数组声明格式应为 "array arrName[arrLength]:type = [...]" 或 "array arrName[arrLength]:type = arrfill"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_decl_format'));
             return;
         }
 
@@ -1769,7 +2177,7 @@ class Interpreter {
 
         // 检查数组名是否符合C语言命名规则
         if (!Interpreter.isValidIdentifier(arrayName)) {
-            reportError(ExceptionType.REFERENCE_ERROR, `命名错误: 数组名 '${arrayName}' 不符合命名规则`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('array_name_invalid', {name: arrayName}));
             return;
         }
 
@@ -1783,12 +2191,12 @@ class Interpreter {
             // 尝试解析长度表达式 (支持数字字面量、全局常量或表达式, 如 ROWS * COLS)
             const lengthValue = Interpreter.evaluateExpression(lengthExpr);
             if (typeof lengthValue !== 'number' || !Number.isInteger(lengthValue) || lengthValue < 0) {
-                reportError(ExceptionType.RANGE_ERROR, `数组长度必须是非负整数`);
+                reportError(ExceptionType.RANGE_ERROR, t('array_length_non_negative'));
                 return;
             }
             arrayLength = lengthValue;
         } catch (error) {
-            reportError(ExceptionType.SYNTAX_ERROR, `无法解析数组长度表达式 '${lengthExpr}'`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_length_expr_unresolvable', {expr: lengthExpr}));
             return;
         }
 
@@ -1797,13 +2205,13 @@ class Interpreter {
 
         // 检查元素类型是否有效
         if (elementType === DataType.UNDEFINED) {
-            reportError(ExceptionType.SYNTAX_ERROR, `不支持的数组元素类型 '${elementTypeStr}'`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_element_type_unsupported', {type: elementTypeStr}));
             return;
         }
 
         // 检查元素类型是否为不允许的类型
         if (elementType === DataType.ARRAY) {
-            reportError(ExceptionType.SYNTAX_ERROR, `不允许声明数组的数组`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_of_array_forbidden'));
             return;
         }
 
@@ -1816,7 +2224,7 @@ class Interpreter {
             let fillValue: any;
             switch (elementType) {
                 case DataType.NUMBER:
-                    reportWarn(`number类型数组统一填充为0.0, 建议明确声明为int或float类型`);
+                    reportWarn(t('array_number_fill_0'));
                     fillValue = 0.0;
                     break;
                 case DataType.INT:
@@ -1832,7 +2240,7 @@ class Interpreter {
                     fillValue = false;
                     break;
                 default:
-                    reportError(ExceptionType.SYNTAX_ERROR, `不支持的数组元素类型 '${elementTypeStr}'`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('array_element_type_unsupported', {type: elementTypeStr}));
                     return;
             }
 
@@ -1857,7 +2265,7 @@ class Interpreter {
 
             // 检查元素数量是否匹配
             if (elementValues.length !== arrayLength) {
-                reportError(ExceptionType.RANGE_ERROR, `数组初始化元素数量(${elementValues.length})与声明长度(${arrayLength})不匹配`);
+                reportError(ExceptionType.RANGE_ERROR, t('array_init_count_mismatch', {actual: elementValues.length, expected: arrayLength}));
                 return;
             }
 
@@ -1870,12 +2278,12 @@ class Interpreter {
                         type: elementType
                     });
                 } catch (error) {
-                    reportError(ExceptionType.SYNTAX_ERROR, `无法解析数组元素[${i}]的值 '${elementValues[i]}'`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('array_element_unresolvable', {index: i, value: elementValues[i]}));
                     return;
                 }
             }
         } else {
-            reportError(ExceptionType.SYNTAX_ERROR, `数组初始化应使用 '[...]' 或 'arrfill'`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_init_format'));
             return;
         }
 
@@ -1911,7 +2319,7 @@ class Interpreter {
         if (isGlobal) {
             // 检查全局变量是否已存在
             if (GLOBAL_VARS.hasOwnProperty(arrayName)) {
-                reportError(ExceptionType.REFERENCE_ERROR, `名称 '${arrayName}' 已被定义`);
+                reportError(ExceptionType.REFERENCE_ERROR, t('name_already_defined', {name: arrayName}));
                 return;
             }
             GLOBAL_VARS[arrayName] = arrayVariable;
@@ -1919,7 +2327,7 @@ class Interpreter {
             // 检查是否在函数内
             const currentFunc = ScopeManager.getCurrentFunction(currentLinePointer);
             if (!currentFunc) {
-                reportError(ExceptionType.REFERENCE_ERROR, `不能在函数外部声明局部数组 '${arrayName}'`);
+                reportError(ExceptionType.REFERENCE_ERROR, t('local_array_outside_func', {name: arrayName}));
                 return;
             }
             // 循环变量作用域内禁止声明同名数组 (doc规则2, 与普通局部变量一致)
@@ -1927,7 +2335,7 @@ class Interpreter {
                 const block = CONTROL_FLOW_STACK[i];
                 if (block.type === 'function') break;
                 if (block.type === 'for' && block.varName === arrayName) {
-                    reportError(ExceptionType.REFERENCE_ERROR, `循环变量 '${arrayName}' 作用域内禁止声明同名变量`);
+                    reportError(ExceptionType.REFERENCE_ERROR, t('loop_var_shadow_forbidden', {name: arrayName}));
                     return;
                 }
             }
@@ -1937,7 +2345,7 @@ class Interpreter {
                     localVar.frameId === arrayVariable.frameId &&
                     localVar.startLine === arrayVariable.startLine &&
                     localVar.endLine === arrayVariable.endLine) {
-                    reportError(ExceptionType.REFERENCE_ERROR, `名称 '${arrayName}' 在相同作用域内已被定义`);
+                    reportError(ExceptionType.REFERENCE_ERROR, t('name_defined_same_scope', {name: arrayName}));
                     return;
                 }
             }
@@ -1987,7 +2395,7 @@ class Interpreter {
 
         // 检查是否有返回值
         if (returnValueStr === '') {
-            reportError(ExceptionType.UNKNOWN_ERROR, `return语句后必须跟一个变量`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('return_requires_var'));
             return;
         }
 
@@ -1998,10 +2406,10 @@ class Interpreter {
             if (block.type === 'function') {
                 const funcName = ScopeManager.getCurrentFunction(currentLinePointer);
                 if (funcName === null) {
-                    reportError(ExceptionType.UNKNOWN_ERROR, `当前返回语句所在行不在函数内`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('return_outside_function'));
                     return;
                 } else if (funcName !== block.funcName) {
-                    reportError(ExceptionType.UNKNOWN_ERROR, `当前返回语句所在行不在控制流栈顶函数中`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, t('return_stack_top_mismatch'));
                     return;
                 }
                 const funcInfo = FUNCTIONS[block.funcName];
@@ -2009,7 +2417,7 @@ class Interpreter {
                 // 规则: return 只能返回函数声明的返回变量
                 const defReturnVar = ScopeManager.getReturnVarName(funcInfo);
                 if (defReturnVar !== undefined && returnValueStr !== defReturnVar) {
-                    reportError(ExceptionType.UNKNOWN_ERROR, `return 只能返回函数 ${block.funcName} 声明的返回变量 ${defReturnVar}, 不能返回 ${returnValueStr}`);
+                    reportError(ExceptionType.TYPE_ERROR, t('return_var_mismatch', {funcName: block.funcName, defReturnVar: defReturnVar, returnValue: returnValueStr}));
                     return;
                 }
 
@@ -2020,7 +2428,7 @@ class Interpreter {
                 if (returnVarInfo === null) {
                     // 变量不存在 → 视为无返回值
                     if (!ScopeManager.isVoidFunction(funcInfo)) {
-                        reportError(ExceptionType.TYPE_ERROR, `函数 ${block.funcName} 期望返回 ${funcInfo.returnType} 类型的值, 但未提供返回值`);
+                        reportError(ExceptionType.TYPE_ERROR, t('func_return_value_missing', {name: block.funcName, type: funcInfo.returnType}));
                         return;
                     }
                     returnValue = undefined;
@@ -2048,7 +2456,7 @@ class Interpreter {
                         RETURN_VALUES[block.funcName][defReturnVar] = returnValue;
                     }
                 } else {
-                    reportError(ExceptionType.UNKNOWN_ERROR, `函数运行时返回值与流程控制栈中的返回值名称不同`);
+                    reportError(ExceptionType.UNKNOWN_ERROR, t('return_value_name_mismatch'));
                     return;
                 }
                 debugLog(2, `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
@@ -2084,7 +2492,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.TYPE_ERROR, `print 无法计算表达式 '${params}'`);
+            reportError(ExceptionType.TYPE_ERROR, t('print_expr_failed', {expr: params}));
             // 如果表达式计算失败, 则返回
             return;
         }
@@ -2095,7 +2503,7 @@ class Interpreter {
         // 检查条件表达式是否用括号括起
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式必须用括号括起`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_need_parentheses'));
             return;
         }
 
@@ -2109,7 +2517,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
-                reportError(ExceptionType.TYPE_ERROR, `条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型`);
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
                 return;
             }
 
@@ -2147,7 +2555,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `无效的条件表达式: ${conditionExpr}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
             debugLog(1, `错误详情: ${error}`);
         }
     }
@@ -2182,7 +2590,7 @@ class Interpreter {
         // 检查条件表达式是否用括号括起
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式必须用括号括起`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_need_parentheses'));
             return;
         }
 
@@ -2199,7 +2607,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
-                reportError(ExceptionType.TYPE_ERROR, `条件表达式必须返回布尔值, 但实际返回了 ${typeof condition} 类型`);
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
                 return;
             }
 
@@ -2258,7 +2666,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `无效的条件表达式: ${conditionExpr}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
         }
         debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
     }
@@ -2292,7 +2700,7 @@ class Interpreter {
         let match = params.match(/^local\s+([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)\s*;\s*(.+)\s*;\s*(.+)$/);
 
         if (!match) {
-            reportError(ExceptionType.SYNTAX_ERROR, `for循环格式应为 "for (local 变量名:类型 = 初始值; 条件; 更新表达式)"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('for_format'));
             return;
         }
 
@@ -2337,7 +2745,7 @@ class Interpreter {
 
             if (conflictForStart !== null && conflictForStart !== currentLinePointer) {
                 // 循环变量作用域内禁止声明同名变量 (如内层for与外层for同名循环变量)
-                reportError(ExceptionType.REFERENCE_ERROR, `循环变量 '${varName}' 作用域内禁止声明同名变量`);
+                reportError(ExceptionType.REFERENCE_ERROR, t('loop_var_shadow_forbidden', {name: varName}));
                 return;
             }
 
@@ -2362,7 +2770,7 @@ class Interpreter {
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof result !== 'boolean') {
-                reportError(ExceptionType.TYPE_ERROR, `条件表达式必须返回布尔值, 但实际返回了 ${typeof result} 类型`);
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof result}));
                 return;
             }
 
@@ -2437,7 +2845,7 @@ class Interpreter {
                 throw error;
             }
             // console.error(`错误: for循环初始化失败`);
-            throw { type: ExceptionType.LOOP_INIT_ERROR, message: `for循环初始化失败 在第 ${currentLinePointer + 1} 行` } as Exception;
+            throw { type: ExceptionType.LOOP_INIT_ERROR, message: t('for_init_failed'), lineNumber: currentLinePointer } as Exception;
         }
         debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
     }
@@ -2469,7 +2877,7 @@ class Interpreter {
                 }
                 // console.error(`错误: for循环更新表达式执行失败`);
                 // 跳过循环
-                throw { type: ExceptionType.LOOP_UPDATE_ERROR, message: `for循环更新表达式执行失败 在第 ${currentLinePointer + 1} 行` } as Exception;
+                throw { type: ExceptionType.LOOP_UPDATE_ERROR, message: t('for_update_failed'), lineNumber: currentLinePointer } as Exception;
             }
         }
     }
@@ -2478,7 +2886,7 @@ class Interpreter {
     static executeBreak(): void {
         // 1. 检查是否在合法的控制块内
         if (CONTROL_FLOW_STACK.length === 0) {
-            reportError(ExceptionType.UNKNOWN_ERROR, `break语句不在循环或switch内`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('break_outside_loop_switch'));
             return;
         }
 
@@ -2501,7 +2909,7 @@ class Interpreter {
                         CONTROL_FLOW_BROKEN_BLOCK_STACK.push(block);
                         break;
                     default:
-                        reportError(ExceptionType.UNKNOWN_ERROR, `不支持的break上下文`);
+                        reportError(ExceptionType.SYNTAX_ERROR, t('break_context_unsupported'));
                         return;
                 }
                 debugLog(2, `跳转目标: ${targetEndTag}`);
@@ -2528,7 +2936,7 @@ class Interpreter {
 
                     i++;
                 }
-                reportError(ExceptionType.SYNTAX_ERROR, `未找到匹配的${targetEndTag}`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
@@ -2540,7 +2948,7 @@ class Interpreter {
     static executeContinue(): void {
         // 1. 检查是否在合法的控制块内
         if (CONTROL_FLOW_STACK.length === 0) {
-            reportError(ExceptionType.UNKNOWN_ERROR, `continue语句不在循环内`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('continue_outside_loop'));
             return;
         }
 
@@ -2559,7 +2967,7 @@ class Interpreter {
                         targetEndTag = 'endwhl';
                         break;
                     default:
-                        reportError(ExceptionType.UNKNOWN_ERROR, `不支持的continue上下文`);
+                        reportError(ExceptionType.SYNTAX_ERROR, t('continue_context_unsupported'));
                         return;
                 }
                 debugLog(2, `跳转目标: ${targetEndTag}`);
@@ -2585,7 +2993,7 @@ class Interpreter {
 
                     i++;
                 }
-                reportError(ExceptionType.SYNTAX_ERROR, `未找到匹配的${targetEndTag}`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
@@ -2593,7 +3001,7 @@ class Interpreter {
         }
 
         // 如果没有找到循环, 输出错误信息
-        reportError(ExceptionType.UNKNOWN_ERROR, `continue语句不在循环内`);
+        reportError(ExceptionType.SYNTAX_ERROR, t('continue_outside_loop'));
     }
 
     // 执行try语句
@@ -2637,7 +3045,7 @@ class Interpreter {
         // 解析catch参数, 格式为 (Exception ErrorName)
         const match = params.match(/^\(\s*Exception\s+([a-zA-Z0-9_]+)\s*\)$/);
         if (!match) {
-            reportError(ExceptionType.SYNTAX_ERROR, `catch语句格式应为 "catch (Exception ErrorName)"`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('catch_format'));
             return;
         }
 
@@ -2708,7 +3116,7 @@ class Interpreter {
         }
 
         // 情况三: 没有匹配的try块
-        reportError(ExceptionType.UNKNOWN_ERROR, `catch语句没有匹配的try块`);
+        reportError(ExceptionType.SYNTAX_ERROR, t('catch_no_try'));
         // 跳过catch块
         let nestedLevel = 1;
         let i = currentLinePointer + 1;
@@ -2758,7 +3166,7 @@ class Interpreter {
         // endasrt
         const trimmedParams = params.trim();
         if (!trimmedParams.startsWith('(') || !trimmedParams.endsWith(')')) {
-            reportError(ExceptionType.SYNTAX_ERROR, `断言表达式必须用括号括起`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('assert_need_parentheses'));
             return;
         }
 
@@ -2774,7 +3182,7 @@ class Interpreter {
 
                 // 检查消息是否用引号括起
                 if (!messageLine.startsWith('"') || !messageLine.endsWith('"')) {
-                    reportError(ExceptionType.SYNTAX_ERROR, `断言消息必须用双引号括起`);
+                    reportError(ExceptionType.SYNTAX_ERROR, t('assert_message_quoted'));
                     return;
                 }
 
@@ -2796,7 +3204,7 @@ class Interpreter {
                 // 断言失败: 抛出异常交由主循环处理 (可被try-catch捕获; 未捕获时由主循环console.error输出并终止)
                 throw error;
             } else {
-                reportError(ExceptionType.SYNTAX_ERROR, `断言条件无效: ${conditionExpr}`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('assert_condition_invalid', {expr: conditionExpr}));
             }
         }
     }
@@ -2814,11 +3222,11 @@ class Interpreter {
             if (typeof condition === 'number') {
                 // 严格检查是否为整数
                 if (!Number.isInteger(condition)) {
-                    reportError(ExceptionType.TYPE_ERROR, `switch语句的条件表达式只能是int或string类型, 数字必须为整数`);
+                    reportError(ExceptionType.TYPE_ERROR, t('switch_cond_int_only'));
                     typeError = true;
                 }
             } else if (typeof condition !== 'string') {
-                reportError(ExceptionType.TYPE_ERROR, `switch语句的条件表达式只能是int或string类型`);
+                reportError(ExceptionType.TYPE_ERROR, t('switch_cond_type'));
                 typeError = true;
             }
 
@@ -2853,7 +3261,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `无效的switch条件表达式: ${params}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('switch_cond_invalid', {expr: params}));
         }
     }
 
@@ -2862,7 +3270,7 @@ class Interpreter {
         debugLog(1, `处理 case 语句`);
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            reportError(ExceptionType.SYNTAX_ERROR, `case语句必须在switch块内使用`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('case_outside_switch'));
             return;
         }
 
@@ -2906,7 +3314,7 @@ class Interpreter {
 
             // 检查类型是否与switch条件类型匹配
             if (switchInfo.type === 'switch' && typeof caseValue !== typeof switchInfo.condition) {
-                reportError(ExceptionType.TYPE_ERROR, `case值的类型必须与switch条件类型相同`);
+                reportError(ExceptionType.TYPE_ERROR, t('case_type_mismatch'));
                 // throw {
                 //     type: ExceptionType.TYPE_ERROR,
                 //     message: `类型错误: case值的类型必须与switch条件类型相同 在第 ${currentLinePointer + 1} 行`,
@@ -2948,7 +3356,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `无效的case值: ${params}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('case_value_invalid', {expr: params}));
         }
     }
 
@@ -2956,7 +3364,7 @@ class Interpreter {
     static executeDefault(): void {
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            reportError(ExceptionType.SYNTAX_ERROR, `default语句必须在switch块内使用`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('default_outside_switch'));
             return;
         }
 
@@ -2998,7 +3406,7 @@ class Interpreter {
     static executeEndSwitch(): void {
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
-            reportError(ExceptionType.SYNTAX_ERROR, `endswc语句必须在switch块内使用`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('endswc_outside_switch'));
             return;
         }
 
@@ -3012,7 +3420,7 @@ class Interpreter {
         // 1. 格式校验
         const match = params.match(/^\(([^)]+)\)\s*:\s*([a-zA-Z_]\w*)$/);
         if (!match) {
-            reportError(ExceptionType.SYNTAX_ERROR, `必须使用 jump (condition) :标签名 格式 (标签需以字母/下划线开头)`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('jump_format'));
             return;
         }
 
@@ -3021,7 +3429,7 @@ class Interpreter {
         const tagName = match[2].trim();
 
         if (!conditionExpr) {
-            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式不能为空`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_expr_empty'));
             return;
         }
 
@@ -3033,7 +3441,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `条件表达式无效: ${conditionExpr}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('cond_expr_invalid', {expr: conditionExpr}));
             return;
         }
 
@@ -3045,7 +3453,7 @@ class Interpreter {
 
         // 4. 标签跳转 (仅支持标签, 不再检查行号) 
         if (TAGS[tagName] === undefined) {
-            reportError(ExceptionType.REFERENCE_ERROR, `未定义的标签: ${tagName}`);
+            reportError(ExceptionType.REFERENCE_ERROR, t('tag_undefined', {name: tagName}));
             return;
         }
 
@@ -3062,7 +3470,7 @@ class Interpreter {
             debugLog(1, `获得解析结果`);
             // 检查是否是数组元素赋值
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
-                debugLog(1, `侦测到 array_assignment target:${result.target.arrayName} index:${result.target.index}`);
+                debugLog(1, `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
                 const { target, value } = result;
                 // 处理 global. 前缀 (与整体赋值分支一致)
                 let targetName: string = target.arrayName;
@@ -3074,25 +3482,25 @@ class Interpreter {
                 const arrayVar = ScopeManager.getVariable(targetName, currentLinePointer, true, isGlobal);
                 // 检查变量是否存在且是数组类型
                 if (!arrayVar) {
-                    throw { type: ExceptionType.REFERENCE_ERROR, message: `未定义的数组: ${targetName}`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
                 debugLog(1, `获得的数组名称: ${arrayVar.name}`);
 
                 if (arrayVar.type !== DataType.ARRAY) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `该 ${targetName} 不是数组类型`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 if (arrayVar.isConst) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${targetName} 是常量数组, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('const_array_assignment', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 if (arrayVar.isReadonlyArray) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `数组 ${targetName} 是只读引用, 不能被赋值`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('readonly_array_assignment', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 检查索引是否在数组范围内
                 if (target.index >= arrayVar.arrayLength) {
-                    throw { type: ExceptionType.RANGE_ERROR, message: `范围错误: 数组索引 ${target.index} 超出范围, 数组长度为 ${arrayVar.arrayLength}`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.RANGE_ERROR, message: t('arr_index_out_of_range', {index: target.index, length: arrayVar.arrayLength}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 更新数组元素
@@ -3100,7 +3508,7 @@ class Interpreter {
                 const elementType = arrayVar.arrayElementType;
                 const validation = ScopeManager.validateType(value, elementType);
                 if (!validation.isValid) {
-                    throw { type: ExceptionType.TYPE_ERROR, message: `数组元素类型错误: 期望 ${elementType} 类型, 实际 ${typeof value}`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('array_element_type_mismatch', {expected: elementType, actual: typeof value}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 更新数组元素
@@ -3129,14 +3537,14 @@ class Interpreter {
                         if (lhsVar.isConst) {
                             throw {
                                 type: ExceptionType.TYPE_ERROR,
-                                message: `常量数组 ${newTarget} 不能被整体赋值`,
+                                message: t('const_array_whole_assignment', {name: newTarget}),
                                 lineNumber: currentLinePointer
                             } as Exception;
                         }
                         if (lhsVar.isReadonlyArray) {
                             throw {
                                 type: ExceptionType.TYPE_ERROR,
-                                message: `数组 ${newTarget} 是只读引用, 不能被整体赋值`,
+                                message: t('readonly_array_whole_assignment', {name: newTarget}),
                                 lineNumber: currentLinePointer
                             } as Exception;
                         }
@@ -3159,7 +3567,7 @@ class Interpreter {
                     // 未定义变量抛引用错误 (可被try-catch捕获)
                     throw {
                         type: ExceptionType.REFERENCE_ERROR,
-                        message: `未定义的${isGlobal ? '全局' : '局部'}变量 ${newTarget}`,
+                        message: t('var_undefined_scope', {scope: isGlobal ? '全局' : '局部', name: newTarget}),
                         lineNumber: currentLinePointer
                     } as Exception;
                 }
@@ -3183,7 +3591,7 @@ class Interpreter {
                     // 未定义变量抛引用错误 (可被try-catch捕获)
                     throw {
                         type: ExceptionType.REFERENCE_ERROR,
-                        message: `未定义的${isGlobal ? '全局' : '局部'}变量 ${newLhs}`,
+                        message: t('var_undefined_scope', {scope: isGlobal ? '全局' : '局部', name: newLhs}),
                         lineNumber: currentLinePointer
                     } as Exception;
                 }
@@ -3193,7 +3601,7 @@ class Interpreter {
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
-            reportError(ExceptionType.SYNTAX_ERROR, `无法执行操作 '${command}': ${error}`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('execute_operation_failed', {command: command, error: error}));
             // 可以选择设置变量为undefined或其他默认值
         }
     }
@@ -3210,7 +3618,7 @@ class Interpreter {
                 if (targetInfo && targetInfo.startLine === block.start) {
                     throw {
                         type: ExceptionType.TYPE_ERROR,
-                        message: `循环变量 ${varName} 是只读的, 禁止修改`,
+                        message: t('loop_var_readonly', {name: varName}),
                         lineNumber: currentLinePointer
                     } as Exception;
                 }
@@ -3230,7 +3638,11 @@ class Interpreter {
             }
             debugLog(1, `计算表达式时出错 '${expr}' 在第 ${currentLinePointer + 1} 行: ${e}`);
             // 重新抛出错误, 以便调用者可以处理
-            throw new Error(`计算表达式时出错 '${expr}' 在第 ${currentLinePointer + 1} 行: ${(e as Error).message}`);
+            throw {
+                type: ExceptionType.UNKNOWN_ERROR,
+                message: t('expr_eval_error', {expr: expr, inner: (e as Error).message}),
+                lineNumber: currentLinePointer
+            } as Exception;
         }
     }
 
@@ -3241,23 +3653,23 @@ class Interpreter {
         if (params.includes('except')) {
             const match = params.match(/^(.*?)\s+except\s+(.*)$/);
             if (!match) {
-                reportError(ExceptionType.SYNTAX_ERROR, `except关键字使用格式错误`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('except_format_error'));
                 return;
             }
             debugLog(1, `匹配到except关键字`);
             const beforeExcept = match[1].trim().split(/\s+/);
             const afterExcept = match[2].trim().split(/\s+/);
             if (beforeExcept.length !== 1 || beforeExcept[0] !== 'all') {
-                reportError(ExceptionType.SYNTAX_ERROR, `except关键字必须正确配合all关键字使用`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('except_requires_all'));
                 return;
             } else if (beforeExcept.length === 1 && beforeExcept[0] === 'all') {
                 debugLog(1, `要排除的变量: ${afterExcept}`);
                 if (afterExcept.length === 0) {
-                    throw { type: ExceptionType.SYNTAX_ERROR, message: `except关键字必须配合变量使用 在第 ${currentLinePointer + 1} 行`, lineNumber: currentLinePointer } as Exception;
+                    throw { type: ExceptionType.SYNTAX_ERROR, message: t('except_requires_var'), lineNumber: currentLinePointer } as Exception;
                 }
                 for (let i = 0; i < afterExcept.length; i++) {
                     if (afterExcept[i].startsWith('global.')) {
-                        throw { type: ExceptionType.SYNTAX_ERROR, message: `except关键字仅适用于局部变量`, lineNumber: currentLinePointer } as Exception;
+                        throw { type: ExceptionType.SYNTAX_ERROR, message: t('except_local_only'), lineNumber: currentLinePointer } as Exception;
                     }
                 }
                 let remainedVars: Variable[] = [];
@@ -3304,13 +3716,13 @@ class Interpreter {
                     let varInfo = ScopeManager.getVariableInfo(cleanedVars[i], currentLinePointer);
                     if (varInfo && varInfo.startLine >= funcStartLine && varInfo.endLine <= funcEndLine) {
                         ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
-                        debugLog(2, `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "lastline" : varInfo.endLine + 1}`);
+                        debugLog(2, `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1}`);
                     }
                 }
                 debugLog(1, `变量清除完成`);
             }
             else {
-                reportError(ExceptionType.SYNTAX_ERROR, `函数外不可声明局部变量, 若要清除全局变量请用global关键字`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('purge_local_outside_func'));
             }
         }
     }
@@ -3318,7 +3730,7 @@ class Interpreter {
     // 执行遇到没有return语句的函数的善后工作
     static executeFunctionEndTag(): void {
         if (CONTROL_FLOW_STACK.length === 0) {
-            reportError(ExceptionType.SYNTAX_ERROR, `检测到单独的的函数闭合标记`);
+            reportError(ExceptionType.SYNTAX_ERROR, t('stray_func_end_tag'));
             return;
         } else {
             const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -3330,7 +3742,7 @@ class Interpreter {
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
-                    reportError(ExceptionType.TYPE_ERROR, `函数 ${funcInfo.name} 期望返回 ${funcInfo.returnType} 类型的值, 但最终执行到函数结束标记`);
+                    reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', {name: funcInfo.name, type: funcInfo.returnType}));
                     currentLinePointer = block.callFrom;
                     return;
                 } else {
@@ -3339,7 +3751,7 @@ class Interpreter {
                     return;
                 }
             } else {
-                reportError(ExceptionType.SYNTAX_ERROR, `未知的函数闭合标记`);
+                reportError(ExceptionType.SYNTAX_ERROR, t('unknown_func_end_tag'));
                 return;
             }
         }
@@ -3396,7 +3808,7 @@ class ExpressionEvaluator {
 
             // 检查是否还有未处理的令牌
             if (this.currentTokenIndex < this.tokens.length) {
-                throw new Error(`意外的标记在处理令牌阶段: ${this.tokens[this.currentTokenIndex]}`);
+                throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_token_after_parse', {token: this.tokens[this.currentTokenIndex]}), lineNumber: this.currentLine } as Exception;
             }
 
             return result;
@@ -3407,13 +3819,13 @@ class ExpressionEvaluator {
             }
             const msg = (error as Error).message || String(error);
             let type: ExceptionType;
-            if (/^TypeError|类型错误|类型不匹配|需要 exactly|只能用于/.test(msg)) {
+            if (/^TypeError|类型错误|类型不匹配|需要 \d+ 个参数|只能用于|必须是数字|要求.*操作数|expects .* argument|must be a|must be of type|requires .* operand/.test(msg)) {
                 type = ExceptionType.TYPE_ERROR;
-            } else if (/^RangeError|范围错误|越界|除零|必须是非负整数/.test(msg)) {
+            } else if (/^RangeError|范围错误|越界|除零|必须是非负整数|out of range|division by zero|must be non-negative|must be within/.test(msg)) {
                 type = ExceptionType.RANGE_ERROR;
-            } else if (/未知函数|未定义的数组/.test(msg)) {
+            } else if (/未知函数|未定义的数组|unknown function|is not defined/.test(msg)) {
                 type = ExceptionType.REFERENCE_ERROR;
-            } else if (/意外的|缺少|无效的|未知操作|意外结束|意外字符/.test(msg)) {
+            } else if (/意外的|缺少|无效的|未知操作|意外结束|意外字符|unexpected|missing|invalid|unknown operation|unexpected end/.test(msg)) {
                 type = ExceptionType.SYNTAX_ERROR;
             } else {
                 type = ExceptionType.UNKNOWN_ERROR;
@@ -3503,7 +3915,7 @@ class ExpressionEvaluator {
                 // 解析分隔符
                 tokens.push(char);
             } else {
-                throw new Error(`意外的字符: ${char} at position ${i}`);
+                throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_char', {char: char, pos: i}), lineNumber: this.currentLine } as Exception;
             }
             i++;
         }
@@ -3566,7 +3978,11 @@ class ExpressionEvaluator {
                 this.currentTokenIndex++;
                 const right = this.parseExpression();
                 // 注意: 赋值运算符的处理需要在调用上下文中进行, 这里仅做解析
-                throw new Error(`赋值运算符应在调用上下文中处理 在 ${this.currentTokenIndex} 位置`);
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: t('assignment_op_in_call_context', {pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
 
             }
         }
@@ -3702,7 +4118,7 @@ class ExpressionEvaluator {
     private static parsePrimary(): any {
         debugLog(2, `解析基本元素中: ${this.tokens}`);
         if (this.currentTokenIndex >= this.tokens.length) {
-            throw new Error(`表达式意外结束 第 ${this.currentTokenIndex} 个token`);
+            throw { type: ExceptionType.SYNTAX_ERROR, message: t('expr_unexpected_end', {pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
 
         const token = this.tokens[this.currentTokenIndex];
@@ -3740,7 +4156,7 @@ class ExpressionEvaluator {
             // 规范: 条件/表达式中出现 null 或 undefined 立即抛出错误
             throw {
                 type: ExceptionType.TYPE_ERROR,
-                message: `表达式中出现 null 值, 不被允许`,
+                message: t('expr_null_not_allowed'),
                 lineNumber: this.currentLine
             } as Exception;
         }
@@ -3748,7 +4164,7 @@ class ExpressionEvaluator {
             // 规范: 条件/表达式中出现 null 或 undefined 立即抛出错误
             throw {
                 type: ExceptionType.TYPE_ERROR,
-                message: `表达式中出现 undefined 值, 不被允许`,
+                message: t('expr_undefined_not_allowed'),
                 lineNumber: this.currentLine
             } as Exception;
         }
@@ -3796,7 +4212,7 @@ class ExpressionEvaluator {
                 // 变量未定义: 抛引用错误 (可被try-catch捕获)
                 throw {
                     type: ExceptionType.REFERENCE_ERROR,
-                    message: `未定义的${isGlobal ? '全局' : ''}变量 ${token}`,
+                    message: isGlobal ? t('var_undefined_expr_global', { name: token }) : t('var_undefined_expr_local', { name: token }),
                     lineNumber: this.currentLine
                 } as Exception;
             }
@@ -3804,7 +4220,7 @@ class ExpressionEvaluator {
             if (varInfo.value === undefined) {
                 throw {
                     type: ExceptionType.TYPE_ERROR,
-                    message: `变量 ${token} 的值为 undefined, 不能被使用`,
+                    message: t('var_value_undefined', { name: token }),
                     lineNumber: this.currentLine
                 } as Exception;
             }
@@ -3818,14 +4234,22 @@ class ExpressionEvaluator {
             const expr = this.parseExpression();
 
             if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ')') {
-                throw new Error(`缺少右括号 at position ${this.currentTokenIndex}`);
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: t('missing_right_paren', {pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
             }
 
             this.currentTokenIndex++;
             return expr;
         }
 
-        throw new Error(`意外的标记在解析基本元素阶段: ${token} at position ${this.currentTokenIndex}`);
+        throw {
+            type: ExceptionType.SYNTAX_ERROR,
+            message: t('unexpected_token_primary', {token: token, pos: this.currentTokenIndex}),
+            lineNumber: this.currentLine
+        } as Exception;
     }
 
     // 解析数组元素访问
@@ -3845,29 +4269,37 @@ class ExpressionEvaluator {
 
         // 检查索引是否为数字
         if (typeof indexExpr !== 'number') {
-            throw new Error(`TypeError: 数组索引必须是数字类型 at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.TYPE_ERROR,
+                message: t('array_index_not_number', {pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
 
         // 检查索引是否为非负整数
         if (!Number.isInteger(indexExpr) || indexExpr < 0) {
-            throw new Error(`RangeError: 数组索引必须是非负整数 at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.RANGE_ERROR,
+                message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
 
         // 跳过右方括号
         if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ']') {
-            throw new Error(`数组访问缺少右方括号: ${newArrayName} at position ${this.currentTokenIndex}`);
+            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_missing_right_bracket', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
         this.currentTokenIndex++;
 
         // 获取数组变量
         const arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, isGlobal);
         if (!arrayVar || arrayVar.type !== DataType.ARRAY) {
-            throw new Error(`变量 '${newArrayName}' 不是数组类型 at position ${this.currentTokenIndex}`);
+            throw { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
 
         // 检查索引是否越界
         if (indexExpr >= (arrayVar.arrayLength || 0)) {
-            throw new Error(`数组索引越界: 索引 ${indexExpr} 超出数组 '${newArrayName}' 的范围 [0, ${arrayVar.arrayLength ? arrayVar.arrayLength - 1 : -1}] at position ${this.currentTokenIndex}`);
+            throw { type: ExceptionType.RANGE_ERROR, message: t('array_index_out_of_range_access', {index: indexExpr, name: newArrayName, max: arrayVar.arrayLength ? arrayVar.arrayLength - 1 : -1, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
 
         // 返回数组元素的值
@@ -3875,7 +4307,7 @@ class ExpressionEvaluator {
         if (elements && indexExpr < elements.length) {
             return elements[indexExpr].value;
         } else {
-            throw new Error(`数组元素访问错误: 无法访问数组 '${newArrayName}' 的元素 ${indexExpr} at position ${this.currentTokenIndex}`);
+            throw { type: ExceptionType.UNKNOWN_ERROR, message: t('array_element_access_error', {name: newArrayName, index: indexExpr, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
     }
 
@@ -3889,17 +4321,25 @@ class ExpressionEvaluator {
 
         // 检查索引是否为数字
         if (typeof indexExpr !== 'number') {
-            throw new Error(`数组索引必须是数字类型 at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.TYPE_ERROR,
+                message: t('array_index_not_number', {pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
 
         // 检查索引是否为非负整数
         if (!Number.isInteger(indexExpr) || indexExpr < 0) {
-            throw new Error(`数组索引必须是非负整数 at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.RANGE_ERROR,
+                message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
 
         // 跳过右方括号
         if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ']') {
-            throw new Error(`数组访问缺少右方括号: ${arrayName} at position ${this.currentTokenIndex}`);
+            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_missing_right_bracket', {name: arrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
         this.currentTokenIndex++;
 
@@ -3911,7 +4351,11 @@ class ExpressionEvaluator {
         // 检查是否是有效的标识符 (允许点号, 以支持 global.var 前缀赋值)
         if (this.currentTokenIndex >= this.tokens.length ||
             !/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex])) {
-            throw new Error(`无效的赋值目标 at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.SYNTAX_ERROR,
+                message: t('invalid_assignment_target', {pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
 
         const varName = this.tokens[this.currentTokenIndex];
@@ -3941,7 +4385,11 @@ class ExpressionEvaluator {
 
         // 跳过右括号
         if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ')') {
-            throw new Error(`函数调用缺少右括号: ${funcName} at position ${this.currentTokenIndex}`);
+            throw {
+                type: ExceptionType.SYNTAX_ERROR,
+                message: t('func_call_missing_right_paren', {name: funcName, pos: this.currentTokenIndex}),
+                lineNumber: this.currentLine
+            } as Exception;
         }
         this.currentTokenIndex++;
 
@@ -3955,41 +4403,41 @@ class ExpressionEvaluator {
         // 支持一些内置函数
         switch (funcName) {
             case 'Math.sin':
-                if (args.length !== 1) throw new Error("Math.sin 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.sin'}), lineNumber: this.currentLine } as Exception;
                 return Math.sin(args[0]);
             case 'Math.cos':
-                if (args.length !== 1) throw new Error("Math.cos 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.cos'}), lineNumber: this.currentLine } as Exception;
                 return Math.cos(args[0]);
             case 'Math.tan':
-                if (args.length !== 1) throw new Error("Math.tan 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.tan'}), lineNumber: this.currentLine } as Exception;
                 return Math.tan(args[0]);
             case 'Math.sqrt':
-                if (args.length !== 1) throw new Error("Math.sqrt 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.sqrt'}), lineNumber: this.currentLine } as Exception;
                 return Math.sqrt(args[0]);
             case 'Math.abs':
-                if (args.length !== 1) throw new Error("Math.abs 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.abs'}), lineNumber: this.currentLine } as Exception;
                 return Math.abs(args[0]);
             case 'Math.pow':
-                if (args.length !== 2) throw new Error("Math.pow 需要 exactly two arguments");
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Math.pow'}), lineNumber: this.currentLine } as Exception;
                 return Math.pow(args[0], args[1]);
             case 'Math.floor':
-                if (args.length !== 1) throw new Error("Math.floor 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.floor'}), lineNumber: this.currentLine } as Exception;
                 return Math.floor(args[0]);
             case 'Math.ceil':
-                if (args.length !== 1) throw new Error("Math.ceil 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.ceil'}), lineNumber: this.currentLine } as Exception;
                 return Math.ceil(args[0]);
             case 'Math.round':
-                if (args.length !== 1) throw new Error("Math.round 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.round'}), lineNumber: this.currentLine } as Exception;
                 return Math.round(args[0]);
             case 'Math.max':
                 return Math.max(...args);
             case 'Math.min':
                 return Math.min(...args);
             case 'Math.random':
-                if (args.length !== 0) throw new Error("Math.random 不需要参数");
+                if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'Math.random'}), lineNumber: this.currentLine } as Exception;
                 return Math.random();
             case 'len':
-                if (args.length !== 1) throw new Error("len 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'len'}), lineNumber: this.currentLine } as Exception;
                 debugLog(2, `执行 len 传入的 arg: ${args[0]}`);
                 if (typeof args[0] === 'string') {
                     debugLog(2, `参数为 string 类型`);
@@ -4010,19 +4458,19 @@ class ExpressionEvaluator {
                         return arrayVar.arrayLength || 0;
                     }
                 }
-                throw new Error("len 只能用于字符串或数组");
+                throw { type: ExceptionType.TYPE_ERROR, message: t('len_only_str_or_array'), lineNumber: this.currentLine } as Exception;
             case 'str':
-                if (args.length !== 1) throw new Error("str 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'str'}), lineNumber: this.currentLine } as Exception;
                 return String(args[0]);
             case 'int':
-                if (args.length !== 1) throw new Error("int 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'int'}), lineNumber: this.currentLine } as Exception;
                 return parseInt(args[0]);
             case 'float':
-                if (args.length !== 1) throw new Error("float 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'float'}), lineNumber: this.currentLine } as Exception;
                 return parseFloat(args[0]);
             case 'copy':
                 // 数组副本: 深拷贝数组数据并返回独立副本 (可用于整体赋值 b = copy(a))
-                if (args.length !== 1) throw new Error("copy 需要 exactly one argument");
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'copy'}), lineNumber: this.currentLine } as Exception;
                 let copySrcArr: Variable | null = null;
                 if (args[0] && typeof args[0] === 'object' && 'type' in args[0] && args[0].type === DataType.ARRAY) {
                     copySrcArr = args[0] as Variable;
@@ -4030,7 +4478,7 @@ class ExpressionEvaluator {
                     copySrcArr = ScopeManager.getVariable(args[0], this.currentLine, true);
                 }
                 if (!copySrcArr || copySrcArr.type !== DataType.ARRAY) {
-                    throw new Error(`copy 参数必须是数组类型`);
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('copy_arg_must_be_array'), lineNumber: this.currentLine } as Exception;
                 }
                 const copiedArr: Variable = {
                     name: copySrcArr.name + "_copy",
@@ -4049,13 +4497,17 @@ class ExpressionEvaluator {
                 debugLog(1, `copy 深拷贝数组: ${copySrcArr.name} (长度 ${copiedArr.arrayLength})`);
                 return copiedArr;
             default:
-                throw new Error(`未知函数: ${funcName} at position ${this.currentTokenIndex}`);
+                throw {
+                    type: ExceptionType.REFERENCE_ERROR,
+                    message: t('unknown_function', {name: funcName, pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
         }
     }
 
     // 计算二元运算
     private static evaluateOperation(operator: string, left: any, right: any): any {
-        debugLog(1, `计算操作: ${operator}, 左操作数: ${JSON.stringify(left)} (${typeof left}), 右操作数: ${JSON.stringify(right)} (${typeof right})`);
+        debugLog(1, `计算操作: ${operator}, 左操作数: ${JSON.stringify(left)} (左类型: ${typeof left}), 右操作数: ${JSON.stringify(right)} (右类型: ${typeof right})`);
 
         // 提取操作数的值和类型
         const leftValue = left;
@@ -4070,13 +4522,13 @@ class ExpressionEvaluator {
                 (leftType === 'object' && left && left.type &&
                     (left.type === DataType.INT || left.type === DataType.FLOAT || left.type === DataType.NUMBER));
             if (!isLeftNumeric) {
-                throw new Error(`类型错误: 运算符 ${operator} 要求左操作数是数字类型`);
+                throw { type: ExceptionType.TYPE_ERROR, message: t('op_left_operand_not_number', {op: operator}), lineNumber: this.currentLine } as Exception;
             }
             const isRightNumeric = rightType === 'number' ||
                 (rightType === 'object' && right && right.type &&
                     (right.type === DataType.INT || right.type === DataType.FLOAT || right.type === DataType.NUMBER));
             if (!isRightNumeric) {
-                throw new Error(`类型错误: 运算符 ${operator} 要求右操作数是数字类型`);
+                throw { type: ExceptionType.TYPE_ERROR, message: t('op_right_operand_not_number', {op: operator}), lineNumber: this.currentLine } as Exception;
             }
         } else if (operator === '==' || operator === '!=') {
             // 这些运算符要求左右操作数类型相同
@@ -4094,10 +4546,10 @@ class ExpressionEvaluator {
             const rightValueType = rightType === 'object' && right && right.type ? right.type : rightType;
 
             if (leftValueType !== DataType.BOOL && leftType !== 'boolean') {
-                throw new Error(`类型错误: 逻辑运算符 ${operator} 要求左操作数是布尔类型`);
+                throw { type: ExceptionType.TYPE_ERROR, message: t('logic_op_left_operand_not_bool', {op: operator}), lineNumber: this.currentLine } as Exception;
             }
             if (rightValueType !== DataType.BOOL && rightType !== 'boolean') {
-                throw new Error(`类型错误: 逻辑运算符 ${operator} 要求右操作数是布尔类型`);
+                throw { type: ExceptionType.TYPE_ERROR, message: t('logic_op_right_operand_not_bool', {op: operator}), lineNumber: this.currentLine } as Exception;
             }
         }
 
@@ -4116,7 +4568,7 @@ class ExpressionEvaluator {
                 debugLog(2, `${operator} operated`);
                 return leftValue * rightValue;
             case '/':
-                if (rightValue === 0) throw new Error("除零错误");
+                if (rightValue === 0) throw { type: ExceptionType.RANGE_ERROR, message: t('division_by_zero'), lineNumber: this.currentLine } as Exception;
                 debugLog(2, `${operator} operated`);
                 return leftValue / rightValue;
             case '%':
@@ -4150,7 +4602,11 @@ class ExpressionEvaluator {
                 debugLog(2, `${operator} operated`);
                 return Boolean(leftValue || rightValue);
             default:
-                throw new Error(`未知操作符: ${operator} at position ${this.currentTokenIndex}`);
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: t('unknown_operator', {op: operator, pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
         }
     }
 
@@ -4164,7 +4620,11 @@ class ExpressionEvaluator {
             case '!':
                 return !operand;
             default:
-                throw new Error(`未知一元操作符: ${operator} at position ${this.currentTokenIndex}`);
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: t('unknown_unary_operator', {op: operator, pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
         }
     }
 
@@ -4191,30 +4651,52 @@ if (typeof require !== 'undefined') {
 function main() {
     // 检查是否在Node.js环境中运行
     if (typeof process !== 'undefined' && process.argv) {
-        // 获取命令行参数
-        // 从 Node.js 进程的命令行参数中提取除前两个参数之外的所有参数
+        // 获取命令行参数 (从 Node.js 进程的命令行参数中提取除前两个参数之外的所有参数)
         const args = process.argv.slice(2);
-        // 获取可能存在的索引为 3 的参数, 若不存在则返回 undefined
-        const argDebug = args.length > 2 ? args[1] : undefined;
+        // 通用可选参数解析: 支持 --debug N 与 --lang en|zh, 顺序任意, 文件名必须是第一个非可选参数
+        let filename: string | undefined;
+        let debugValue: string | undefined;
+        let langArg: string | undefined;
+        for (let i = 0; i < args.length; i++) {
+            if (args[i] === '--debug') {
+                debugValue = args[i + 1];
+                i++;
+            } else if (args[i] === '--lang') {
+                langArg = args[i + 1];
+                i++;
+            } else if (filename === undefined) {
+                filename = args[i];
+            }
+        }
 
-        if (argDebug === '--debug') {
-            const argDebugValue = args.length > 2 ? args[2] : undefined;
+        // 语言设置: 仅接受 en/zh, 其他值忽略 (保持默认中文)
+        if (langArg === 'en') {
+            LANG = 'en';
+        } else if (langArg !== 'zh' && langArg !== undefined) {
+            console.log(t('cli_invalid_lang'));
+        }
 
-            if (argDebugValue && Number.isInteger(Number(argDebugValue)) && Number(argDebugValue) >= 0) {
-                DEBUG_LEVEL = Number(argDebugValue);
+        // 调试等级设置
+        if (debugValue !== undefined) {
+            if (Number.isInteger(Number(debugValue)) && Number(debugValue) >= 0) {
+                DEBUG_LEVEL = Number(debugValue);
             } else {
-                console.log(`未指定调试参数等级, 初始化默认为 0`);
+                console.log(t('cli_no_debug_level'));
             }
         }
 
         // 检查是否有参数
-        if (args.length === 0) {
-            console.error('用法: node noethingScript-Interpreter.js <文件名>');
+        if (filename === undefined) {
+            console.error(t('cli_usage'));
             process.exit(1);
         }
 
-        // 获取文件名
-        const filename = args[0];
+        // 输出语言切换提示 (第一行, 用与当前输出语言不同的语言书写, 便于用户发现切换方式)
+        if (LANG === 'en') {
+            console.error('提示: 使用 --lang zh 切换为中文输出。');
+        } else {
+            console.error('Tip: Run with --lang en for English messages.');
+        }
 
         try {
             // 读取文件内容
@@ -4224,11 +4706,12 @@ function main() {
             Interpreter.loadProgram(code);
             Interpreter.run();
         } catch (error) {
-            reportError(ExceptionType.UNKNOWN_ERROR, `无法读取文件 '${filename}': 未知错误类型 - ${error instanceof Error ? error.message : String(error)}`, 0);
+            // CLI 层错误 (脚本运行前): 与脚本执行错误区分, 不用 [ERROR N] [行 X] 脚本错误格式
+            console.error(t('cli_cannot_read', { filename: filename, error: error instanceof Error ? error.message : String(error) }));
             process.exit(1);
         }
     } else {
-        reportError(ExceptionType.UNKNOWN_ERROR, '此脚本需要在Node.js环境中运行以支持文件读取');
+        console.error(t('cli_node_required'));
     }
 }
 
@@ -4256,7 +4739,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                 }
                 delete RETURN_VALUES[funcName];
                 if (!arrStruct || arrStruct.type !== DataType.ARRAY || !arrStruct.arrayElements) {
-                    reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 未返回有效的数组值`, oldLinePointer + 1);
+                    reportError(ExceptionType.TYPE_ERROR, t('func_no_valid_array_return', {name: funcName}), oldLinePointer + 1);
                     return;
                 }
                 if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
@@ -4284,11 +4767,11 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         existing.isReadonlyArray = arrStruct.isReadonlyArray;
                         debugLog(2, `数组返回值绑定到已有数组变量 ${resultVar}`);
                     } else {
-                        reportError(ExceptionType.TYPE_ERROR, `结果变量 ${resultVar} 不是数组类型, 无法接收数组返回值`);
+                        reportError(ExceptionType.TYPE_ERROR, t('result_var_not_array', {name: resultVar}));
                     }
                 }
             } else {
-                reportError(ExceptionType.UNKNOWN_ERROR, `函数 ${funcName} 未返回数组值`, oldLinePointer + 1);
+                reportError(ExceptionType.TYPE_ERROR, t('func_no_array_return', {name: funcName}), oldLinePointer + 1);
             }
             return;
         }

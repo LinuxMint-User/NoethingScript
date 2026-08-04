@@ -239,6 +239,15 @@ node dist/noethingScript-Interpreter.js program.ns --debug 2
 ```
 命令行指定的级别优先级更高，文档内低于命令行的级别会被忽略。
 
+### 输出语言控制
+解释器默认使用中文输出错误/警告/调试信息，可通过 `--lang` 参数切换为英文：
+```bash
+node dist/noethingScript-Interpreter.js program.ns --lang en
+node dist/noethingScript-Interpreter.js program.ns --lang en --debug 2
+```
+`--lang` 仅接受 `en` 或 `zh`（其他值忽略并保持默认中文），与 `--debug` 顺序可任意。运行时会用另一种语言提示当前语言及其切换方式（如默认中文时第一行显示英文 Tip）。
+
+
 #### 示例：
 ```ns
 debug 1
@@ -482,3 +491,20 @@ purge, all, except, call, print, debug, mut, copy
 | `LoopInitError`       | for循环初始化失败 |
 | `LoopUpdateError`     | for循环更新表达式执行失败 |
 | `UnknownError`        | 未知错误     |
+
+### 错误报告格式
+
+控制台输出统一为 `[ERROR N] [行 X] 类型: 消息`（英文输出时 `[Line X]`），错误编号与异常类型对应：
+
+| 编号 | 异常类型 | 说明 |
+|------|----------|------|
+| 1 | `SyntaxError` | 语法错误 |
+| 2 | `TypeError` | 类型错误 |
+| 3 | `ReferenceError` | 引用错误 |
+| 4 | `RangeError` | 范围错误 |
+| 5 | `AssertionError` | 断言错误 |
+| 6 | `UnknownError` | 未知错误 |
+| 7 | `LoopInitError` | for循环初始化失败 |
+| 8 | `LoopUpdateError` | for循环更新表达式执行失败 |
+
+此外还有两类与脚本无关的输出：非致命问题以 `[WARN] [行 X] 警告: 消息` 输出；解释器自身缺陷（原生 JS 异常）以 `[内部错误] [行 X] 解释器内部发生错误: 消息` 输出并终止；脚本运行前的环境/文件错误以 `[错误] 消息` 输出。
