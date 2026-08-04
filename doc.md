@@ -427,7 +427,7 @@ print r1[0]   // 5
 | `int(x)` | 任意 | int | 转换为整数（`parseInt` 语义） |
 | `float(x)` | 任意 | float | 转换为浮点数 |
 | `copy(arr)` | 数组 | array | 数组深拷贝副本，用于实参副本或整体赋值（见"数组作为函数参数"/"数组整体赋值"） |
-| `input()` | 无 | string | 运行时输入：读取一行用户输入（不含换行符）。命令行读取 stdin；浏览器默认 `prompt` 弹窗，可用 `NSI.setInput()` 绑定自定义输入源（如页面输入框）。注意声明初始化不允许函数调用，需先声明后赋值 |
+| `input()` | 无 | string | 运行时输入：读取一行用户输入（不含换行符）。命令行读取 stdin；浏览器默认 `prompt` 弹窗，可用 `NSI.setInput()` 绑定自定义输入源（如页面输入框）。浏览器交互模式（`NSI.runInteractive`）下无输入时挂起等待 `NSI.resumeInput(value)` 喂入（见"浏览器中使用"）。注意声明初始化不允许函数调用，需先声明后赋值 |
 
 #### Math 数学对象
 `Math.` 前缀调用数学函数（12 个）：
@@ -599,7 +599,34 @@ node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
+`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
+
+##### 交互执行（程序模式）
+
+`run()` 是同步执行到底的。若脚本需要**自持主循环**（游戏等交互程序：脚本在 `input()` 处等待用户输入、拿到后继续跑），可用 `runInteractive` + `resumeInput` 实现挂起/恢复，让脚本自持完整流程、JS 只做交互胶水：
+
+```html
+<script>
+    // 启动: 脚本跑到 input() 且无可用输入时挂起, 返回 'suspended'; 跑完返回 'finished'
+    const status = window.NSI.runInteractive(NS_SCRIPT, () => {
+        // 可选回调: 挂起时通知宿主 (如刷新"等待输入"提示)
+    });
+
+    // 用户按键时: 从挂起处继续执行 (每按键喂一次), 返回 'suspended'/'finished'
+    function onKey(key) {
+        if (window.NSI.resumeInput(key) === 'finished') {
+            // 脚本运行结束 (如用户选择退出)
+        }
+    }
+
+    // 重新开局: 直接再次 runInteractive 会重新加载程序并重置一切
+    function restart() {
+        window.NSI.runInteractive(NS_SCRIPT, () => {});
+    }
+</script>
+```
+
+约定：脚本一行内只出现一次 `input()`（恢复时会重执行挂起行）；`try` 块内挂起需自行避免（语义是"重做"，会被 catch 捕获）。完整示例见 `examples/2048_web.html`（网页版 2048，脚本与命令行版 `examples/2048.ns` 同构、自持主循环）。
 
 ## 常见问题 (FAQ)
 

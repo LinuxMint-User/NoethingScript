@@ -9,6 +9,19 @@ var DEBUG_LEVEL: number = 0; // 默认不输出debug信息
 // 自定义运行时输入处理器 (优先级最高): 由 NSI.setInput() 设置, 未设置时回退到默认 (Node 读 stdin / 浏览器 prompt)
 var INPUT_HANDLER: (() => string) | null = null;
 
+// ===== 浏览器交互执行 (input 挂起/恢复) =====
+// 交互模式下脚本自持主流程: 执行到 input() 且无可用输入时挂起 (抛信号交还控制权),
+// 宿主通过 NSI.resumeInput(value) 提供输入后从挂起点继续执行。
+var INPUT_INTERACTIVE_MODE: boolean = false;    // 交互模式开关 (NSI.runInteractive 开启)
+var INPUT_ON_REQUEST: (() => void) | null = null; // 挂起时通知宿主 (如刷新"等待输入"提示)
+var INPUT_PRELOAD: string[] = [];               // 恢复时预取的输入值队列
+var INPUT_SUSPENDED: boolean = false;           // 当前是否处于挂起等待输入状态
+// 挂起信号: 带 type 字段以便穿透解释器各层 catch (该 type 不属于 ExceptionType, 不会被当作脚本异常)
+const INPUT_SUSPEND_SIGNAL: any = { type: '__INPUT_SUSPEND__' };
+function isInputSuspend(e: any): boolean {
+    return !!e && e.type === '__INPUT_SUSPEND__';
+}
+
 // 自定义debug日志函数
 function debugLog(level: number, ...args: any[]): void {
     if (DEBUG_LEVEL >= level) {
@@ -1406,28 +1419,34 @@ class Interpreter {
 
     // 执行程序
     static run(): void {
-        currentLinePointer = 0;
-        CONTROL_FLOW_STACK = [];
-        EXCEPTION_STACK = [];
-        PENDING_EXCEPTION = null;
-        IN_MULTILINE_COMMENT = false;
-        CALL_FRAME_ID = 0;
+        if (!INPUT_SUSPENDED) {
+            // 首次执行: 重置执行现场
+            currentLinePointer = 0;
+            CONTROL_FLOW_STACK = [];
+            EXCEPTION_STACK = [];
+            PENDING_EXCEPTION = null;
+            IN_MULTILINE_COMMENT = false;
+            CALL_FRAME_ID = 0;
 
-        // 检查第一行是否包含debug关键字
-        if (programLines.length > 0) {
-            const firstLine = programLines[0].trim();
-            if (firstLine.startsWith('debug ')) {
-                const debugLevelStr = firstLine.substring(6).trim();
-                const debugLevel = parseInt(debugLevelStr);
-                if (!isNaN(debugLevel) && debugLevel >= DEBUG_LEVEL) {
-                    DEBUG_LEVEL = debugLevel;
-                    debugLog(1, `Debug级别设置为: ${DEBUG_LEVEL}`);
-                } else {
-                    debugLog(1, `文档内指定调试级别 ${debugLevel} 低于外部指定调试级别 ${DEBUG_LEVEL}, 忽略文档内调试级别`);
+            // 检查第一行是否包含debug关键字
+            if (programLines.length > 0) {
+                const firstLine = programLines[0].trim();
+                if (firstLine.startsWith('debug ')) {
+                    const debugLevelStr = firstLine.substring(6).trim();
+                    const debugLevel = parseInt(debugLevelStr);
+                    if (!isNaN(debugLevel) && debugLevel >= DEBUG_LEVEL) {
+                        DEBUG_LEVEL = debugLevel;
+                        debugLog(1, `Debug级别设置为: ${DEBUG_LEVEL}`);
+                    } else {
+                        debugLog(1, `文档内指定调试级别 ${debugLevel} 低于外部指定调试级别 ${DEBUG_LEVEL}, 忽略文档内调试级别`);
+                    }
+                    // 跳过debug行
+                    currentLinePointer = 1;
                 }
-                // 跳过debug行
-                currentLinePointer = 1;
             }
+        } else {
+            // 恢复执行 (NSI.resumeInput 从挂起处继续): 保留行指针/控制流栈/局部变量等执行现场
+            INPUT_SUSPENDED = false;
         }
 
         while (currentLinePointer < programLines.length) {
@@ -1483,6 +1502,11 @@ class Interpreter {
                 Interpreter.executeCommand(line);
                 currentLinePointer++;
             } catch (error) {
+                // input 挂起信号: 交还控制权给宿主等待下一次输入 (不报错不终止)
+                if (isInputSuspend(error)) {
+                    INPUT_SUSPENDED = true;
+                    return;
+                }
                 // 处理异常
                 const exception = error as Exception;
                 if (exception.lineNumber === undefined) {
@@ -1980,6 +2004,8 @@ class Interpreter {
                         args.push(value);
                     }
                 } catch (error) {
+                    // 实参表达式中的 input() 挂起信号穿透 (如 call f(input()))
+                    if (isInputSuspend(error)) throw error;
                     reportError(ExceptionType.TYPE_ERROR, t('func_arg_type_error', {name: funcName, argIndex: i + 1}));
                     return;
                 }
@@ -2203,6 +2229,8 @@ class Interpreter {
             }
             arrayLength = lengthValue;
         } catch (error) {
+            // 长度表达式中的 input() 挂起信号穿透 (如 global array a[input()]:int)
+            if (isInputSuspend(error)) throw error;
             reportError(ExceptionType.SYNTAX_ERROR, t('array_length_expr_unresolvable', {expr: lengthExpr}));
             return;
         }
@@ -3207,6 +3235,8 @@ class Interpreter {
                 currentLinePointer += 2;
             }
         } catch (error) {
+            // 断言条件中的 input() 挂起信号穿透 (如 assert (input() != ""))
+            if (isInputSuspend(error)) throw error;
             if ((error as Exception).type === ExceptionType.ASSERTION_ERROR) {
                 // 断言失败: 抛出异常交由主循环处理 (可被try-catch捕获; 未捕获时由主循环console.error输出并终止)
                 throw error;
@@ -4478,6 +4508,17 @@ class ExpressionEvaluator {
             case 'input':
                 // 运行时输入: 无参数, 返回用户输入的一行字符串 (不含换行符)
                 if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'input'}), lineNumber: this.currentLine } as Exception;
+                // 交互挂起模式 (NSI.runInteractive): 有预取值直接取, 否则挂起等待宿主提供 (按键等事件)
+                if (INPUT_INTERACTIVE_MODE) {
+                    if (INPUT_PRELOAD.length > 0) {
+                        return INPUT_PRELOAD.shift() as string;
+                    }
+                    INPUT_SUSPENDED = true;
+                    if (typeof INPUT_ON_REQUEST === 'function') {
+                        try { INPUT_ON_REQUEST(); } catch (e) { /* 宿主回调异常不影响解释器 */ }
+                    }
+                    throw INPUT_SUSPEND_SIGNAL;
+                }
                 // 自定义输入处理器优先 (浏览器可用 NSI.setInput() 绑定, 如页面中的输入框)
                 if (typeof INPUT_HANDLER === 'function') {
                     const custom = INPUT_HANDLER();
@@ -4995,11 +5036,35 @@ function nsiSetInput(handler: (() => string) | null): void {
     INPUT_HANDLER = handler;
 }
 
+// 浏览器入口: 交互执行 — 脚本自持主流程, 遇到 input() 且无可用输入时挂起并通知宿主,
+// 宿主 (如按键事件) 通过 NSI.resumeInput(value) 提供输入后从挂起点继续执行。
+// 返回 'suspended' (等待下一次输入) 或 'finished' (程序自然结束)。
+// 注意: 交互模式下一行内应只出现一次 input() (恢复时会重执行挂起行)。
+function nsiRunInteractive(code: string, onInput?: () => void): string {
+    Interpreter.loadProgram(code);
+    INPUT_INTERACTIVE_MODE = true;
+    INPUT_ON_REQUEST = onInput || null;
+    INPUT_PRELOAD = [];
+    INPUT_SUSPENDED = false;
+    Interpreter.run();
+    return INPUT_SUSPENDED ? 'suspended' : 'finished';
+}
+
+// 浏览器入口: 为挂起的 input() 提供一行输入并继续执行 (返回 'suspended' 或 'finished')
+function nsiResumeInput(value: string): string {
+    if (!INPUT_SUSPENDED) return 'finished';
+    INPUT_PRELOAD.push(String(value));
+    Interpreter.run();
+    return INPUT_SUSPENDED ? 'suspended' : 'finished';
+}
+
 // 浏览器全局暴露: 仅在浏览器环境 (存在 window) 时挂载, 不影响 Node 运行
 if (typeof window !== 'undefined') {
     (window as any).NSI = {
         version: NSIVersion,
         run: nsiRun,
+        runInteractive: nsiRunInteractive,
+        resumeInput: nsiResumeInput,
         setLanguage: nsiSetLanguage,
         getLanguage: (): 'zh' | 'en' => LANG,
         setInput: nsiSetInput,

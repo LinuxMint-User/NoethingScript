@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>NoethingScript 网页版 2048</title>
+<style>
+    body {
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        background: #faf8ef;
+        color: #776e65;
+        margin: 0;
+        padding: 16px;
+        display: flex;
+        justify-content: center;
+    }
+    #wrap { width: 500px; max-width: 100%; }
+    h1 { font-size: 48px; margin: 0; color: #776e65; }
+    #head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .scores { display: flex; gap: 8px; }
+    .score-box {
+        background: #bbada0;
+        color: #eee4da;
+        border-radius: 6px;
+        padding: 6px 14px;
+        text-align: center;
+        font-size: 13px;
+        min-width: 70px;
+    }
+    .score-box b { display: block; font-size: 20px; color: #fff; }
+    #winBanner {
+        display: none;
+        background: #edc22e;
+        color: #fff;
+        text-align: center;
+        padding: 8px;
+        border-radius: 6px;
+        margin-bottom: 10px;
+        font-weight: bold;
+    }
+    #board-wrap { position: relative; }
+    #board {
+        background: #bbada0;
+        border-radius: 10px;
+        padding: 10px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+    }
+    .cell {
+        background: #cdc1b4;
+        border-radius: 6px;
+        height: 100px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 40px;
+        font-weight: bold;
+        color: #776e65;
+        user-select: none;
+    }
+    .cell.s2 { font-size: 36px; }
+    .cell.s3 { font-size: 28px; }
+    .cell.s4 { font-size: 22px; }
+    /* 动画: pop 新生成方块弹出, merge 合并方块闪一下, 与纯移动区分 */
+    .cell.pop { animation: tilePop 0.2s ease; }
+    .cell.merge { animation: tileMerge 0.2s ease; }
+    @keyframes tilePop { from { transform: scale(0); } to { transform: scale(1); } }
+    @keyframes tileMerge { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
+    .cell[data-v="2"]   { background: #eee4da; }
+    .cell[data-v="4"]   { background: #ede0c8; }
+    .cell[data-v="8"]   { background: #f2b179; color: #f9f6f2; }
+    .cell[data-v="16"]  { background: #f59563; color: #f9f6f2; }
+    .cell[data-v="32"]  { background: #f67c5f; color: #f9f6f2; }
+    .cell[data-v="64"]  { background: #f65e3b; color: #f9f6f2; }
+    .cell[data-v="128"] { background: #edcf72; color: #f9f6f2; }
+    .cell[data-v="256"] { background: #edcc61; color: #f9f6f2; }
+    .cell[data-v="512"] { background: #edc850; color: #f9f6f2; }
+    .cell[data-v="1024"]{ background: #edc53f; color: #f9f6f2; }
+    .cell[data-v="2048"]{ background: #edc22e; color: #f9f6f2; }
+    .cell[data-v="4096"],
+    .cell[data-v="8192"] { background: #3c3a32; color: #f9f6f2; }
+    #overlay {
+        display: none;
+        position: absolute;
+        inset: 0;
+        background: rgba(238, 228, 218, 0.73);
+        border-radius: 10px;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        font-size: 28px;
+        font-weight: bold;
+    }
+    #overlay.show { display: flex; }
+    #overlay button {
+        font-size: 18px;
+        padding: 10px 28px;
+        border: none;
+        border-radius: 6px;
+        background: #8f7a66;
+        color: #f9f6f2;
+        cursor: pointer;
+    }
+    #overlay button:hover { background: #9f8b77; }
+    .tip { color: #999; font-size: 13px; margin-top: 10px; text-align: center; }
+    .tip code { background: #eee4da; border-radius: 4px; padding: 1px 5px; }
+    #err { color: #c00; font-size: 13px; white-space: pre-wrap; }
+    /* 程序自身输出 (脚本 print 的内容) */
+    #output {
+        background: #f4f4f4;
+        border-radius: 6px;
+        padding: 8px 10px;
+        margin-top: 12px;
+        font-size: 12px;
+        line-height: 1.5;
+        max-height: 180px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+    }
+    #output::-webkit-scrollbar { width: 6px; }
+    #output::-webkit-scrollbar-thumb { background: #c1b8ad; border-radius: 3px; }
+    #output::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<div id="wrap">
+    <div id="head">
+        <h1>2048</h1>
+        <div class="scores">
+            <div class="score-box">分数<b id="score">0</b></div>
+            <div class="score-box">最高<b id="best">0</b></div>
+        </div>
+    </div>
+    <div id="winBanner">达成 2048! 继续挑战更高分!</div>
+    <div id="board-wrap">
+        <div id="board"></div>
+        <div id="overlay">
+            <div id="overlay-text"></div>
+            <button id="againBtn">再来一局</button>
+        </div>
+    </div>
+    <p class="tip">方向键或 <code>W/A/S/D</code> 移动, <code>Q</code> 退出, <code>R</code> 重新开始</p>
+    <pre id="err"></pre>
+    <h4 style="margin: 10px 0 2px; color:#666;">程序输出 (脚本 print)</h4>
+    <pre id="output"></pre>
+</div>
+
+<!-- NoethingScript 2048 游戏核心 (程序模式):
+     脚本自持完整主循环 (与 examples/2048.ns 同构)。
+     浏览器中由 NSI.runInteractive 启动, 脚本运行到 input() 时挂起,
+     键盘事件通过 NSI.resumeInput 喂入, 脚本继续执行, 直到结束。
+     JS 只负责: 按键转发 / 读回状态渲染 / 展示 print 输出。 -->
+<script type="text/plain" id="ns2048">
+// ============================================================
+//  NoethingScript 网页版 2048 (程序模式)
+//  与 examples/2048.ns 命令行版同构: 脚本自持主循环,
+//  浏览器中由 NSI.runInteractive / NSI.resumeInput 驱动 input()
+//  玩法: w/a/s/d 移动, q 退出
+// ============================================================
+
+global array grid[16]:int = arrfill
+global score:int = 0
+global over:int = 0
+
+// ------------------------------------------------------------
+// 滑动合并: mode 0=左 1=右 2=上 3=下
+// 直接修改传入的 grid, 返回本方向是否发生了移动
+// ------------------------------------------------------------
+:slideDir (mut g:array, mode:int) -> changed:int
+local i:int
+local j:int
+local line:int
+local sr:int
+local sc:int
+local w:int
+local array row[4]:int = arrfill
+local array res[4]:int = arrfill
+changed = 0
+line = 0
+while (line < 4)
+    i = 0
+    while (i < 4)
+        res[i] = 0
+        row[i] = 0
+        i = i + 1
+    endwhl
+    i = 0
+    while (i < 4)
+        if (mode == 0)
+            sr = line
+            sc = i
+        else
+            if (mode == 1)
+                sr = line
+                sc = 3 - i
+            else
+                if (mode == 2)
+                    sr = i
+                    sc = line
+                else
+                    sr = 3 - i
+                    sc = line
+                endif
+            endif
+        endif
+        row[i] = g[sr * 4 + sc]
+        i = i + 1
+    endwhl
+    w = 0
+    i = 0
+    while (i < 4)
+        if (row[i] != 0)
+            res[w] = row[i]
+            w = w + 1
+        endif
+        i = i + 1
+    endwhl
+    i = 0
+    while (i < 3)
+        if (res[i] != 0 && res[i] == res[i + 1])
+            res[i] = res[i] * 2
+            score = score + res[i]
+            j = i + 1
+            while (j < 3)
+                res[j] = res[j + 1]
+                j = j + 1
+            endwhl
+            res[3] = 0
+        endif
+        i = i + 1
+    endwhl
+    i = 0
+    while (i < 4)
+        if (mode == 0)
+            sr = line
+            sc = i
+        else
+            if (mode == 1)
+                sr = line
+                sc = 3 - i
+            else
+                if (mode == 2)
+                    sr = i
+                    sc = line
+                else
+                    sr = 3 - i
+                    sc = line
+                endif
+            endif
+        endif
+        if (res[i] != g[sr * 4 + sc])
+            changed = 1
+        endif
+        g[sr * 4 + sc] = res[i]
+        i = i + 1
+    endwhl
+    line = line + 1
+endwhl
+return changed
+:end
+
+// ------------------------------------------------------------
+// 在随机空位生成新方块 (90% 为 2, 10% 为 4)
+// ------------------------------------------------------------
+:spawnTile () -> :void
+local n:int = 0
+local k:int = 0
+local idx:int = 0
+local i:int = 0
+i = 0
+while (i < 16)
+    if (grid[i] == 0)
+        n = n + 1
+    endif
+    i = i + 1
+endwhl
+if (n > 0)
+    k = int(Math.random() * n)
+    i = 0
+    while (i < 16)
+        if (grid[i] == 0)
+            if (idx == k)
+                grid[i] = 2
+                if (Math.random() < 0.1)
+                    grid[i] = 4
+                endif
+            endif
+            idx = idx + 1
+        endif
+        i = i + 1
+    endwhl
+endif
+:end
+
+// ------------------------------------------------------------
+// 打印棋盘
+// ------------------------------------------------------------
+:printGrid () -> :void
+local r:int = 0
+local c:int = 0
+local v:int = 0
+local line:string
+r = 0
+while (r < 4)
+    line = ""
+    c = 0
+    while (c < 4)
+        v = grid[r * 4 + c]
+        if (v == 0)
+            line = line + ".  "
+        else
+            line = line + str(v)
+            if (v < 10)
+                line = line + "  "
+            else
+                line = line + " "
+            endif
+        endif
+        c = c + 1
+    endwhl
+    print line
+    r = r + 1
+endwhl
+:end
+
+// ------------------------------------------------------------
+// 是否还有可行移动 (存在空位或有相邻相同方块)
+// ------------------------------------------------------------
+:hasMove () -> can:int
+local i:int = 0
+local r:int = 0
+local c:int = 0
+can = 0
+i = 0
+while (i < 16)
+    if (grid[i] == 0)
+        can = 1
+    endif
+    i = i + 1
+endwhl
+if (can == 0)
+    r = 0
+    while (r < 4 && can == 0)
+        c = 0
+        while (c < 4 && can == 0)
+            if (c < 3)
+                if (grid[r * 4 + c] == grid[r * 4 + c + 1])
+                    can = 1
+                endif
+            endif
+            if (r < 3)
+                if (grid[r * 4 + c] == grid[(r + 1) * 4 + c])
+                    can = 1
+                endif
+            endif
+            c = c + 1
+        endwhl
+        r = r + 1
+    endwhl
+endif
+return can
+:end
+
+// ==================== 主流程 ====================
+call spawnTile()
+call spawnTile()
+
+global key:string
+global ch:int
+global canMove:int
+while (over == 0)
+    call printGrid()
+    print "==== 分数: " + str(score) + " ===="
+    print "移动: w/a/s/d, 退出: q"
+    key = input()
+    ch = 0
+    if (key == "w")
+        call slideDir(mut grid, 2) -> ch
+    else
+        if (key == "a")
+            call slideDir(mut grid, 0) -> ch
+        else
+            if (key == "s")
+                call slideDir(mut grid, 3) -> ch
+            else
+                if (key == "d")
+                    call slideDir(mut grid, 1) -> ch
+                else
+                    if (key == "q")
+                        over = 2
+                    else
+                        print "无效输入, 请按 w/a/s/d 或 q"
+                    endif
+                endif
+            endif
+        endif
+    endif
+    call hasMove() -> canMove
+    if (canMove == 0)
+        print "棋盘满了, 没有可移动的方块!"
+        over = 1
+    else
+        if (ch == 1)
+            call spawnTile()
+        endif
+    endif
+endwhl
+if (over == 2)
+    print "已退出游戏"
+else
+    call printGrid()
+    print "==== 游戏结束, 最终分数: " + str(score) + " ===="
+endif
+</script>
+
+<script src="../dist/noethingScript-Interpreter.js"></script>
+<script>
+    // ==================== 程序模式胶水: 按键转发 / 状态读回 / 渲染 ====================
+    const NS_SRC = document.getElementById('ns2048').textContent;
+    const state = { grid: new Array(16).fill(0), score: 0, over: 0 };
+    let prevGrid = new Array(16).fill(0);
+
+    // 方向键与 WASD 统一映射到脚本认识的按键字符
+    const KEY_MAP = {
+        ArrowLeft: 'a', 'a': 'a', 'A': 'a',
+        ArrowRight: 'd', 'd': 'd', 'D': 'd',
+        ArrowUp: 'w', 'w': 'w', 'W': 'w',
+        ArrowDown: 's', 's': 's', 'S': 's',
+        'q': 'q', 'Q': 'q'
+    };
+
+    // 执行一步 (首次启动或按键后继续), 然后读回状态渲染
+    function step(status) {
+        readBack();
+        render();
+        return status;
+    }
+
+    // 从解释器作用域读回脚本全局变量 (程序模式的"输出通道")
+    function readBack() {
+        const gridVar = window.NSI.ScopeManager.getVariable('grid', 0, true, true);
+        const scoreVal = window.NSI.ScopeManager.getVariable('score', 0);
+        const overVal = window.NSI.ScopeManager.getVariable('over', 0);
+        if (gridVar && gridVar.arrayElements) {
+            state.grid = gridVar.arrayElements.map(e => e.value);
+        }
+        if (typeof scoreVal === 'number') state.score = scoreVal;
+        if (typeof overVal === 'number') state.over = overVal;
+    }
+
+    function newGame() {
+        prevGrid = new Array(16).fill(0);
+        // 重新加载程序: loadProgram 重置一切, 脚本生成初始方块后挂起等待第一次输入
+        step(window.NSI.runInteractive(NS_SRC, () => {}));
+    }
+
+    // 键盘事件 → NSI.resumeInput (脚本从挂起的 input() 处继续执行)
+    function handleKey(key) {
+        if (state.over === 1 || state.over === 2) return;
+        step(window.NSI.resumeInput(key));
+    }
+
+    // ==================== 渲染 ====================
+    const boardEl = document.getElementById('board');
+    const scoreEl = document.getElementById('score');
+    const bestEl = document.getElementById('best');
+    const winBannerEl = document.getElementById('winBanner');
+    const overlayEl = document.getElementById('overlay');
+    const overlayTextEl = document.getElementById('overlay-text');
+
+    // 初始构建 16 个格子
+    for (let i = 0; i < 16; i++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        boardEl.appendChild(cell);
+    }
+
+    // 最高分持久化 (file:// 下 localStorage 可能不可用, 忽略)
+    let best = 0;
+    try { best = parseInt(localStorage.getItem('ns2048_best') || '0', 10) || 0; } catch (e) {}
+
+    function render() {
+        const cells = boardEl.children;
+        for (let i = 0; i < 16; i++) {
+            const v = state.grid[i];
+            const pv = prevGrid[i];
+            const cell = cells[i];
+            cell.textContent = v === 0 ? '' : v;
+            cell.dataset.v = v;
+            cell.className = 'cell' + (v >= 1000 ? ' s4' : v >= 100 ? ' s3' : v >= 10 ? ' s2' : '');
+            // 动画区分: 新生成的方块弹出, 合并的方块闪一下, 纯移动的方块无动画
+            if (v !== 0) {
+                if (pv === 0) cell.classList.add('pop');
+                else if (v > pv) cell.classList.add('merge');
+            }
+        }
+        prevGrid = state.grid.slice();
+        scoreEl.textContent = state.score;
+        if (state.score > best) {
+            best = state.score;
+            try { localStorage.setItem('ns2048_best', String(best)); } catch (e) {}
+        }
+        bestEl.textContent = best;
+        if (state.over === 1) {
+            overlayTextEl.textContent = '游戏结束! 最终分数: ' + state.score;
+            overlayEl.classList.add('show');
+        } else if (state.over === 2) {
+            overlayTextEl.textContent = '已退出游戏, 最终分数: ' + state.score;
+            overlayEl.classList.add('show');
+        } else {
+            overlayEl.classList.remove('show');
+        }
+        winBannerEl.style.display = state.grid.indexOf(2048) >= 0 ? 'block' : 'none';
+    }
+
+    // ==================== 交互 ====================
+    window.addEventListener('keydown', (e) => {
+        const k = KEY_MAP[e.key];
+        if (k) {
+            e.preventDefault();
+            handleKey(k);
+        } else if (e.key === 'r' || e.key === 'R') {
+            newGame();
+        }
+    });
+
+    document.getElementById('againBtn').addEventListener('click', newGame);
+
+    // 捕获脚本 print / 错误输出到页面 (print 走 console.log, 错误走 console.error)
+    const nativeLog = console.log.bind(console);
+    const nativeError = console.error.bind(console);
+    const outputEl = document.getElementById('output');
+    const errEl = document.getElementById('err');
+    console.log = (...args) => {
+        nativeLog(...args);
+        outputEl.textContent += args.join(' ') + '\n';
+        outputEl.scrollTop = outputEl.scrollHeight;
+    };
+    console.error = (...args) => {
+        nativeError(...args);
+        errEl.textContent = args.join(' ');
+    };
+
+    // 页面加载后自动开一局
+    newGame();
+</script>
+</body>
+</html>
