@@ -43,11 +43,29 @@ node dist/noethingScript-Interpreter.js --version
 
 > 注：不支持短参数（如 `-h`）；以 `-` 开头的未知参数会提示"未知参数"而非被当作文件名。
 
+## 浏览器中使用
+
+解释器核心为纯 TypeScript，不依赖 Node.js API，可直接在浏览器中加载 `dist/noethingScript-Interpreter.js`，通过全局 `window.NSI` 调用：
+
+```html
+<script src="dist/noethingScript-Interpreter.js"></script>
+<script>
+    // 执行一段 NoethingScript 代码 (输出走 console, 与 Node 一致)
+    window.NSI.run("global x:int = 42\nprint x * 2");
+
+    // 切换输出语言 ('zh' | 'en', 默认 zh)
+    window.NSI.setLanguage('en');
+    window.NSI.getLanguage();
+</script>
+```
+
+`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。
+
 ## 示例
 
-```ns
-debug 0
+将以下代码保存为 `example.ns` 并运行：
 
+```ns
 global message:string = "Hello, NoethingScript!"
 print message
 
@@ -90,6 +108,7 @@ NoethingScript/
 
 ## 版本历史
 
+- **2.3.1**：浏览器接口——全局 `window.NSI`（`run`/`setLanguage`/`getLanguage`/底层类），浏览器可直接加载 `dist` 产物运行脚本
 - **2.3.0**：完整中英国际化（i18n）——`--lang en|zh` 切换输出语言，158 对双语消息模板，错误类型名中英对照，第一行切换提示
 - **2.2.0**：数组四种传参模式、数组整体赋值与 `copy` 深拷贝、`return` 规则检测、只读传播修复
 - **2.1.0**：声明初始化字面量限制、关键字补全、文档同步

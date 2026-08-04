@@ -3,6 +3,40 @@
 ## 概述
 本语言是一种基于行运行的脚本语言，要求显式声明变量作用域和数据类型，支持常见的流程控制和函数定义。
 
+## 一分钟上手
+
+一个完整的可运行程序：
+
+```ns
+print "Hello, NoethingScript!"
+
+global x:int = 10
+print x * 2
+
+:addOne (a:int) -> res:int
+    res = a + 1
+    return res
+:end
+
+call addOne(x) -> y
+print y
+```
+
+逐行解析：
+
+| 代码 | 说明 |
+|---|---|
+| `print "Hello, NoethingScript!"` | 输出一行文本，`print` 后跟表达式 |
+| `global x:int = 10` | 声明全局整型变量 `x` 并初始化为字面量 `10`（声明初始化只允许字面量表达式，见"变量声明"） |
+| `print x * 2` | 表达式直接参与运算并输出：`20` |
+| `:addOne (a:int) -> res:int` | 定义函数 `addOne`：一个 `int` 形参 `a`，返回值存入返回变量 `res` |
+| `res = a + 1` / `return res` | 函数体：计算后赋值给返回变量，`return` 返回之 |
+| `:end` | 函数定义结束 |
+| `call addOne(x) -> y` | 调用函数，实参 `x` 传给形参 `a`，返回值存入结果变量 `y` |
+| `print y` | 输出调用结果：`11` |
+
+运行方式（命令行或浏览器）见文末"运行方式"章节。运行时会输出一行 `[WARN]` 提示返回变量 `res` 声明时未赋值，这是正常提示（函数返回变量初始为 `undefined`，见"函数规则"第 13 条），不影响执行：`res` 虽未赋初值，但函数体内先经 `res = a + 1` 赋值再 `return res`，因此不会触发 `undefined` 错误。
+
 ## 变量声明
 
 ### 作用域
@@ -47,11 +81,11 @@ global bad2:int = src                // 错误: 单变量引用也不允许
 不支持 **复合赋值运算符**（`+=`、`-=`、`*=`、`/=`、`%=`），请使用 `x = x + 1` 形式。
 
 ### 注意事项
-1. 未赋初值的变量值为 `undefined`，使用值为 `undefined` 的变量会抛出错误
+1. 未赋初值的变量值为 `undefined`，使用值为 `undefined` 的变量会报错
 2. 全局变量存储空间内不允许同名变量
 3. 局部变量存储空间内允许同名变量（通过作用域行号区分）
 4. 局部变量允许与全局变量同名，块级作用域内需通过`global.`关键字访问全局变量
-5. 在表达式中出现 `null` 或 `undefined` 立即抛出错误；引用未定义的变量抛出 `ReferenceError`
+5. 在表达式中出现 `null` 或 `undefined` 立即报错；引用未定义的变量抛出 `ReferenceError`
 6. 函数内部和流程块内部不可声明全局变量
 
 ## 数组类型
@@ -77,10 +111,10 @@ global array arrName[arrLength]:type = arrfill
 #### `arrfill` 关键字行为：
 | 数组类型   | 默认填充值       | 说明                                                                 |
 |------------|------------------|----------------------------------------------------------------------|
-| `number`   | 0.0              | 抛出警告：建议明确声明为 `int` 或 `float` 类型                       |
+| `number`   | 0.0              | 发出警告：建议明确声明为 `int` 或 `float` 类型                       |
 | `int`      | 0                |                                                                      |
 | `float`    | 0.0              |                                                                      |
-| `string`   | ""（空字符串）   | 必须使用英文双引号括起                                               |
+| `string`   | ""（空字符串，字符串字面量须用英文双引号括起） |                                                      |
 | `bool`     | false            |                                                                      |
 
 `arrfill` 仅用于数组**声明时**的统一填充初始化（`global array buffer[32]:int = arrfill`），不能用于数组整体赋值等其他场景（会按未定义变量报错）。
@@ -107,26 +141,26 @@ varName = arrName[index]
 arrName[index] = val
 ```
 
-### 数组整体赋值
-```ns
-arrA = arrB
-```
-将 `arrB` 的引用整体赋值给 `arrA`（引用赋值），二者共享同一份数组数据，修改任一数组的元素会同步反映到另一个；`arrA` 的长度与元素类型随之变为与 `arrB` 一致。常量数组、只读引用数组（只读形参/字面量实参）禁止作为整体赋值目标。
-
-若需要副本赋值（深拷贝，互不影响）：
-```ns
-arrA = copy(arrB)
-```
-`arrA` 获得 `arrB` 的独立副本，此后修改 `arrA` 不影响 `arrB`。
-
-只读保护会随整体赋值与返回值传播：从只读引用视图（只读形参/字面量实参）整体赋值得到的引用、以及函数返回只读视图得到的引用，均保持只读，防止透过新名字写穿原数组。
-
 #### 规则说明：
 1. 索引 `index` 必须为非负整数，从 0 开始
 2. 读取操作：被赋值的变量类型必须与数组元素类型相同
 3. 写入操作：赋值的数据类型必须与数组元素类型相同
 4. 可以使用同类型已初始化变量赋值，使用未初始化变量会报错
 5. 越界访问直接报错
+
+### 数组整体赋值
+```ns
+arrA = arrB
+```
+将 `arrB` 的引用整体赋值给 `arrA`（引用赋值），二者共享同一份数组数据，修改任一数组的元素会同步反映到另一个；`arrA` 的长度与元素类型随之变为与 `arrB` 一致。常量数组、只读引用数组（只读形参/字面量实参）禁止作为整体赋值目标。
+
+若需要副本赋值（深拷贝，互不影响，`copy` 的完整语义见"内置函数"表）：
+```ns
+arrA = copy(arrB)
+```
+此后修改 `arrA` 不影响 `arrB`。
+
+只读保护会随整体赋值与返回值传播：从只读引用视图（只读形参/字面量实参）整体赋值得到的引用、以及函数返回只读视图得到的引用，均保持只读，防止透过新名字写穿原数组。
 
 ### 数组长度属性
 ```ns
@@ -233,32 +267,7 @@ debug level
 
 通过设置不同的调试级别，可以控制解释器输出的调试信息详细程度。级别越高，输出的调试信息越详细。不使用debug关键字时，默认级别为0，不输出任何调试信息。
 
-文档内（首行 `debug level`）与命令行均可指定调试级别：
-```bash
-node dist/noethingScript-Interpreter.js program.ns --debug 2
-```
-命令行指定的级别优先级更高，文档内低于命令行的级别会被忽略。
-
-### 输出语言控制
-解释器默认使用中文输出错误/警告/调试信息，可通过 `--lang` 参数切换为英文：
-```bash
-node dist/noethingScript-Interpreter.js program.ns --lang en
-node dist/noethingScript-Interpreter.js program.ns --lang en --debug 2
-```
-`--lang` 仅接受 `en` 或 `zh`（其他值忽略并保持默认中文），与 `--debug` 顺序可任意。运行时会用另一种语言提示当前语言及其切换方式（如默认中文时第一行显示英文 Tip）。
-
-### 帮助与版本信息
-```bash
-node dist/noethingScript-Interpreter.js --help      # 显示用法说明 (跟随 --lang 语言) 后退出
-node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
-```
-`--help`/`--version` 为独立参数，不需要提供文件名，且优先于其他检查。
-
-### 参数约定
-- 可选参数与文件名**顺序任意**，文件名必须是第一个**非 `-` 开头**的参数
-- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--help`/`--version`
-- **不支持短参数**（如 `-h`/`-v`）；未知参数（含短参数）会提示"未知参数"并退出，不会被当作文件名
-
+脚本内（首行 `debug level`）与命令行 `--debug N`（见"运行方式"章节）均可指定调试级别，命令行指定的级别优先级更高。
 
 #### 示例：
 ```ns
@@ -271,7 +280,7 @@ local y:int = x + 3
 
 当运行以上代码时，解释器将根据设置的调试级别输出相应的调试信息。
 
-### 断言
+## 断言
 ```ns
 assert (condition)
 "assertion failure message"  // 下一行必须是双引号括起的字符串, 作为断言失败时的错误消息
@@ -284,7 +293,7 @@ endasrt
 ```
 断言失败时抛出 `AssertionError`（可被 `try-catch` 捕获，未捕获则由解释器输出错误消息）。
 
-### 异常处理
+## 异常处理
 ```ns
 try
     operate var, var, ...
@@ -327,7 +336,7 @@ call functionName(arg0, arg1, ...)
 1. 必须声明返回值类型
 2. 形参默认为local类型，不能使用global关键字
 3. 形参数量不匹配：
-   - 多于声明数量：取前面部分并抛出警告
+   - 多于声明数量：取前面部分并发出警告
    - 少于声明数量：直接报错
 4. 类型不匹配直接报错
 5. 非void函数必须有return语句
@@ -403,7 +412,7 @@ print r1[0]   // 5
 1. 必须返回布尔值 `true`/`false`
 2. 不能使用 `0`/`1` 替代布尔值
 3. 必须用括号括起：`if (condition)`
-4. 出现 `null` 或 `undefined` 立即抛出错误
+4. 出现 `null` 或 `undefined` 立即报错
 5. 运算符两侧数据类型必须相同，否则返回 `false`（赋值表达式也必须相同，否则报错。条件表达式仅返回`false`，不报错）
 
 ### 内置函数
@@ -498,11 +507,11 @@ purge, all, except, call, print, debug, mut, copy
 | `ReferenceError`      | 引用错误     |
 | `RangeError`          | 范围错误     |
 | `AssertionError`      | 断言错误     |
-| `TryBlock`            | try代码块    |
-| `CatchBlock`          | catch代码块  |
 | `LoopInitError`       | for循环初始化失败 |
 | `LoopUpdateError`     | for循环更新表达式执行失败 |
 | `UnknownError`        | 未知错误     |
+
+表中为可在脚本中捕获的异常类型（见"异常处理"）。`TryBlock`/`CatchBlock` 是解释器内部实现标识，用户代码不可见，不在此列。
 
 ### 错误报告格式
 
@@ -520,3 +529,99 @@ purge, all, except, call, print, debug, mut, copy
 | 8 | `LoopUpdateError` | for循环更新表达式执行失败 |
 
 此外还有两类与脚本无关的输出：非致命问题以 `[WARN] [行 X] 警告: 消息` 输出；解释器自身缺陷（原生 JS 异常）以 `[内部错误] [行 X] 解释器内部发生错误: 消息` 输出并终止；脚本运行前的环境/文件错误以 `[错误] 消息` 输出。
+
+## 运行方式
+
+解释器可在命令行（Node.js）与浏览器两种环境中运行，二者共享同一份核心逻辑。
+
+### 命令行运行
+
+```bash
+node dist/noethingScript-Interpreter.js 脚本文件名.ns
+```
+
+#### 调试级别
+
+```bash
+node dist/noethingScript-Interpreter.js 脚本文件名.ns --debug 2
+```
+
+命令行指定的级别优先级更高，脚本内（首行 `debug level`）低于命令行的级别会被忽略。
+
+#### 输出语言控制
+
+解释器默认使用中文输出错误/警告/调试信息，可通过 `--lang` 参数切换为英文：
+
+```bash
+node dist/noethingScript-Interpreter.js 脚本文件名.ns --lang en
+node dist/noethingScript-Interpreter.js 脚本文件名.ns --lang en --debug 2
+```
+
+`--lang` 仅接受 `en` 或 `zh`（其他值忽略并保持默认中文），与 `--debug` 顺序可任意。运行时会用另一种语言提示当前语言及其切换方式（如默认中文时第一行显示英文 Tip）。
+
+#### 帮助与版本信息
+
+```bash
+node dist/noethingScript-Interpreter.js --help      # 显示用法说明 (跟随 --lang 语言) 后退出
+node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
+```
+
+`--help`/`--version` 为独立参数，不需要提供文件名，且优先于其他检查。
+
+#### 参数约定
+
+- 可选参数与文件名**顺序任意**，文件名必须是第一个**非 `-` 开头**的参数
+- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--help`/`--version`
+- **不支持短参数**（如 `-h`/`-v`）；未知参数（含短参数）会提示"未知参数"并退出，不会被当作文件名
+
+### 浏览器中使用
+
+解释器核心为纯 TypeScript，不依赖 Node.js API，可直接在浏览器中加载编译产物，通过全局 `window.NSI` 调用：
+
+```html
+<script src="dist/noethingScript-Interpreter.js"></script>
+<script>
+    // 执行一段 NoethingScript 代码 (print 等输出走 console, 与 Node 一致)
+    window.NSI.run("global x:int = 42\nprint x * 2");
+
+    // 切换输出语言 ('zh' | 'en', 默认 zh)
+    window.NSI.setLanguage('en');
+    window.NSI.getLanguage();
+</script>
+```
+
+`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
+
+## 常见问题 (FAQ)
+
+**Q：声明变量时为什么不能用另一个变量赋值（`global y:int = x`）？**
+
+A：声明初始化只允许字面量或字面量表达式，禁止引用变量（含单变量）。这是刻意设计：强制初始化值自包含，避免初始化顺序依赖和隐式耦合（详见"变量声明 → 初始化值"）。
+
+**Q：为什么 `return` 不支持直接写运算（`return a + 1`）？**
+
+A：`return` 只返回声明返回值时定义的返回变量，运算需先赋值给该变量。设计目标是强制"先计算、后返回"，让函数出口只有一条明确的返回路径，降低调试复杂度（详见"函数规则"第 8 条）。
+
+**Q：为什么 `if`/`while` 的条件必须用括号，且不能用 `0`/`1` 代替布尔值？**
+
+A：条件表达式必须是括号括起的 `bool` 值，`0`/`1` 会被拒绝。这能提前暴露"把数字当布尔"这类常见错误，而不是静默按真/假解释（详见"表达式运算 → 条件表达式"）。
+
+**Q：为什么 for 循环变量不能修改？**
+
+A：循环变量在作用域内为只读（for 更新表达式除外），防止循环内意外改动步进导致死循环或跳步（详见"流程控制 → for循环规则"）。
+
+**Q：为什么数组整体赋值报错？**
+
+A：若目标数组是常量数组、只读引用数组（只读形参/字面量实参），禁止作为整体赋值目标（详见"数组整体赋值"）。
+
+**Q：为什么 `print` 一个未初始化的变量会报错？**
+
+A：未赋初值的变量值为 `undefined`，在表达式中使用 `undefined`/`null` 会立即报错（详见"变量声明 → 注意事项"）。
+
+**Q：为什么字符串字面量必须用双引号？**
+
+A：字符串字面量只接受英文双引号（`"..."`），单引号不是字符串边界（详见"数组类型 → `arrfill` 关键字行为"附注）。
+
+**Q：为什么 `-h` 会提示"未知参数"而不是运行脚本？**
+
+A：不支持短参数；以 `-` 开头的参数仅接受 `--debug`/`--lang`/`--help`/`--version`（详见"运行方式 → 参数约定"）。

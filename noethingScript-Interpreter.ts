@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.3.0";
+const NSIVersion: string = "2.3.1";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -4938,4 +4938,35 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
 // 如果在Node.js环境中运行, 则调用main函数
 if (typeof process !== 'undefined' && process.argv) {
     main();
+}
+
+// ========== 浏览器接口 ==========
+// 核心逻辑为纯 TS, 不依赖 Node API (fs 已条件加载, main 已在 Node 守卫内)。
+// 浏览器中加载本文件后, 可通过 window.NSI (或 globalThis.NSI) 调用解释器。
+
+// 浏览器入口: 加载并执行一段 NoethingScript 代码
+function nsiRun(code: string): void {
+    Interpreter.loadProgram(code);
+    Interpreter.run();
+}
+
+// 浏览器入口: 切换输出语言 ('zh' | 'en')
+function nsiSetLanguage(lang: 'zh' | 'en'): void {
+    if (lang === 'en' || lang === 'zh') {
+        LANG = lang;
+    }
+}
+
+// 浏览器全局暴露: 仅在浏览器环境 (存在 window) 时挂载, 不影响 Node 运行
+if (typeof window !== 'undefined') {
+    (window as any).NSI = {
+        version: NSIVersion,
+        run: nsiRun,
+        setLanguage: nsiSetLanguage,
+        getLanguage: (): 'zh' | 'en' => LANG,
+        Interpreter: Interpreter,
+        ExpressionEvaluator: ExpressionEvaluator,
+        ScopeManager: ScopeManager,
+        LANG_PACKS: LANG_PACKS
+    };
 }
