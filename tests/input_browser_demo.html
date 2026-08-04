@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>NoethingScript 浏览器 input() 演示</title>
+<style>
+    body { font-family: "Segoe UI", "PingFang SC", sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; color: #222; }
+    h1 { font-size: 20px; }
+    textarea { width: 100%; height: 72px; box-sizing: border-box; font-size: 14px; }
+    button { margin: 8px 4px 8px 0; padding: 6px 16px; font-size: 14px; cursor: pointer; }
+    pre { background: #f4f4f4; border-radius: 6px; padding: 12px; min-height: 80px; white-space: pre-wrap; word-break: break-all; }
+    .tip { color: #666; font-size: 13px; }
+    .err { color: #c00; }
+</style>
+</head>
+<body>
+
+<h1>NoethingScript 浏览器 input() 演示</h1>
+<p class="tip">
+    脚本里每调用一次 <code>input()</code>，就读取下方文本框中的一行。
+    文本框里每行放一个输入，例如第 1 行放名字、第 2 行放年龄。
+    演示脚本会依次读取两行。
+</p>
+
+<textarea id="inputBox" placeholder="第一行: 名字&#10;第二行: 年龄&#10;例如:&#10;张三&#10;23">张三
+23</textarea>
+<br>
+<button id="runBtn">运行脚本</button>
+
+<h3>输出 (print 与 console 输出)</h3>
+<pre id="output">&lt;尚未运行&gt;</pre>
+
+<script src="../dist/noethingScript-Interpreter.js"></script>
+<script>
+    const output = document.getElementById('output');
+    const inputBox = document.getElementById('inputBox');
+
+    // 将解释器的 console 输出 (print 走 console.log, 错误走 console.error) 捕获到页面
+    const nativeLog = console.log.bind(console);
+    const nativeWarn = console.warn.bind(console);
+    const nativeError = console.error.bind(console);
+    console.log = (...args) => {
+        nativeLog(...args);
+        output.textContent += args.join(' ') + '\n';
+    };
+    console.warn = (...args) => {
+        nativeWarn(...args);
+        output.textContent += '[WARN] ' + args.join(' ') + '\n';
+    };
+    console.error = (...args) => {
+        nativeError(...args);
+        output.textContent += '[ERROR] ' + args.join(' ') + '\n';
+    };
+
+    // 绑定自定义输入: input() 每次调用读取文本框的下一行 (按剩余行分配)
+    let inputQueue = [];
+    window.NSI.setInput(() => {
+        // 队列耗尽时从文本框按行重新装载
+        if (inputQueue.length === 0) {
+            inputQueue = inputBox.value.split('\n').map(s => s.trim()).filter(s => s !== '');
+        }
+        return inputQueue.length > 0 ? inputQueue.shift() : '';
+    });
+
+    document.getElementById('runBtn').addEventListener('click', () => {
+        inputQueue = []; // 每次运行重新装载输入
+        output.textContent = '';
+        const script = [
+            'global name:string',
+            'name = input()',
+            'print "你好, " + name + "!"',
+            '',
+            'global age:int',
+            'age = int(input())',
+            'print "明年你 " + str(age + 1) + " 岁"'
+        ].join('\n');
+        window.NSI.run(script);
+        nativeLog('--- 运行结束 ---');
+    });
+
+    // 页面加载后自动跑一次, 便于直接看到效果
+    document.getElementById('runBtn').click();
+</script>
+
+</body>
+</html>

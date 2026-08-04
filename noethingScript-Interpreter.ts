@@ -1,10 +1,13 @@
 
 // 解释器版本
-const NSIVersion: string = "2.3.1";
+const NSIVersion: string = "2.4.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
 var DEBUG_LEVEL: number = 0; // 默认不输出debug信息
+
+// 自定义运行时输入处理器 (优先级最高): 由 NSI.setInput() 设置, 未设置时回退到默认 (Node 读 stdin / 浏览器 prompt)
+var INPUT_HANDLER: (() => string) | null = null;
 
 // 自定义debug日志函数
 function debugLog(level: number, ...args: any[]): void {
@@ -393,6 +396,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_no_arg_expected: '{func} 不需要参数',
         len_only_str_or_array: 'len 只能用于字符串或数组',
         copy_arg_must_be_array: 'copy 参数必须是数组类型',
+        input_unavailable: '当前环境不支持运行时输入 (input)',
         unknown_function: '未知函数: {name} 位置 {pos}',
         op_left_operand_not_number: '运算符 {op} 要求左操作数是数字类型',
         op_right_operand_not_number: '运算符 {op} 要求右操作数是数字类型',
@@ -573,6 +577,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_no_arg_expected: '{func} expects no arguments',
         len_only_str_or_array: 'len can only be used on strings or arrays',
         copy_arg_must_be_array: 'The copy argument must be an array type',
+        input_unavailable: 'Runtime input (input) is not supported in this environment',
         unknown_function: 'Unknown function: {name} at position {pos}',
         op_left_operand_not_number: 'Operator {op} requires the left operand to be a number',
         op_right_operand_not_number: 'Operator {op} requires the right operand to be a number',
@@ -741,8 +746,8 @@ class ScopeManager {
             debugLog(1, `局部变量 ${name} 添加成功`);
         }
 
-        // 如果未赋初值, 发出警告
-        if (value === undefined) {
+        // 如果未赋初值, 发出警告 (默认静默, 调试级别 >= 1 时显示, 避免先声明后赋值如 input() 场景刷屏)
+        if (value === undefined && DEBUG_LEVEL >= 1) {
             reportWarn(t('var_declared_uninitialized', {name: name}), startLine + 1);
         }
 
@@ -4470,6 +4475,34 @@ class ExpressionEvaluator {
             case 'float':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'float'}), lineNumber: this.currentLine } as Exception;
                 return parseFloat(args[0]);
+            case 'input':
+                // 运行时输入: 无参数, 返回用户输入的一行字符串 (不含换行符)
+                if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'input'}), lineNumber: this.currentLine } as Exception;
+                // 自定义输入处理器优先 (浏览器可用 NSI.setInput() 绑定, 如页面中的输入框)
+                if (typeof INPUT_HANDLER === 'function') {
+                    const custom = INPUT_HANDLER();
+                    return custom === null || custom === undefined ? '' : String(custom);
+                }
+                // Node 环境: 同步逐字节读取 stdin (fs.readSync 是同步的, 不破坏解释器的同步执行模型)
+                if (typeof process !== 'undefined' && typeof fs !== 'undefined' && typeof fs.readSync === 'function') {
+                    const inBuf = Buffer.alloc(1);
+                    const bytes: number[] = [];
+                    while (true) {
+                        const bytesRead = fs.readSync(0, inBuf, 0, 1, null);
+                        if (bytesRead === 0) break; // EOF: 无更多输入
+                        const b = inBuf[0];
+                        if (b === 0x0A) break;          // \n: 行结束
+                        if (b === 0x0D) continue;       // 忽略 \r (Windows CRLF), 仅以 \n 结束
+                        bytes.push(b);
+                    }
+                    // 一次性按 UTF-8 解码, 避免逐字节解码导致多字节字符 (如中文) 损坏
+                    return Buffer.from(bytes).toString('utf8');
+                }
+                // 浏览器环境: 同步弹窗输入 (prompt 为阻塞式)
+                if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+                    return window.prompt('') || '';
+                }
+                throw { type: ExceptionType.TYPE_ERROR, message: t('input_unavailable'), lineNumber: this.currentLine } as Exception;
             case 'copy':
                 // 数组副本: 深拷贝数组数据并返回独立副本 (可用于整体赋值 b = copy(a))
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'copy'}), lineNumber: this.currentLine } as Exception;
@@ -4957,6 +4990,11 @@ function nsiSetLanguage(lang: 'zh' | 'en'): void {
     }
 }
 
+// 浏览器入口: 绑定自定义运行时输入处理器 (同步函数, 返回一行字符串; 传入 null 恢复默认 prompt)
+function nsiSetInput(handler: (() => string) | null): void {
+    INPUT_HANDLER = handler;
+}
+
 // 浏览器全局暴露: 仅在浏览器环境 (存在 window) 时挂载, 不影响 Node 运行
 if (typeof window !== 'undefined') {
     (window as any).NSI = {
@@ -4964,6 +5002,7 @@ if (typeof window !== 'undefined') {
         run: nsiRun,
         setLanguage: nsiSetLanguage,
         getLanguage: (): 'zh' | 'en' => LANG,
+        setInput: nsiSetInput,
         Interpreter: Interpreter,
         ExpressionEvaluator: ExpressionEvaluator,
         ScopeManager: ScopeManager,

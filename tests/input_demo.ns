@@ -1,0 +1,41 @@
+// input() 交互演示 (2.4.0)
+// 运行: node dist/noethingScript-Interpreter.js tests/input_demo.ns
+// 或管道输入: printf '张三\n18\n1.75\na\nb\nc\n7\n' | node dist/noethingScript-Interpreter.js tests/input_demo.ns
+
+print "== input() 演示 =="
+
+// 1. 字符串输入
+global name:string
+print "请输入你的名字: "
+name = input()
+print "你好, " + name + "!"
+
+// 2. 数字输入 (int 转换)
+global age:int
+print "请输入你的年龄: "
+age = int(input())
+print "明年你 " + str(age + 1) + " 岁"
+
+// 3. 浮点输入
+global height:float
+print "请输入你的身高(米): "
+height = float(input())
+print "身高: " + str(height) + " 米"
+
+// 4. 连续多次输入
+print "输入三个词, 每行一个: "
+global w1:string
+global w2:string
+global w3:string
+w1 = input()
+w2 = input()
+w3 = input()
+print "你输入了: " + w1 + " / " + w2 + " / " + w3
+
+// 5. input 组合进表达式
+print "再输入一个数字, 我会把它乘 10: "
+global n:int
+n = int(input())
+print "结果: " + str(n * 10)
+
+print "== 演示结束 =="

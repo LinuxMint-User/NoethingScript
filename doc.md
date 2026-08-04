@@ -35,7 +35,7 @@ print y
 | `call addOne(x) -> y` | 调用函数，实参 `x` 传给形参 `a`，返回值存入结果变量 `y` |
 | `print y` | 输出调用结果：`11` |
 
-运行方式（命令行或浏览器）见文末"运行方式"章节。运行时会输出一行 `[WARN]` 提示返回变量 `res` 声明时未赋值，这是正常提示（函数返回变量初始为 `undefined`，见"函数规则"第 13 条），不影响执行：`res` 虽未赋初值，但函数体内先经 `res = a + 1` 赋值再 `return res`，因此不会触发 `undefined` 错误。
+运行方式（命令行或浏览器）见文末"运行方式"章节。`res` 虽未赋初值（函数返回变量初始为 `undefined`，见"函数规则"第 13 条），但函数体内先经 `res = a + 1` 赋值再 `return res`，因此不会触发 `undefined` 错误。若以 `--debug 1` 及以上运行，声明但未初始化的变量会显示 `[WARN]`（默认静默，见"调试控制"）。
 
 ## 变量声明
 
@@ -269,6 +269,8 @@ debug level
 
 脚本内（首行 `debug level`）与命令行 `--debug N`（见"运行方式"章节）均可指定调试级别，命令行指定的级别优先级更高。
 
+调试级别还控制部分警告的显示：声明但未初始化的变量在级别 0 时静默，级别 ≥1 时输出 `[WARN]`（先声明后赋值等场景默认不打扰，需要时可开启调试查看）。
+
 #### 示例：
 ```ns
 debug 1
@@ -425,6 +427,7 @@ print r1[0]   // 5
 | `int(x)` | 任意 | int | 转换为整数（`parseInt` 语义） |
 | `float(x)` | 任意 | float | 转换为浮点数 |
 | `copy(arr)` | 数组 | array | 数组深拷贝副本，用于实参副本或整体赋值（见"数组作为函数参数"/"数组整体赋值"） |
+| `input()` | 无 | string | 运行时输入：读取一行用户输入（不含换行符）。命令行读取 stdin；浏览器默认 `prompt` 弹窗，可用 `NSI.setInput()` 绑定自定义输入源（如页面输入框）。注意声明初始化不允许函数调用，需先声明后赋值 |
 
 #### Math 数学对象
 `Math.` 前缀调用数学函数（12 个）：
@@ -587,16 +590,26 @@ node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
     // 切换输出语言 ('zh' | 'en', 默认 zh)
     window.NSI.setLanguage('en');
     window.NSI.getLanguage();
+
+    // 绑定自定义运行时输入: input() 会调用此同步函数而非默认的 prompt 弹窗
+    window.NSI.setInput(() => {
+        return document.getElementById('inputBox').value;
+    });
+    window.NSI.setInput(null); // 传入 null 恢复默认 prompt 弹窗
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
+`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
 
 ## 常见问题 (FAQ)
 
 **Q：声明变量时为什么不能用另一个变量赋值（`global y:int = x`）？**
 
-A：声明初始化只允许字面量或字面量表达式，禁止引用变量（含单变量）。这是刻意设计：强制初始化值自包含，避免初始化顺序依赖和隐式耦合（详见"变量声明 → 初始化值"）。
+A：声明初始化只允许字面量或字面量表达式，禁止引用变量（含单变量）。这是刻意设计：强制初始化值自包含，避免初始化顺序依赖和隐式耦合（详见"变量声明 → 初始化值"）。同理，`input()` 等函数调用也不能出现在声明初始化中，需先声明后赋值：
+```ns
+global name:string
+name = input()
+```
 
 **Q：为什么 `return` 不支持直接写运算（`return a + 1`）？**
 

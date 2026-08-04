@@ -11,7 +11,7 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 - **函数**：形参、返回值变量、`return` 即时返回；支持 `mut` 可变引用参数与 `copy` 深拷贝
 - **数组**：定长声明、`arrfill` 填充、`len()` 长度；四种传参模式（只读引用/副本/字面量/可变引用 `mut`），整体赋值引用共享，只读视图写保护
 - **异常处理**：`try`/`catch` 可捕获全部错误类型（`SyntaxError`/`TypeError`/`ReferenceError`/`RangeError`/`AssertionError`/循环初始化/循环更新错误等）
-- **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/random）、`len`/`str`/`int`/`float`/`copy`
+- **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/random）、`len`/`str`/`int`/`float`/`copy`/`input`（运行时输入，命令行读 stdin、浏览器默认 prompt 弹窗且可自定义绑定）
 - **进制字面量**：二进制 `0b`、八进制 `0o`、十六进制 `0x`
 - **调试控制**：`debug` 级别调节输出详细程度
 - **国际化**：`--lang en|zh` 切换输出语言（默认中文），消息模板化语言包可扩展（l10n 友好）
@@ -56,10 +56,14 @@ node dist/noethingScript-Interpreter.js --version
     // 切换输出语言 ('zh' | 'en', 默认 zh)
     window.NSI.setLanguage('en');
     window.NSI.getLanguage();
+
+    // 绑定自定义输入: input() 调用此同步函数, 而非默认的 prompt 弹窗
+    window.NSI.setInput(() => document.getElementById('inputBox').value);
+    window.NSI.setInput(null); // 恢复默认 prompt
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。
+`window.NSI` 提供：`version`、`run(code)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。
 
 ## 示例
 
@@ -95,7 +99,7 @@ endtry
 NoethingScript/
 ├── noethingScript-Interpreter.ts   # 解释器源码
 ├── doc.md                          # 语言规范手册
-├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md)
+├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md), 含 input 演示 (tests/input_demo.ns, tests/input_browser_demo.html)
 ├── vscode-extension/               # VSCode 语法高亮扩展 (NoethingScript Language Support)
 ├── dist/                           # 编译产物 (npm run build 生成)
 ├── tsconfig.json
@@ -108,6 +112,7 @@ NoethingScript/
 
 ## 版本历史
 
+- **2.4.0**：内置 `input()` 运行时输入——命令行同步读取 stdin（含中文），浏览器默认 prompt 弹窗、可 `NSI.setInput()` 自定义绑定（如页面输入框），双环境通用
 - **2.3.1**：浏览器接口——全局 `window.NSI`（`run`/`setLanguage`/`getLanguage`/底层类），浏览器可直接加载 `dist` 产物运行脚本
 - **2.3.0**：完整中英国际化（i18n）——`--lang en|zh` 切换输出语言，158 对双语消息模板，错误类型名中英对照，第一行切换提示
 - **2.2.0**：数组四种传参模式、数组整体赋值与 `copy` 深拷贝、`return` 规则检测、只读传播修复
