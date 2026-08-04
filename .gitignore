@@ -3,3 +3,6 @@ node_modules/
 
 # 编译产物
 dist/
+
+# 扩展打包产物
+*.vsix

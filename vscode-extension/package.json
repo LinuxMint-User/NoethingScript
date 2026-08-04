@@ -1,0 +1,40 @@
+{
+  "name": "noethingscript-syntax",
+  "displayName": "NoethingScript Language Support",
+  "description": "NoethingScript 脚本语言语法高亮 (.ns 文件与 Markdown 代码块)",
+  "version": "0.1.2",
+  "publisher": "noethingscript",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "noethingscript",
+        "aliases": [
+          "NoethingScript",
+          "ns",
+          "noething"
+        ],
+        "extensions": [
+          ".ns"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "noethingscript",
+        "scopeName": "source.noethingscript",
+        "path": "./syntaxes/noethingscript.tmLanguage.json"
+      }
+    ]
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.9.2"
+  }
+}

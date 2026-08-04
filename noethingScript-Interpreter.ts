@@ -633,9 +633,9 @@ class Interpreter {
         for (let i = 0; i < programLines.length; i++) {
             const line = programLines[i].trim();
 
-            // 多行注释: 遇到 /// 行切换注释状态 (就近原则闭合), 区间内其余行全部忽略
+            // 多行注释: 仅整行恰为 "///" 的独立行作为开始/结束标志 (就近闭合), 内容行中的 /// 前缀不参与切换
             // 避免多行注释区间内的 :end / 标签 / 函数定义行被误解析
-            if (line.startsWith('///')) {
+            if (line === '///') {
                 IN_MULTILINE_COMMENT = !IN_MULTILINE_COMMENT;
                 continue;
             }
@@ -981,8 +981,8 @@ class Interpreter {
             try {
                 const line = programLines[currentLinePointer].trim();
 
-                // 多行注释: 遇到 /// 行切换注释状态 (就近原则闭合), 区间内其余行全部忽略
-                if (line.startsWith('///')) {
+                // 多行注释: 仅整行恰为 "///" 的独立行作为开始/结束标志 (就近闭合), 内容行中的 /// 前缀不参与切换
+                if (line === '///') {
                     IN_MULTILINE_COMMENT = !IN_MULTILINE_COMMENT;
                     currentLinePointer++;
                     continue;

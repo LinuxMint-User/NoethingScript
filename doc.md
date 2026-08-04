@@ -427,11 +427,11 @@ print Math.floor(3.7) // 3
 
 ### 多行注释
 ```ns
-/// 多行注释起始
+///
 注释内容（任意行，无需 /// 前缀，可包含代码）
-/// 多行注释结束
+///
 ```
-采用就近原则闭合：遇到 `///` 行进入多行注释，区间内所有行（无论内容）均被忽略，直到遇到下一个 `///` 行结束。若文件结束时仍未闭合则视为注释到文件末尾。
+只有整行恰为 `///`（允许首尾空白、不含其他任何内容）的独立行才会作为开始/结束标志，区间内所有行（无论内容）均被忽略。因此注释内容中带内容的 `/// xxx` 行不会被误判为结束标志；若文件结束时仍未闭合则视为注释到文件末尾。
 
 ## 跳转指令
 ```ns
@@ -459,7 +459,7 @@ purge all except varName
 默认清除所有局部变量，全局变量不支持`except`关键字
 
 ## 关键字列表
-```
+```ns
 global, local, number, int, float, string, bool, array, 
 true, false, const, if, else, endif, for, endfor, 
 while, endwhl, switch, case, default, endswc, 
