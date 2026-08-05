@@ -52,6 +52,84 @@ var GLOBAL_VARS: { [key: string]: Variable } = {};
 // 局部变量存储
 var LOCAL_VARS: Variable[] = [];
 
+// ========== 槽位映射 (静态符号表 + 运行时槽位索引) ==========
+// 局部变量的"声明"在程序加载时静态登记为槽位 (帧内序号), 热路径变量访问由
+// "按名线性扫描" 变为 "按槽位 O(1) 下标", 语义 (遮蔽/递归帧隔离/行号作用域) 在静态建表时解析。
+interface SlotDecl {
+    name: string;
+    startLine: number;   // 声明行 (0基)
+    endLine: number;     // 作用域结束行 (0基, 含)
+    type: DataType;
+    isConst: boolean;
+    isArray: boolean;
+    frameKey: string;    // 'top' (顶层/函数外块) 或 'f:<函数名>:<函数定义行>' (函数调用帧)
+    slot: number;        // 帧内槽位号
+}
+var SLOT_DECLS: SlotDecl[] = [];                      // 全部局部声明 (静态)
+var SLOT_BY_NAME: Map<string, SlotDecl[]> = new Map();// name → 声明列表 (按登记顺序)
+// 运行时槽位索引: 帧键 → 槽位 → Variable 对象。
+// 帧键: 'top' (顶层局部) 或 函数调用帧ID (数字, 字符串化)。由 rebuildSlotIndex() 从 LOCAL_VARS 重建。
+var SLOT_INDEX: { [frameKey: string]: { [slot: number]: Variable } } = {};
+// 程序指纹: 每次 loadProgram 递增。表达式树缓存按程序隔离 (树节点携带静态槽位绑定, 跨程序不可共享)。
+var PROGRAM_ID: number = 0;
+
+// 按 (名字, 行号) 静态解析引用点的槽位绑定 (区间包含该行且声明行最晚者)
+function lookupSlotBinding(name: string, line: number): { frameKey: string; slot: number } | null {
+    const list = SLOT_BY_NAME.get(name);
+    if (!list) return null;
+    let best: SlotDecl | null = null;
+    for (let i = 0; i < list.length; i++) {
+        const d = list[i];
+        if (line >= d.startLine && (line <= d.endLine || d.endLine === -1)) {
+            if (!best || d.startLine > best.startLine) best = d;
+        }
+    }
+    return best ? { frameKey: best.frameKey, slot: best.slot } : null;
+}
+
+// 按 (名字, 声明行, 结束行) 精确匹配声明 (rebuild 槽位索引用)
+function findSlotDecl(name: string, startLine: number, endLine: number): SlotDecl | null {
+    const list = SLOT_BY_NAME.get(name);
+    if (!list) return null;
+    for (let i = list.length - 1; i >= 0; i--) {
+        const d = list[i];
+        if (d.startLine === startLine && d.endLine === endLine) return d;
+    }
+    return null;
+}
+
+// 登记单个局部变量到槽位索引 (增量形式; 用于"新增变量批次"已知且低频重建的热点场景, 如函数调用参数绑定)
+function indexSlotVar(v: Variable): void {
+    let d = findSlotDecl(v.name, v.startLine, v.endLine);
+    // 兜底: 运行时作用域区间与静态表有细微偏差时按行号区间宽松匹配
+    if (!d) {
+        const bind = lookupSlotBinding(v.name, v.startLine);
+        if (bind) d = findSlotDeclByKey(v.name, bind.frameKey, bind.slot);
+    }
+    if (!d) return;
+    const key: string = d.frameKey === 'top' ? 'top' : (v.frameId === undefined ? 'top' : String(v.frameId));
+    const m = SLOT_INDEX[key] || (SLOT_INDEX[key] = {});
+    m[d.slot] = v;
+}
+
+// 从 LOCAL_VARS 重建运行时槽位索引 (所有 LOCAL_VARS 变更点调用; 非热路径, 低频)
+function rebuildSlotIndex(): void {
+    SLOT_INDEX = {};
+    for (let i = 0; i < LOCAL_VARS.length; i++) {
+        indexSlotVar(LOCAL_VARS[i]);
+    }
+}
+
+function findSlotDeclByKey(name: string, frameKey: string, slot: number): SlotDecl | null {
+    const list = SLOT_BY_NAME.get(name);
+    if (!list) return null;
+    for (let i = list.length - 1; i >= 0; i--) {
+        const d = list[i];
+        if (d.frameKey === frameKey && d.slot === slot) return d;
+    }
+    return null;
+}
+
 // 函数作用域跟踪
 var FUNCTION_SCOPES: { [name: string]: { startLine: number, endLine: number } } = {};
 
@@ -773,6 +851,8 @@ class ScopeManager {
             LOCAL_VARS.push(variable);
             debugLog(1, () => `局部变量 ${name} 添加成功`);
         }
+        // 注意: 不再在此处同步槽位索引 — 由各调用方在"声明批次"结束后统一调用 rebuildSlotIndex(),
+        // 避免函数参数绑定等连续多次 addVariable 时重复全量重建 (热路径开销)。
 
         // 如果未赋初值, 发出警告 (默认静默, 调试级别 >= 1 时显示, 避免先声明后赋值如 input() 场景刷屏)
         if (value === undefined && DEBUG_LEVEL >= 1) {
@@ -1034,6 +1114,7 @@ class ScopeManager {
     static cleanupLocalVariable(cleanAll: Boolean = false, exceptMode?: Boolean, varName?: string, startLine?: number, endLine?: number, frameId?: number) {
         if (cleanAll) {
             LOCAL_VARS = [];
+            rebuildSlotIndex();
             debugLog(1, () => `已清除所有局部变量`);
             return;
         }
@@ -1044,11 +1125,13 @@ class ScopeManager {
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
             debugLog(2, () => `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
+            rebuildSlotIndex();
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && exceptMode) {
             debugLog(2, () => `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
+            rebuildSlotIndex();
             return;
         }
         if (!cleanAll && !varName && startLine !== undefined && endLine !== undefined) {
@@ -1056,6 +1139,7 @@ class ScopeManager {
                 reportWarn(t('purge_scope_no_except'));
             }
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.startLine >= startLine && varInfo.endLine <= endLine));
+            rebuildSlotIndex();
             return;
         }
         else {
@@ -1097,8 +1181,14 @@ class Interpreter {
         LOCAL_VARS = [];
         IN_MULTILINE_COMMENT = false;
 
+        // 程序指纹递增: 表达式树缓存按程序隔离 (树节点携带静态槽位绑定, 跨程序不可共享)
+        PROGRAM_ID++;
+        SLOT_INDEX = {};
+
         // 第一次扫描: 解析标签和函数定义
         Interpreter.scanTagsAndFunctions();
+        // 构建局部变量静态符号表 (槽位映射)
+        Interpreter.buildSlotSymbolTable();
     }
 
     // 扫描标签和函数定义
@@ -1275,6 +1365,159 @@ class Interpreter {
         }
         debugLog(1, () => `扫描标签和函数定义结束`);
     }
+
+    // 构建局部变量静态符号表 (槽位映射): 程序加载时一次性执行。
+    // 与运行时行号作用域规则保持一致: 普通局部变量作用域=所在最内层块; 局部数组作用域=所在函数;
+    // 函数参数/返回值变量作用域=整个函数体; for 循环变量作用域=for块。
+    static buildSlotSymbolTable(): void {
+        SLOT_DECLS = [];
+        SLOT_BY_NAME = new Map();
+        SLOT_INDEX = {};
+
+        // 第一遍: 构建块区间表 (start/end, 含函数块)
+        const blocks: { start: number; end: number; type: string; funcKey?: string }[] = [];
+        const stack: { start: number; type: string; funcKey?: string }[] = [];
+        let inMultiComment = false;
+        for (let i = 0; i < programLines.length; i++) {
+            const line = programLines[i].trim();
+            if (line === '///') { inMultiComment = !inMultiComment; continue; }
+            if (inMultiComment || line === '' || line.indexOf('//') === 0) continue;
+            // 标签行 (非函数定义/非:end)
+            if (line !== ':end' && line.match(/^:([a-zA-Z_]\w*)$/)) continue;
+            if (line.indexOf(':') === 0) {
+                if (line === ':end') {
+                    const b = stack.pop();
+                    if (b) blocks.push({ start: b.start, end: i, type: b.type, funcKey: b.funcKey });
+                } else if (line.match(/^:[a-zA-Z0-9_]+\s*\(.*\)/)) {
+                    const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\(/);
+                    stack.push({ start: i, type: 'function', funcKey: 'f:' + (funcMatch ? funcMatch[1] : '') + ':' + i });
+                }
+                continue;
+            }
+            const first = line.split(/\s+/)[0];
+            if (first === 'if' || first === 'while' || first === 'for' || first === 'switch' || first === 'try') {
+                stack.push({ start: i, type: first });
+            } else if (first === 'endif' || first === 'endwhl' || first === 'endfor' || first === 'endswc' || first === 'endtry') {
+                const b = stack.pop();
+                if (b) blocks.push({ start: b.start, end: i, type: b.type, funcKey: b.funcKey });
+            }
+            // else/case/default/catch: 不推不弹, 归属当前块
+        }
+        while (stack.length) {
+            const b = stack.pop();
+            if (b) blocks.push({ start: b.start, end: programLines.length - 1, type: b.type, funcKey: b.funcKey });
+        }
+
+        // 辅助: 行所属的最内层块 (含函数块)
+        const deepestBlock = (line: number): { start: number; end: number; type: string; funcKey?: string } | null => {
+            let best: { start: number; end: number; type: string; funcKey?: string } | null = null;
+            for (const b of blocks) {
+                if (b.start <= line && line <= b.end) {
+                    if (!best || b.end < best.end) best = b;
+                }
+            }
+            return best;
+        };
+        // 辅助: 行所属的最近函数块
+        const funcBlock = (line: number): { start: number; end: number; funcKey?: string } | null => {
+            let best: { start: number; end: number; funcKey?: string } | null = null;
+            for (const b of blocks) {
+                if (b.type === 'function' && b.start <= line && line <= b.end) {
+                    if (!best || b.end < best.end) best = b;
+                }
+            }
+            return best;
+        };
+
+        // 第二遍: 声明行登记 + 槽位分配
+        const frameSlots: Map<string, number> = new Map();
+        const registerDecl = (name: string, startLine: number, endLine: number, isArray: boolean, isConst: boolean, forcedKey?: string) => {
+            const fb = funcBlock(startLine);
+            const frameKey = forcedKey !== undefined ? forcedKey : (fb ? fb.funcKey! : 'top');
+            let slot = frameSlots.get(frameKey) || 0;
+            frameSlots.set(frameKey, slot + 1);
+            const decl: SlotDecl = {
+                name, startLine, endLine,
+                type: isArray ? DataType.ARRAY : DataType.UNDEFINED,
+                isConst, isArray, frameKey, slot
+            };
+            SLOT_DECLS.push(decl);
+            let list = SLOT_BY_NAME.get(name);
+            if (!list) { list = []; SLOT_BY_NAME.set(name, list); }
+            list.push(decl);
+        };
+
+        let multiComment = false;
+        for (let i = 0; i < programLines.length; i++) {
+            const line = programLines[i].trim();
+            if (line === '///') { multiComment = !multiComment; continue; }
+            if (multiComment || line === '' || line.indexOf('//') === 0) continue;
+            if (line !== ':end' && line.match(/^:([a-zA-Z_]\w*)$/)) continue;
+
+            // 函数定义: 参数 + 返回值变量 (帧槽位从0开始)
+            if (line.indexOf(':') === 0 && line.match(/^:[a-zA-Z0-9_]+\s*\(.*\)/)) {
+                const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]+)(?:\s*:([a-zA-Z0-9_]+))?$/);
+                if (!funcMatch) continue;
+                const frameKey = 'f:' + funcMatch[1] + ':' + i;
+                const fb = blocks.find(b => b.type === 'function' && b.funcKey === frameKey);
+                if (!fb) continue;
+                const bodyStart = fb.start + 1;
+                const bodyEnd = fb.end;
+                let slot = 0;
+                if (funcMatch[2].trim()) {
+                    for (const pm of funcMatch[2].split(',')) {
+                        const parts = pm.trim().split(':');
+                        if (parts.length !== 2) continue;
+                        let pname = parts[0].trim();
+                        if (pname.startsWith('mut ')) pname = pname.substring(4).trim();
+                        if (!pname) continue;
+                        registerDecl(pname, bodyStart, bodyEnd, parts[1].trim().toLowerCase() === 'array', false, frameKey);
+                        slot++;
+                    }
+                }
+                const ret = funcMatch[3];
+                if (ret && ret !== ':void') {
+                    const retName = ret.startsWith(':') ? ret.substring(1) : ret;
+                    registerDecl(retName, bodyStart, bodyEnd, false, false, frameKey);
+                    slot++;
+                }
+                frameSlots.set(frameKey, slot);
+                continue;
+            }
+
+            const first = line.split(/\s+/)[0];
+            // for 循环变量: for (local x:int = ...; ...; ...)
+            if (first === 'for') {
+                const fm = line.match(/^for\s*\(?local\s+([a-zA-Z0-9_]+):/);
+                if (fm) {
+                    const fb = blocks.find(b => b.type === 'for' && b.start === i);
+                    registerDecl(fm[1], i, fb ? fb.end : i, false, false);
+                }
+                continue;
+            }
+            // 局部变量/常量/数组声明 (local [const] name:type / local array name[len]:type)
+            if (first === 'local') {
+                let declStr = line.substring(5).trim();
+                let isConst = false;
+                if (declStr.startsWith('const ')) { isConst = true; declStr = declStr.substring(6).trim(); }
+                const db = deepestBlock(i);
+                const declEnd = db ? db.end : -1;
+                if (declStr.startsWith('array ')) {
+                    // 局部数组: 作用域=所在函数帧 (与 executeArrayDeclaration 一致)
+                    const am = declStr.substring(6).trim().match(/^([a-zA-Z0-9_]+)\[/);
+                    if (am) {
+                        const fb = funcBlock(i);
+                        registerDecl(am[1], i, fb ? fb.end : declEnd, true, isConst, undefined);
+                    }
+                } else {
+                    const vm = declStr.match(/^([a-zA-Z0-9_]+):/);
+                    if (vm) registerDecl(vm[1], i, declEnd, false, isConst, undefined);
+                }
+            }
+        }
+        debugLog(1, () => `槽位符号表构建完成: ${SLOT_DECLS.length} 个局部声明`);
+    }
+
 
     // 辅助方法: 将字符串类型转换为DataType枚举
     private static getDataTypeFromString(typeStr: string): DataType {
@@ -1907,6 +2150,7 @@ class Interpreter {
             debugLog(1, () => exception.message);
             return;
         }
+        rebuildSlotIndex(); // 槽位索引同步 (局部变量声明批次完成)
     }
 
     // 执行函数调用
@@ -2062,6 +2306,8 @@ class Interpreter {
         debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
         debugLog(2, () => `开始参数传递循环`);
         debugLog(2, () => `函数调用: ${funcName}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        // 记录参数绑定前局部变量长度, 批次完成后仅增量登记新增槽位 (避免全量重建 SLOT_INDEX 的分配开销)
+        const callVarStart = LOCAL_VARS.length;
         for (let i = 0; i < funcInfo.params.length; i++) {
             debugLog(3, () => `循环索引: ${i}`);
             const param = funcInfo.params[i];
@@ -2082,6 +2328,7 @@ class Interpreter {
                     } catch (e) {
                         reportError(ExceptionType.TYPE_ERROR, t('array_literal_arg_parse_failed', {error: (e as Error).message}));
                         LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                        rebuildSlotIndex();
                         return;
                     }
                     const literalVar: Variable = {
@@ -2107,6 +2354,7 @@ class Interpreter {
                 if (!arrVar || arrVar.type !== DataType.ARRAY) {
                     reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArg.name}));
                     LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                    rebuildSlotIndex();
                     return;
                 }
                 const paramVar: Variable = {
@@ -2170,6 +2418,10 @@ class Interpreter {
                     ScopeManager.addVariable(returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId);
                 }
             }
+        }
+        // 增量登记本次调用新增的参数/返回值变量槽位 (帧ID单调递增不复用, 无需清理旧帧条目)
+        for (let vi = callVarStart; vi < LOCAL_VARS.length; vi++) {
+            indexSlotVar(LOCAL_VARS[vi]);
         }
         debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
         debugLog(2, () => `函数 ${funcName} 参数传递完成`);
@@ -2420,6 +2672,7 @@ class Interpreter {
                 }
             }
             LOCAL_VARS.push(arrayVariable);
+            rebuildSlotIndex(); // 槽位索引同步 (局部数组已添加)
         }
     }
 
@@ -2535,10 +2788,13 @@ class Interpreter {
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
                 CONTROL_FLOW_STACK.pop();
                 // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
+                // 注意: 无需重建槽位索引 — 函数帧ID单调递增不复用, 被清理帧的陈旧槽位条目不可达 (readSlot 仅经活动控制流栈查找)
                 LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
                 debugLog(2, () => `函数调用清理后的局部变量表`, LOCAL_VARS);
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
-                handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, currentLinePointer);
+                // 注意: 用调用行 (block.callFrom) 而非当前 return 行作为结果变量作用域起点,
+                // 否则递归时 return 行晚于调用点, 结果变量会被误判为"未声明"而创建隐式重复变量, 遮蔽静态声明。
+                handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, block.callFrom);
                 debugLog(2, () => `清理后控制流栈:`, CONTROL_FLOW_STACK);
                 currentLinePointer = block.callFrom;
                 break; // 停止遍历, 防止处理残留函数帧
@@ -2825,6 +3081,7 @@ class Interpreter {
             } else {
                 // 创建循环变量 (若与全局变量同名则自动遮蔽, 局部查找优先)
                 ScopeManager.addVariable(varName, initialValue, type, currentLinePointer, endForLine, false);
+                rebuildSlotIndex(); // 槽位索引同步 (循环变量已声明)
             }
 
             const brokenexists = CONTROL_FLOW_BROKEN_BLOCK_STACK.some(item =>
@@ -3146,6 +3403,7 @@ class Interpreter {
             // 将异常绑定为string类型的局部变量 (值为错误消息)
             if (endtryLine !== -1) {
                 ScopeManager.addVariable(errorName, exception.message, DataType.STRING, currentLinePointer, endtryLine, false, false);
+                rebuildSlotIndex(); // 槽位索引同步 (catch 异常变量已绑定)
             }
             debugLog(1, () => `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
 
@@ -3213,6 +3471,7 @@ class Interpreter {
         if (topFrame && topFrame.type === 'try') {
             const blockStart = topFrame.start;
             LOCAL_VARS = LOCAL_VARS.filter(v => !(v.startLine >= blockStart && !v.isGlobal));
+            rebuildSlotIndex(); // 槽位索引同步 (try块内局部变量已清理)
         }
         // 清除异常栈栈顶的一个try/catch标记 (一个endtry只对应一个try-catch结构, 不能弹出外层标记)
         if (EXCEPTION_STACK.length > 0) {
@@ -3543,7 +3802,7 @@ class Interpreter {
             // 检查是否是数组元素赋值
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
                 debugLog(1, () => `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
-                const { target, value } = result;
+                const { target, value, binding } = result;
                 // 处理 global. 前缀 (与整体赋值分支一致)
                 let targetName: string = target.arrayName;
                 let isGlobal: boolean = false;
@@ -3551,7 +3810,16 @@ class Interpreter {
                     targetName = targetName.slice('global.'.length);
                     isGlobal = true;
                 }
-                const arrayVar = ScopeManager.getVariable(targetName, currentLinePointer, true, isGlobal);
+                // 槽位快速路径: 局部数组 O(1) 读取; 槽位为空 (被 purge 等移除) 或无绑定 (全局/未注册) 回退原查找
+                let arrayVar: Variable | null;
+                if (binding) {
+                    arrayVar = ExpressionEvaluator.readSlot(binding);
+                    if (arrayVar === null) {
+                        arrayVar = ScopeManager.getVariable(targetName, currentLinePointer, true, isGlobal);
+                    }
+                } else {
+                    arrayVar = ScopeManager.getVariable(targetName, currentLinePointer, true, isGlobal);
+                }
                 // 检查变量是否存在且是数组类型
                 if (!arrayVar) {
                     throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLinePointer } as Exception;
@@ -3571,13 +3839,13 @@ class Interpreter {
                 }
 
                 // 检查索引是否在数组范围内
-                if (target.index >= arrayVar.arrayLength) {
+                if (target.index >= arrayVar.arrayLength!) {
                     throw { type: ExceptionType.RANGE_ERROR, message: t('arr_index_out_of_range', {index: target.index, length: arrayVar.arrayLength}), lineNumber: currentLinePointer } as Exception;
                 }
 
                 // 更新数组元素
                 // 检查元素类型是否匹配
-                const elementType = arrayVar.arrayElementType;
+                const elementType = arrayVar.arrayElementType!;
                 const validation = ScopeManager.validateType(value, elementType);
                 if (!validation.isValid) {
                     throw { type: ExceptionType.TYPE_ERROR, message: t('array_element_type_mismatch', {expected: elementType, actual: typeof value}), lineNumber: currentLinePointer } as Exception;
@@ -3591,12 +3859,64 @@ class Interpreter {
             } else if (result && typeof result === 'object' && result.type === 'assignment') {
                 debugLog(1, () => `处理普通变量赋值 (type: assignment) : ${command}`);
                 // 处理普通变量赋值
-                const { target, value } = result;
+                const { target, value, binding } = result;
                 let newTarget: string = target;
                 let isGlobal: boolean = false;
                 if (newTarget.startsWith('global.')) {
                     newTarget = newTarget.slice('global.'.length);
                     isGlobal = true;
+                }
+
+                // 槽位快速路径: 局部变量 O(1) 赋值 (global. 目标绑定为 null 不走此路径)
+                if (binding) {
+                    const lhsVar = ExpressionEvaluator.readSlot(binding);
+                    // 槽位为空 (变量被 purge/帧清理移除): 回退下方通用查找路径 (可能命中全局变量)
+                    if (lhsVar !== null) {
+                        // 数组整体赋值: LHS 为数组变量且 RHS 求值为数组变量 → 引用赋值 (共享同一数组数据)
+                        if (lhsVar.type === DataType.ARRAY &&
+                            value && typeof value === 'object' && (value as Variable).type === DataType.ARRAY &&
+                            Array.isArray((value as Variable).arrayElements)) {
+                            if (lhsVar.isConst) {
+                                throw {
+                                    type: ExceptionType.TYPE_ERROR,
+                                    message: t('const_array_whole_assignment', {name: newTarget}),
+                                    lineNumber: currentLinePointer
+                                } as Exception;
+                            }
+                            if (lhsVar.isReadonlyArray) {
+                                throw {
+                                    type: ExceptionType.TYPE_ERROR,
+                                    message: t('readonly_array_whole_assignment', {name: newTarget}),
+                                    lineNumber: currentLinePointer
+                                } as Exception;
+                            }
+                            Interpreter.checkLoopVarWritable(newTarget);
+                            // 引用赋值: LHS 与 RHS 共享同一数组数据
+                            const rhsVar = value as Variable;
+                            lhsVar.arrayLength = rhsVar.arrayLength;
+                            lhsVar.arrayElementType = rhsVar.arrayElementType;
+                            lhsVar.arrayElements = rhsVar.arrayElements;
+                            // 只读传播: 从只读引用视图整体赋值得到的引用同样受只读保护, 防止透过 LHS 写穿原数组
+                            if (rhsVar.isReadonlyArray) {
+                                lhsVar.isReadonlyArray = true;
+                            }
+                            debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                            return;
+                        }
+                        Interpreter.checkLoopVarWritable(newTarget);
+                        // 快速 setVariable (const/类型检查 + 赋值, 语义与 setVariable 一致)
+                        if (lhsVar.isConst) {
+                            reportError(ExceptionType.TYPE_ERROR, t('const_assignment_forbidden', {name: newTarget}), currentLinePointer + 1);
+                            return;
+                        }
+                        const validation = ScopeManager.validateType(value, lhsVar.type);
+                        if (!validation.isValid) {
+                            reportError(ExceptionType.TYPE_ERROR, t('assign_type_mismatch', {value: value, name: newTarget, type: lhsVar.type}), currentLinePointer + 1);
+                            return;
+                        }
+                        lhsVar.value = validation.convertedValue;
+                        return;
+                    }
                 }
 
                 // 检查是否为已声明变量
@@ -3755,6 +4075,7 @@ class Interpreter {
                 // 清除所有局部变量再将排除的局部变量恢复
                 ScopeManager.cleanupLocalVariable(true);
                 LOCAL_VARS = remainedVars;
+                rebuildSlotIndex(); // 槽位索引同步 (排除变量已恢复)
                 debugLog(1, () => `已将排除的变量恢复, 当前局部变量有: ${LOCAL_VARS.map(varInfo => varInfo.name)}`);
                 return;
             }
@@ -3811,6 +4132,7 @@ class Interpreter {
                 // 没有显式return到达函数结束标记，先弹出函数帧再处理
                 const funcInfo = FUNCTIONS[block.funcName];
                 // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
+                // 注意: 无需重建槽位索引 — 函数帧ID单调递增不复用, 被清理帧的陈旧槽位条目不可达
                 LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
                 CONTROL_FLOW_STACK.pop();
                 debugLog(2, () => `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
@@ -3873,6 +4195,10 @@ interface ExprNode {
     index?: ExprNode;     // arrayAccess 索引表达式树
     target?: string | { arrayName: string, index: ExprNode }; // assignment: 变量名; arrayAssignment: 数组目标
     valueExpr?: ExprNode; // assignment / arrayAssignment 右值表达式树
+    // 静态槽位绑定 (局部变量热路径 O(1) 访问用; 全局变量/未注册引用为 undefined 走原查找路径)
+    slotBinding?: { frameKey: string, slot: number };      // variable / arrayAccess
+    targetBinding?: { frameKey: string, slot: number };    // assignment 目标
+    arrayTargetBinding?: { frameKey: string, slot: number };// arrayAssignment 数组目标
 }
 
 class ExpressionEvaluator {
@@ -3889,8 +4215,10 @@ class ExpressionEvaluator {
         this.currentLine = currentLine;
         try {
             // 表达式树缓存: 树为纯结构 (不含运行时值), 同一表达式首次执行时解析建树, 之后每次执行直接遍历求值。
-            // 变量/数组访问/函数调用等节点在求值时实时查作用域, 故树可安全跨执行共享。
-            let tree = ExpressionEvaluator.treeCache.get(expression);
+            // 树节点携带静态槽位绑定 (依赖当前程序的符号表), 故缓存按程序指纹 (PROGRAM_ID) 隔离;
+            // 变量/数组访问/函数调用等节点的运行时值仍在求值时实时查作用域。
+            const cacheKey = PROGRAM_ID + '|' + expression;
+            let tree = ExpressionEvaluator.treeCache.get(cacheKey);
             if (tree === undefined) {
                 // 树缓存未命中: 需要词法分析 + 建树 (词法结果同样缓存, 供建树失败需重复解析的场景复用)
                 let cachedTokens = ExpressionEvaluator.tokenCache.get(expression);
@@ -3918,7 +4246,7 @@ class ExpressionEvaluator {
                 if (ExpressionEvaluator.treeCache.size >= ExpressionEvaluator.MAX_TREE_CACHE) {
                     ExpressionEvaluator.treeCache.clear();
                 }
-                ExpressionEvaluator.treeCache.set(expression, tree);
+                ExpressionEvaluator.treeCache.set(cacheKey, tree);
             }
 
             return this.evalTree(tree);
@@ -4082,7 +4410,12 @@ class ExpressionEvaluator {
                     const target = this.buildArrayAssignmentTarget();
                     this.currentTokenIndex++; // 跳过 '='
                     const value = this.buildExpressionTree();
-                    return { kind: 'arrayAssignment', target: target, valueExpr: value };
+                    const node: ExprNode = { kind: 'arrayAssignment', target: target, valueExpr: value };
+                    // 局部数组目标绑定槽位 (global. 前缀跳过, 走原查找路径)
+                    if (!target.arrayName.startsWith('global.')) {
+                        node.arrayTargetBinding = lookupSlotBinding(target.arrayName, this.currentLine) ?? undefined;
+                    }
+                    return node;
                 }
             }
 
@@ -4099,7 +4432,12 @@ class ExpressionEvaluator {
             const target = this.buildAssignmentTarget();
             this.currentTokenIndex++; // 跳过 '='
             const value = this.buildExpressionTree();
-            return { kind: 'assignment', target: target, valueExpr: value };
+            const node: ExprNode = { kind: 'assignment', target: target, valueExpr: value };
+            // 局部变量目标绑定槽位 (global. 前缀跳过, 走原查找路径)
+            if (typeof target === 'string' && !target.startsWith('global.')) {
+                node.targetBinding = lookupSlotBinding(target, this.currentLine) ?? undefined;
+            }
+            return node;
         }
 
         let left = this.buildLogicalOr();
@@ -4330,6 +4668,12 @@ class ExpressionEvaluator {
             }
 
             // 变量节点: 类型/存在性/值检查推迟到求值期实时查作用域 (缓存树不含运行时值)
+            // 局部变量额外携带静态槽位绑定 (热路径 O(1) 访问; 全局/未注册引用留空走原查找路径)
+            if (!isGlobal) {
+                const node: ExprNode = { kind: 'variable', name: token, isGlobal: isGlobal };
+                node.slotBinding = lookupSlotBinding(token, this.currentLine) ?? undefined;
+                return node;
+            }
             return { kind: 'variable', name: token, isGlobal: isGlobal };
         }
 
@@ -4371,7 +4715,12 @@ class ExpressionEvaluator {
         }
         this.currentTokenIndex++;
 
-        return { kind: 'arrayAccess', name: arrayName, isGlobal: isGlobal, index: index };
+        const node: ExprNode = { kind: 'arrayAccess', name: arrayName, isGlobal: isGlobal, index: index };
+        // 局部数组绑定槽位 (global. 前缀跳过, 走原查找路径)
+        if (!isGlobal) {
+            node.slotBinding = lookupSlotBinding(arrayName, this.currentLine) ?? undefined;
+        }
+        return node;
     }
 
     // 构建数组赋值目标节点 (索引类型/范围检查推迟到求值期实时进行)
@@ -4598,6 +4947,22 @@ class ExpressionEvaluator {
     private static readonly MAX_TREE_CACHE = 1000;
 
     // ===== 求值 (运行期): 遍历表达式树求值, 变量/数组/函数调用实时查作用域 =====
+    // 槽位读取: 顶层帧固定 'top' 键; 函数帧从控制流栈查找匹配的调用帧 (递归时栈顶即最内层, 语义与"后入先匹配"一致)
+    static readSlot(binding: { frameKey: string, slot: number }): Variable | null {
+        if (binding.frameKey === 'top') {
+            const m = SLOT_INDEX.top;
+            return m ? (m[binding.slot] ?? null) : null;
+        }
+        for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+            const b = CONTROL_FLOW_STACK[i];
+            if (b.type === 'function' && ('f:' + b.funcName + ':' + b.startLine) === binding.frameKey) {
+                const m = SLOT_INDEX[b.frameId];
+                return m ? (m[binding.slot] ?? null) : null;
+            }
+        }
+        return null;
+    }
+
     // 语义与原有"边解析边求值"严格一致: 求值顺序 (左→右→运算, 参数按序, 数组索引先于右值),
     // 类型检查/报错 (引用/类型/越界/除零等) 完全复刻, 唯一差异是解析不再重复执行。
     private static evalTree(node: ExprNode): any {
@@ -4607,13 +4972,24 @@ class ExpressionEvaluator {
             case 'variable': {
                 const name = node.name as string;
                 const isGlobal = !!node.isGlobal;
-                // 复刻 parsePrimary 变量分支: 数组整体返回数组对象, 未定义抛引用错误, 值为 undefined 抛类型错误
-                const varType = ScopeManager.getVariableType(name, this.currentLine, isGlobal);
-                if (varType === 'array') {
-                    const array = ScopeManager.getVariable(name, this.currentLine, true, isGlobal);
-                    debugLog(2, () => `返回${isGlobal ? '全局' : ''}数组: ${array.name} 在第${this.currentLine + 1}行`);
-                    return array;
+                // 槽位快速路径: 局部变量 O(1) 读取 (未注册绑定/全局变量走下方原查找路径)
+                const binding = node.slotBinding;
+                if (binding) {
+                    const varInfo = ExpressionEvaluator.readSlot(binding);
+                    if (varInfo !== null) {
+                        if (varInfo.type === DataType.ARRAY) return varInfo; // 数组整体返回数组对象
+                        if (varInfo.value === undefined) {
+                            throw {
+                                type: ExceptionType.TYPE_ERROR,
+                                message: t('var_value_undefined', { name: name }),
+                                lineNumber: this.currentLine
+                            } as Exception;
+                        }
+                        return varInfo.value;
+                    }
+                    // 槽位为空 (变量被 purge/帧清理移除 或 槽位索引未覆盖): 回退原查找路径 (可能命中全局变量)
                 }
+                // 无绑定路径: 一次 getVariableInfo 完成类型/存在性/值检查 (原 getVariableType+getVariableInfo 两趟扫描合并)
                 const varInfo = ScopeManager.getVariableInfo(name, this.currentLine, isGlobal);
                 if (varInfo === null) {
                     throw {
@@ -4621,6 +4997,10 @@ class ExpressionEvaluator {
                         message: isGlobal ? t('var_undefined_expr_global', { name: name }) : t('var_undefined_expr_local', { name: name }),
                         lineNumber: this.currentLine
                     } as Exception;
+                }
+                if (varInfo.type === DataType.ARRAY) {
+                    debugLog(2, () => `返回${isGlobal ? '全局' : ''}数组: ${varInfo.name} 在第${this.currentLine + 1}行`);
+                    return varInfo;
                 }
                 if (varInfo.value === undefined) {
                     throw {
@@ -4668,7 +5048,16 @@ class ExpressionEvaluator {
                 if (node.isGlobal && newArrayName.startsWith('global.')) {
                     newArrayName = newArrayName.slice('global.'.length);
                 }
-                const arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, !!node.isGlobal);
+                // 槽位快速路径: 局部数组 O(1) 读取; 槽位为空 (被 purge 等移除) 或无绑定 (全局/未注册) 回退原查找
+                let arrayVar: Variable | null;
+                if (node.slotBinding) {
+                    arrayVar = ExpressionEvaluator.readSlot(node.slotBinding);
+                    if (arrayVar === null) {
+                        arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, !!node.isGlobal);
+                    }
+                } else {
+                    arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, !!node.isGlobal);
+                }
                 if (!arrayVar || arrayVar.type !== DataType.ARRAY) {
                     throw { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
                 }
@@ -4683,8 +5072,8 @@ class ExpressionEvaluator {
             }
             case 'assignment': {
                 const value = this.evalTree(node.valueExpr as ExprNode);
-                // 返回结构与原有边解析边求值一致, executeOperation 原样消费
-                return { type: 'assignment', target: node.target as string, value: value };
+                // 返回结构与原有边解析边求值一致, executeOperation 原样消费 (附带目标槽位绑定供赋值快速路径用)
+                return { type: 'assignment', target: node.target as string, value: value, binding: node.targetBinding };
             }
             case 'arrayAssignment': {
                 const target = node.target as { arrayName: string, index: ExprNode };
@@ -4705,7 +5094,12 @@ class ExpressionEvaluator {
                     } as Exception;
                 }
                 const value = this.evalTree(node.valueExpr as ExprNode);
-                return { type: 'array_assignment', target: { arrayName: target.arrayName, index: index }, value: value };
+                return {
+                    type: 'array_assignment',
+                    target: { arrayName: target.arrayName, index: index },
+                    value: value,
+                    binding: node.arrayTargetBinding
+                };
             }
             default:
                 throw {
@@ -5002,6 +5396,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         isReadonlyArray: arrStruct.isReadonlyArray
                     };
                     LOCAL_VARS.push(newVar);
+                    indexSlotVar(newVar); // 增量登记 (仅新增变量, 避免全量重建)
                     debugLog(2, () => `数组返回值绑定到新变量 ${resultVar}`);
                 } else {
                     const existing = ScopeManager.getVariableInfo(resultVar, oldLinePointer);
@@ -5036,7 +5431,10 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                 default: initValue = undefined;
             }
             // 变量作用域从当前行开始, 到程序结束
+            const rvIdx = LOCAL_VARS.length;
             ScopeManager.addVariable(resultVar, initValue, funcInfo.returnType, oldLinePointer, -1, false);
+            // 增量登记结果变量槽位 (仅新增变量, 避免全量重建)
+            if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
         }
 
         // 从返回值池中获取返回值
@@ -5125,7 +5523,10 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
             debugLog(2, () => `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
             // 添加变量到局部作用域, 类型为UNDEFINED, 初始值为undefined
             // 变量作用域从当前行开始, 到程序结束
+            const rvIdx = LOCAL_VARS.length;
             ScopeManager.addVariable(resultVar, undefined, DataType.UNDEFINED, oldLinePointer, -1, false);
+            // 增量登记结果变量槽位 (仅新增变量, 避免全量重建)
+            if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
         }
         ScopeManager.setVariable(resultVar, undefined, oldLinePointer);
     }
