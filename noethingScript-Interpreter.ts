@@ -23,13 +23,16 @@ function isInputSuspend(e: any): boolean {
 }
 
 // 自定义debug日志函数
+// 惰性参数: 调用点可将字符串模板等重代价表达式包成 0 参函数 (如 debugLog(2, () => `...${x}...`)),
+// 仅在 DEBUG_LEVEL 达标需要输出时才求值, 避免无条件构造模板字符串 / 调用 Object.keys 等开销。
 function debugLog(level: number, ...args: any[]): void {
     if (DEBUG_LEVEL >= level) {
         const lineInfo = typeof currentLinePointer !== 'undefined'
             ? ` [Line ${currentLinePointer + 1}]`
             : '';
+        const resolved = args.map(a => (typeof a === 'function' ? a() : a));
 
-        console.log(`[DEBUG ${level}]${lineInfo}`, ...args);
+        console.log(`[DEBUG ${level}]${lineInfo}`, ...resolved);
     }
 }
 
@@ -123,6 +126,18 @@ var CONTROL_FLOW_BROKEN_BLOCK_STACK: ({
 // 流程控制部分
 var currentLinePointer: number = 0;
 var programLines: string[] = [];
+
+// 行预处理缓存条目 (与 programLines 一一对应, 仅存静态信息; 多行注释状态为运行期状态, 不进缓存)
+interface LineInfo {
+    content: string;     // trim 后的行内容
+    isEmpty: boolean;    // 空行
+    isComment: boolean;  // 以 // 开头
+    isEndTag: boolean;   // 恰为 ':end'
+}
+
+// 行预处理缓存: loadProgram 时构建一次, 主循环运行时直接读, 避免每行重复 trim/判断。
+// 注意: 与 programLines 严格一一对应, 不删行不改索引, 标签/函数作用域/变量作用域/错误行号语义完全不变。
+var LINE_INFO: LineInfo[] = [];
 
 // 函数调用帧计数器 (每次 call 分配唯一 ID, 用于递归隔离各帧局部变量)
 var CALL_FRAME_ID: number = 0;
@@ -654,10 +669,10 @@ interface Exception {
 class ScopeManager {
     // 验证数据类型
     static validateType(value: any, type: DataType): { isValid: boolean, convertedValue: any } {
-        debugLog(1, `验证数据类型: 值 ${value === "" ? '""' : value}, 类型 ${type}`);
+        debugLog(1, () => `验证数据类型: 值 ${value === "" ? '""' : value}, 类型 ${type}`);
         // 未初始化变量 (无 = 值 的声明) 或 无返回值函数返回值变量: 值为 undefined
         if (value === undefined) {
-            debugLog(1, `未初始化变量, 存储 undefined`);
+            debugLog(1, () => `未初始化变量, 存储 undefined`);
             return { isValid: true, convertedValue: undefined };
         }
 
@@ -700,14 +715,14 @@ class ScopeManager {
                 }
                 return { isValid: false, convertedValue: undefined };
             default:
-                debugLog(1, `数据类型验证到达默认分支`)
+                debugLog(1, () => `数据类型验证到达默认分支`)
                 return { isValid: true, convertedValue: value };
         }
     }
 
     // 添加变量 (全局或局部)
     static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number): boolean {
-        debugLog(1, `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
+        debugLog(1, () => `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
@@ -744,7 +759,7 @@ class ScopeManager {
                 return false;
             }
             GLOBAL_VARS[name] = variable;
-            debugLog(1, `全局变量 ${name} 添加成功`);
+            debugLog(1, () => `全局变量 ${name} 添加成功`);
         } else {
             // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
             for (const localVar of LOCAL_VARS) {
@@ -756,7 +771,7 @@ class ScopeManager {
                 }
             }
             LOCAL_VARS.push(variable);
-            debugLog(1, `局部变量 ${name} 添加成功`);
+            debugLog(1, () => `局部变量 ${name} 添加成功`);
         }
 
         // 如果未赋初值, 发出警告 (默认静默, 调试级别 >= 1 时显示, 避免先声明后赋值如 input() 场景刷屏)
@@ -770,8 +785,8 @@ class ScopeManager {
     // 获取变量值 (考虑行号作用域) 
     static getVariable(vname: string, currentLine: number, isArray: boolean = false, isGlobal: boolean = false): any {
         let name: string = vname;
-        debugLog(2, `查找${isGlobal ? '全局' : ''}${isArray ? '数组' : '变量'}: ${name} (行 ${currentLine + 1})`);
-        debugLog(2, `${isGlobal ? '' : `当前局部变量 (含数组) 数量: ${LOCAL_VARS.length}, `}当前全局变量数量: ${Object.keys(GLOBAL_VARS).length}`);
+        debugLog(2, () => `查找${isGlobal ? '全局' : ''}${isArray ? '数组' : '变量'}: ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => `${isGlobal ? '' : `当前局部变量 (含数组) 数量: ${LOCAL_VARS.length}, `}当前全局变量数量: ${Object.keys(GLOBAL_VARS).length}`);
         if (isGlobal) {
             if (name.startsWith('global.')) {
                 name = name.slice('global.'.length);
@@ -785,45 +800,33 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
+                debugLog(3, () => `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
 
                 if (varInfo.name === name && inScope) {
-                    debugLog(1, `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
+                    debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
                     return isArray ? varInfo : varInfo.value;
                 }
             }
 
-            debugLog(2, `局部变量详情:`, LOCAL_VARS);
-
-            // 1. 先检查精确匹配的局部变量 (当前行在变量作用域内) 
-            for (let i = LOCAL_VARS.length - 1; i >= 0; i--) {
-                const varInfo = LOCAL_VARS[i];
-                if (varInfo.name === name &&
-                    currentLine >= varInfo.startLine &&
-                    (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
-                    // 优先返回当前作用域最匹配的变量
-                    debugLog(1, `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
-                    return isArray ? varInfo : varInfo.value;
-                }
-            }
+            debugLog(2, () => `局部变量详情:`, LOCAL_VARS);
         }
 
-        debugLog(2, `全局变量详情:`, GLOBAL_VARS);
+        debugLog(2, () => `全局变量详情:`, GLOBAL_VARS);
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            debugLog(1, `获取${isArray ? '数组' : '变量'} ${name} (全局): ${isArray ? `长度=${GLOBAL_VARS[name].arrayLength}` : `值=${GLOBAL_VARS[name].value}`}, 类型=${GLOBAL_VARS[name].type}, 行号=${currentLine + 1}`);
+            debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (全局): ${isArray ? `长度=${GLOBAL_VARS[name].arrayLength}` : `值=${GLOBAL_VARS[name].value}`}, 类型=${GLOBAL_VARS[name].type}, 行号=${currentLine + 1}`);
             return isArray ? GLOBAL_VARS[name] : GLOBAL_VARS[name].value;
 
         }
 
-        debugLog(1, `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
         return undefined;
     }
 
     // 获取变量信息 (考虑行号作用域) 
     static getVariableInfo(vname: string, currentLine: number, isGlobal: boolean = false): Variable | null {
         let name: string = vname;
-        debugLog(2, `查找${isGlobal ? '全局' : ''}变量信息: ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量信息: ${name} (行 ${currentLine + 1})`);
 
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -840,7 +843,7 @@ class ScopeManager {
                     // 对于函数参数, 作用域从startLine到endLine
                     // 特殊处理: 如果endLine为-1, 表示这是一个函数返回值变量, 作用域从startLine到函数结束
                     if (currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
-                        debugLog(1, `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
+                        debugLog(1, () => `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
                         return varInfo;
                     }
                 }
@@ -849,11 +852,11 @@ class ScopeManager {
 
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            debugLog(1, `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
+            debugLog(1, () => `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
             return GLOBAL_VARS[name];
         }
 
-        debugLog(1, `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
         return null;
     }
 
@@ -888,7 +891,7 @@ class ScopeManager {
     // 设置变量值
     static setVariable(vname: string, value: any, currentLine: number, isGlobal: boolean = false): boolean {
         let name: string = vname;
-        debugLog(2, `设置${isGlobal ? '全局' : '局部'}变量 ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => `设置${isGlobal ? '全局' : '局部'}变量 ${name} (行 ${currentLine + 1})`);
 
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -941,7 +944,7 @@ class ScopeManager {
     // 检查变量是否存在
     static hasVariable(vname: string, currentLine: number, isGlobal: boolean = false): boolean {
         let name: string = vname;
-        debugLog(2, `查找${isGlobal ? '全局' : ''}变量: ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量: ${name} (行 ${currentLine + 1})`);
         let foundVar = null;
 
         if (isGlobal) {
@@ -956,11 +959,11 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, `  检查 ${varInfo.name}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} ` +
+                debugLog(3, () => `  检查 ${varInfo.name}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} ` +
                     `当前行${currentLine + 1} 在范围内: ${inScope}`);
 
                 if (varInfo.name === name && inScope) {
-                    debugLog(2, `  找到变量: ${name} = ${varInfo.value === "" ? '""' : varInfo.value}`);
+                    debugLog(2, () => `  找到变量: ${name} = ${varInfo.value === "" ? '""' : varInfo.value}`);
                     foundVar = varInfo;
                     return true; // 优先返回最近声明的变量
                 }
@@ -970,23 +973,23 @@ class ScopeManager {
         // 检查全局变量
         const globalExists = GLOBAL_VARS.hasOwnProperty(name);
         if (globalExists) {
-            debugLog(2, `  找到全局变量: ${name} = ${GLOBAL_VARS[name].value === "" ? '""' : GLOBAL_VARS[name].value}`);
+            debugLog(2, () => `  找到全局变量: ${name} = ${GLOBAL_VARS[name].value === "" ? '""' : GLOBAL_VARS[name].value}`);
         }
         return globalExists;
     }
 
     // 注册函数
     static registerFunction(funcInfo: FunctionInfo): void {
-        debugLog(2, `${funcInfo.endLine === -1 ? '未完整注册的函数' : '已完整注册的函数'}: ${funcInfo.name}`);
-        debugLog(3, `注册函数作用域: ${funcInfo.name} (行 ${funcInfo.startLine + 1}-${funcInfo.endLine === -1 ? '末行' : funcInfo.endLine + 1})`);
+        debugLog(2, () => `${funcInfo.endLine === -1 ? '未完整注册的函数' : '已完整注册的函数'}: ${funcInfo.name}`);
+        debugLog(3, () => `注册函数作用域: ${funcInfo.name} (行 ${funcInfo.startLine + 1}-${funcInfo.endLine === -1 ? '末行' : funcInfo.endLine + 1})`);
 
         FUNCTIONS[funcInfo.name] = funcInfo; // 直接覆盖同名函数定义，不支持函数重载
-        debugLog(2, `当前注册的函数:`, FUNCTIONS);
+        debugLog(2, () => `当前注册的函数:`, FUNCTIONS);
     }
 
     // 获取当前行所在的函数名
     static getCurrentFunction(currentLine: number): string | null {
-        debugLog(3, `查找第 ${currentLine + 1} 行所在函数`);
+        debugLog(3, () => `查找第 ${currentLine + 1} 行所在函数`);
         for (const funcName in FUNCTIONS) {
             const funcInfo = FUNCTIONS[funcName];
             if (currentLine >= funcInfo.startLine && currentLine <= funcInfo.endLine) {
@@ -1012,7 +1015,7 @@ class ScopeManager {
     //  (可能) 实现垃圾回收机制后使用
     // // 清理超出范围的局部变量 (用于优化内存) 
     // static cleanupVariables(currentLine: number): void {
-    //     debugLog(2, `清理超出范围的局部变量: 行 ${currentLine + 1}`);
+    //     debugLog(2, () => `清理超出范围的局部变量: 行 ${currentLine + 1}`);
     //     LOCAL_VARS = LOCAL_VARS.filter(varInfo => currentLine <= varInfo.endLine);
     // }
 
@@ -1020,10 +1023,10 @@ class ScopeManager {
     static cleanupGlobalVariable(varName: string) {
         if (GLOBAL_VARS.hasOwnProperty(varName)) {
             delete GLOBAL_VARS[varName];
-            debugLog(1, `已清除全局变量 ${varName}`);
+            debugLog(1, () => `已清除全局变量 ${varName}`);
         }
         else {
-            debugLog(1, `全局变量 ${varName} 不存在`);
+            debugLog(1, () => `全局变量 ${varName} 不存在`);
         }
     }
 
@@ -1031,7 +1034,7 @@ class ScopeManager {
     static cleanupLocalVariable(cleanAll: Boolean = false, exceptMode?: Boolean, varName?: string, startLine?: number, endLine?: number, frameId?: number) {
         if (cleanAll) {
             LOCAL_VARS = [];
-            debugLog(1, `已清除所有局部变量`);
+            debugLog(1, () => `已清除所有局部变量`);
             return;
         }
         if (!cleanAll && exceptMode === undefined) {
@@ -1039,12 +1042,12 @@ class ScopeManager {
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
-            debugLog(2, `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
+            debugLog(2, () => `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && exceptMode) {
-            debugLog(2, `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
+            debugLog(2, () => `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             return;
         }
@@ -1063,7 +1066,7 @@ class ScopeManager {
 
     // 检查函数返回类型是否为undefined (void函数) 
     static isVoidFunction(funcInfo: FunctionInfo): boolean {
-        debugLog(3, `检查函数 ${funcInfo.name} 是否为 void 函数`);
+        debugLog(3, () => `检查函数 ${funcInfo.name} 是否为 void 函数`);
         return funcInfo.returnType === DataType.UNDEFINED;
     }
 }
@@ -1077,6 +1080,16 @@ class Interpreter {
     // 加载程序
     static loadProgram(code: string): void {
         programLines = code.split('\n');
+        // 构建行预处理缓存 (与 programLines 严格一一对应, 行号/标签/作用域索引不受影响)
+        LINE_INFO = programLines.map(raw => {
+            const content = raw.trim();
+            return {
+                content,
+                isEmpty: content === '',
+                isComment: content.indexOf('//') === 0,
+                isEndTag: content === ':end'
+            };
+        });
         currentLinePointer = 0;
         TAGS = {};
         FUNCTIONS = {};
@@ -1090,7 +1103,7 @@ class Interpreter {
 
     // 扫描标签和函数定义
     static scanTagsAndFunctions(): void {
-        debugLog(1, `开始扫描标签和函数定义`);
+        debugLog(1, () => `开始扫描标签和函数定义`);
         TAGS = {};
         FUNCTIONS = {};
         let currentFunction: FunctionInfo | null = null;
@@ -1109,7 +1122,7 @@ class Interpreter {
             if (line === '') continue;
 
             // 检查标签
-            // debugLog(0, `检查标签: ${line}`);
+            // debugLog(0, () => `检查标签: ${line}`);
             // 检查行是否不是 ":end", 并且匹配标签格式。正则解释: 
             // ^: 匹配以冒号开头
             // ([a-zA-Z_]\w*) 捕获组, 匹配以字母或下划线开头, 后跟零个或多个单词字符 (字母、数字、下划线) 
@@ -1117,12 +1130,12 @@ class Interpreter {
             if (line !== ':end' && line.match(/^:([a-zA-Z_]\w*)$/)) {
                 const tagName = line.substring(1).trim();
                 TAGS[tagName] = i;
-                debugLog(1, `找到标签: ${tagName} (行 ${i + 1})`);
+                debugLog(1, () => `找到标签: ${tagName} (行 ${i + 1})`);
                 continue;
             }
 
             // 检查函数定义或结束
-            // debugLog(0, `检查函数定义或结束: ${line}`);
+            // debugLog(0, () => `检查函数定义或结束: ${line}`);
             if (line.indexOf(':') === 0) {
                 // 检查是否是函数结束标记
                 if (line === ':end') {
@@ -1132,11 +1145,11 @@ class Interpreter {
                     }
                     if (currentFunction) {
                         // 更新FUNCTION中的函数作用域信息
-                        debugLog(2, `检测到函数结束标记, 更新函数信息`);
+                        debugLog(2, () => `检测到函数结束标记, 更新函数信息`);
                         let funcInfo = currentFunction;
                         funcInfo.endLine = i;
                         ScopeManager.registerFunction(funcInfo);
-                        debugLog(2, `更新后的函数注册信息`, FUNCTIONS);
+                        debugLog(2, () => `更新后的函数注册信息`, FUNCTIONS);
                         // 检查非void函数是否包含return语句
                         if (currentFunction.returnType !== DataType.UNDEFINED) {
                             let hasReturn = false;
@@ -1250,7 +1263,7 @@ class Interpreter {
                         endLine: -1,
                         // hasReturnStatement: false
                     };
-                    debugLog(3, `解析函数: ${funcName}, startLine: ${i}, params: ${JSON.stringify(params)}`);
+                    debugLog(3, () => `解析函数: ${funcName}, startLine: ${i}, params: ${JSON.stringify(params)}`);
                     inFunction = true;
                     ScopeManager.registerFunction(currentFunction);
                 }
@@ -1260,7 +1273,7 @@ class Interpreter {
         if (inFunction) {
             reportError(ExceptionType.SYNTAX_ERROR, t('func_unclosed_at_eof'));
         }
-        debugLog(1, `扫描标签和函数定义结束`);
+        debugLog(1, () => `扫描标签和函数定义结束`);
     }
 
     // 辅助方法: 将字符串类型转换为DataType枚举
@@ -1436,9 +1449,9 @@ class Interpreter {
                     const debugLevel = parseInt(debugLevelStr);
                     if (!isNaN(debugLevel) && debugLevel >= DEBUG_LEVEL) {
                         DEBUG_LEVEL = debugLevel;
-                        debugLog(1, `Debug级别设置为: ${DEBUG_LEVEL}`);
+                        debugLog(1, () => `Debug级别设置为: ${DEBUG_LEVEL}`);
                     } else {
-                        debugLog(1, `文档内指定调试级别 ${debugLevel} 低于外部指定调试级别 ${DEBUG_LEVEL}, 忽略文档内调试级别`);
+                        debugLog(1, () => `文档内指定调试级别 ${debugLevel} 低于外部指定调试级别 ${DEBUG_LEVEL}, 忽略文档内调试级别`);
                     }
                     // 跳过debug行
                     currentLinePointer = 1;
@@ -1451,7 +1464,8 @@ class Interpreter {
 
         while (currentLinePointer < programLines.length) {
             try {
-                const line = programLines[currentLinePointer].trim();
+                const info = LINE_INFO[currentLinePointer];
+                const line = info.content;
 
                 // 多行注释: 仅整行恰为 "///" 的独立行作为开始/结束标志 (就近闭合), 内容行中的 /// 前缀不参与切换
                 if (line === '///') {
@@ -1465,7 +1479,7 @@ class Interpreter {
                     continue;
                 }
 
-                if (line === '' || line.indexOf('//') === 0) {
+                if (info.isEmpty || info.isComment) {
                     currentLinePointer++;
                     continue;
                 }
@@ -1478,8 +1492,7 @@ class Interpreter {
                         // 查找对应的:end标记
                         let endLine = -1;
                         for (let i = currentLinePointer + 1; i < programLines.length; i++) {
-                            const checkLine = programLines[i].trim();
-                            if (checkLine === ':end') {
+                            if (LINE_INFO[i].isEndTag) {
                                 endLine = i;
                                 break;
                             }
@@ -1490,7 +1503,7 @@ class Interpreter {
                             currentLinePointer = endLine + 1;
                             continue;
                         }
-                    } else if (line === ':end') {
+                    } else if (info.isEndTag) {
                         Interpreter.executeCommand(line); // 先遇到函数结束标签可能处于无返回值函数中, 需要特殊处理
                     }
 
@@ -1542,7 +1555,7 @@ class Interpreter {
                         }
                         // 记录待绑定的异常, 供 executeCatch 使用
                         PENDING_EXCEPTION = exception;
-                        debugLog(1, `异常被捕获: ${exception.message} (行 ${currentLinePointer + 1})`);
+                        debugLog(1, () => `异常被捕获: ${exception.message} (行 ${currentLinePointer + 1})`);
                         // 跳转到 catch 行, 让主循环执行 executeCatch 绑定异常变量
                         currentLinePointer = catchLine;
                         continue;
@@ -1565,15 +1578,37 @@ class Interpreter {
         }
 
         if (EXCEPTION_STACK.length > 0) {
-            debugLog(1, '程序因错误而停止');
+            debugLog(1, () => '程序因错误而停止');
         } else {
-            debugLog(1, '程序执行完毕');
+            debugLog(1, () => '程序执行完毕');
         }
     }
 
     // 执行指令
+    // executeCommand 中 switch 的全部命令关键字 (小写), 用于快速判断是否需要走完整 split/分发逻辑。
+    // 含 'const' (const 位置检查用); 纯赋值/表达式行 (首 token 不在集合) 直接进 executeOperation。
+    private static readonly KEYWORD_COMMANDS: string[] = [
+        'global', 'local', 'const', 'call', 'return', 'jump', 'print',
+        'if', 'else', 'endif', 'while', 'endwhl', 'for', 'endfor',
+        'break', 'continue', 'try', 'catch', 'endtry', 'assert', 'endasrt',
+        'switch', 'case', 'default', 'endswc', 'purge', ':end'
+    ];
+
+    // 判断一行命令是否以关键字开头 (需走完整 switch 分发)
+    private static isKeywordCommand(command: string): boolean {
+        const sp = command.indexOf(' ');
+        const first = sp === -1 ? command : command.substring(0, sp);
+        return Interpreter.KEYWORD_COMMANDS.indexOf(first.toLowerCase()) !== -1;
+    }
+
     static executeCommand(command: string): void {
-        debugLog(2, `执行指令 ${command}`);
+        debugLog(2, () => `执行指令 ${command}`);
+        // 快速路径: 非关键字行 (纯赋值/表达式, 如 "i = i + 1") 直接交给 executeOperation,
+        // 避免 split(/\s+/) 的数组分配与 switch 分发。行为与原 default 分支一致。
+        if (!Interpreter.isKeywordCommand(command)) {
+            Interpreter.executeOperation(command);
+            return;
+        }
         // 使用正则表达式 \s+ 按一个或多个空白字符分割命令字符串
         const parts = command.split(/\s+/);
         if (parts.length === 0) return;
@@ -1762,7 +1797,7 @@ class Interpreter {
             ScopeManager.addVariable(varName, value, type, currentLinePointer, -1, true, isConst);
         } catch (error) {
             const exception = error as Exception;
-            debugLog(1, `${exception.message}`);
+            debugLog(1, () => `${exception.message}`);
             return;
         }
     }
@@ -1814,7 +1849,7 @@ class Interpreter {
             return;
         }
         const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
-        debugLog(1, `代码块类型`, block.type);
+        debugLog(1, () => `代码块类型`, block.type);
         switch (block.type) {
             case 'if':
                 targetEndTag = 'endif';
@@ -1836,7 +1871,7 @@ class Interpreter {
                 break;
             default:
                 targetEndTag = '';
-                debugLog(1, 'switch 分支 运行至 default');
+                debugLog(1, () => 'switch 分支 运行至 default');
                 break;
         }
         let j = currentLinePointer + 1;
@@ -1869,14 +1904,14 @@ class Interpreter {
             ScopeManager.addVariable(varName, value, type, startLine, endLine, false, isConst);
         } catch (error) {
             const exception = error as Exception;
-            debugLog(1, exception.message);
+            debugLog(1, () => exception.message);
             return;
         }
     }
 
     // 执行函数调用
     static executeCall(params: string): void {
-        debugLog(1, `开始执行函数调用: ${params}`);
+        debugLog(1, () => `开始执行函数调用: ${params}`);
         // 匹配格式: 函数名(参数1, 参数2, ...) -> 结果变量 或 函数名(参数1, 参数2, ...)
         const matchWithResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
         const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
@@ -1908,7 +1943,7 @@ class Interpreter {
         }
 
         const funcInfo = FUNCTIONS[funcName];
-        debugLog(2, `函数信息:`, funcInfo);
+        debugLog(2, () => `函数信息:`, funcInfo);
 
         // 检查返回值变量
         if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) {
@@ -2022,16 +2057,16 @@ class Interpreter {
         const frameId = ++CALL_FRAME_ID;
 
         // 传递参数 - 修正行号范围
-        debugLog(2, `函数 ${funcName} 开始传递参数`);
-        debugLog(2, `函数信息:`, funcInfo);
-        debugLog(2, `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
-        debugLog(2, `开始参数传递循环`);
-        debugLog(2, `函数调用: ${funcName}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        debugLog(2, () => `函数 ${funcName} 开始传递参数`);
+        debugLog(2, () => `函数信息:`, funcInfo);
+        debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
+        debugLog(2, () => `开始参数传递循环`);
+        debugLog(2, () => `函数调用: ${funcName}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
         for (let i = 0; i < funcInfo.params.length; i++) {
-            debugLog(3, `循环索引: ${i}`);
+            debugLog(3, () => `循环索引: ${i}`);
             const param = funcInfo.params[i];
             const paramName = param.name;
-            debugLog(2, `设置参数: ${paramName} (类型: ${param.type})`);
+            debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
 
             if (param.type === DataType.ARRAY) {
                 // 数组参数: 绑定引用/副本/字面量
@@ -2064,7 +2099,7 @@ class Interpreter {
                         isReadonlyArray: true
                     };
                     LOCAL_VARS.push(literalVar);
-                    debugLog(2, `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
                     continue;
                 }
 
@@ -2093,15 +2128,15 @@ class Interpreter {
                     isReadonlyArray: arrArg.mode === 'copy' ? false : !param.isMutable
                 };
                 LOCAL_VARS.push(paramVar);
-                debugLog(2, `数组参数 ${paramName} 绑定完成 (模式: ${arrArg.mode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArg.mode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
                 continue;
             }
 
             const argValue = args[i] !== undefined ? args[i] : null;
             const result = ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId);
-            debugLog(2, `参数 ${paramName} 添加${result ? '成功' : '失败'}`);
+            debugLog(2, () => `参数 ${paramName} 添加${result ? '成功' : '失败'}`);
         }
-        debugLog(2, `参数传递循环结束`);
+        debugLog(2, () => `参数传递循环结束`);
 
         // 如果是有返回值的函数, 在调用位置声明返回值变量
         // 设置currentLinePointer为函数体开始行, 准备执行函数
@@ -2136,54 +2171,54 @@ class Interpreter {
                 }
             }
         }
-        debugLog(3, '当前局部变量详情:', LOCAL_VARS);
-        debugLog(2, `函数 ${funcName} 参数传递完成`);
+        debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
+        debugLog(2, () => `函数 ${funcName} 参数传递完成`);
 
         // 额外的调试信息, 检查参数是否真的被添加
-        debugLog(3, `检查参数是否正确添加:`);
+        debugLog(3, () => `检查参数是否正确添加:`);
         for (let i = 0; i < funcInfo.params.length; i++) {
             const paramName = funcInfo.params[i].name;
             let found = false;
             for (let j = 0; j < LOCAL_VARS.length; j++) {
                 if (LOCAL_VARS[j].name === paramName) {
-                    debugLog(3, `参数 ${paramName} 的索引: ${j}`);
+                    debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                debugLog(3, `参数 ${paramName} 未找到`);
+                debugLog(3, () => `参数 ${paramName} 未找到`);
             }
         }
 
         // 进一步调试: 检查每个参数在LOCAL_VARS中的详细信息
-        debugLog(3, `详细检查参数:`);
+        debugLog(3, () => `详细检查参数:`);
         for (let i = 0; i < funcInfo.params.length; i++) {
             const paramName = funcInfo.params[i].name;
             const paramType = funcInfo.params[i].type;
             let paramFound = false;
             for (let j = 0; j < LOCAL_VARS.length; j++) {
                 if (LOCAL_VARS[j].name === paramName) {
-                    debugLog(3, `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
+                    debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
                     // 验证类型是否匹配
                     if (LOCAL_VARS[j].type !== paramType) {
-                        debugLog(3, `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
+                        debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
                     }
                     paramFound = true;
                     break;
                 }
             }
             if (!paramFound) {
-                debugLog(3, `参数 ${paramName} 未找到`);
+                debugLog(3, () => `参数 ${paramName} 未找到`);
             }
         }
 
         currentLinePointer = funcInfo.startLine; // 主循环会自动加一执行函数体内部的代码
-        debugLog(2, `函数体开始行: ${functionBodyStartLine + 1}`);
+        debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
         // 添加作用域调试信息
-        debugLog(2, `函数 ${funcName} 变量作用域详情:`);
-        debugLog(2, `  返回值变量: ${returnVarName}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-        debugLog(2, `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        debugLog(2, () => `函数 ${funcName} 变量作用域详情:`);
+        debugLog(2, () => `  返回值变量: ${returnVarName}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
         CONTROL_FLOW_STACK.push({
             type: 'function',
             funcName: funcInfo.name,
@@ -2193,12 +2228,12 @@ class Interpreter {
             returnVarName: resultVar,
             frameId: frameId
         });
-        debugLog(2, `当前流程控制栈:`, CONTROL_FLOW_STACK);
+        debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
     }
 
     // 执行数组声明
     static executeArrayDeclaration(params: string, isGlobal: boolean, isConst: boolean): void {
-        debugLog(3, `执行${isGlobal ? '全局' : '局部'}${isConst ? '常量' : '变量'}数组声明: ${params}`);
+        debugLog(3, () => `执行${isGlobal ? '全局' : '局部'}${isConst ? '常量' : '变量'}数组声明: ${params}`);
         // 匹配格式: arrName[arrLength]:type = {...} 或 arrName[arrLength]:type = arrfill
         const arrayMatch = params.match(/^([a-zA-Z0-9_]+)\[([^\]]+)\]:([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
         if (!arrayMatch) {
@@ -2255,7 +2290,7 @@ class Interpreter {
 
         // 处理arrfill关键字
         if (initValue === 'arrfill') {
-            debugLog(2, `数组${arrayName}使用arrfill初始化`);
+            debugLog(2, () => `数组${arrayName}使用arrfill初始化`);
             let fillValue: any;
             switch (elementType) {
                 case DataType.NUMBER:
@@ -2286,9 +2321,9 @@ class Interpreter {
                     type: elementType
                 });
             }
-            debugLog(2, `数组填充完毕`);
+            debugLog(2, () => `数组填充完毕`);
         } else if (initValue.startsWith('[') && initValue.endsWith(']')) {
-            debugLog(2, `数组${arrayName}使用手动初始化`);
+            debugLog(2, () => `数组${arrayName}使用手动初始化`);
             // 处理手动初始化
             const elementsStr = initValue.substring(1, initValue.length - 1).trim();
             let elementValues: string[] = [];
@@ -2423,7 +2458,7 @@ class Interpreter {
 
     // 执行返回语句
     static executeReturn(params: string): void {
-        debugLog(2, `执行返回语句: ${params}`);
+        debugLog(2, () => `执行返回语句: ${params}`);
         // 根据用户需求修改返回值处理逻辑
         // return语句后只能是单个变量
         const returnValueStr = params.trim();
@@ -2467,7 +2502,7 @@ class Interpreter {
                         return;
                     }
                     returnValue = undefined;
-                    debugLog(2, (`无返回值, 设置为undefined`));
+                    debugLog(2, () => (`无返回值, 设置为undefined`));
                     return;
                 }
                 // 数组返回: 捕获整个数组结构引用 (含 arrayElements), 标量返回捕获值
@@ -2476,7 +2511,7 @@ class Interpreter {
                 } else {
                     returnValue = returnVarInfo.value;
                 }
-                debugLog(2, `从变量获取返回值: ${returnValue}`);
+                debugLog(2, () => `从变量获取返回值: ${returnValue}`);
 
                 // 将返回值存储到RETURN_VALUES池中并做好标记
                 if (!RETURN_VALUES.hasOwnProperty(block.funcName)) {
@@ -2494,22 +2529,22 @@ class Interpreter {
                     reportError(ExceptionType.UNKNOWN_ERROR, t('return_value_name_mismatch'));
                     return;
                 }
-                debugLog(2, `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
-                debugLog(2, `当前返回值池内容: `, RETURN_VALUES);
+                debugLog(2, () => `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
+                debugLog(2, () => `当前返回值池内容: `, RETURN_VALUES);
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
                 CONTROL_FLOW_STACK.pop();
                 // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
                 LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
-                debugLog(2, `函数调用清理后的局部变量表`, LOCAL_VARS);
+                debugLog(2, () => `函数调用清理后的局部变量表`, LOCAL_VARS);
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
                 handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, currentLinePointer);
-                debugLog(2, `清理后控制流栈:`, CONTROL_FLOW_STACK);
+                debugLog(2, () => `清理后控制流栈:`, CONTROL_FLOW_STACK);
                 currentLinePointer = block.callFrom;
                 break; // 停止遍历, 防止处理残留函数帧
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
+                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
             }
         }
 
@@ -2545,10 +2580,10 @@ class Interpreter {
         // 提取括号内的表达式
         const conditionExpr = trimmedParams.substring(1, trimmedParams.length - 1);
 
-        debugLog(2, `计算条件表达式: ${conditionExpr} (行 ${currentLinePointer + 1})`);
+        debugLog(2, () => `计算条件表达式: ${conditionExpr} (行 ${currentLinePointer + 1})`);
         try {
             const condition = Interpreter.evaluateExpression(conditionExpr);
-            debugLog(2, `条件表达式结果: ${condition} (类型: ${typeof condition})`);
+            debugLog(2, () => `条件表达式结果: ${condition} (类型: ${typeof condition})`);
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
@@ -2563,7 +2598,7 @@ class Interpreter {
 
             if (!condition) {
                 // 跳过if块
-                debugLog(1, `if 条件为假在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, () => `if 条件为假在第 ${currentLinePointer + 1} 行`);
                 let nestedLevel = 1;
                 let i = currentLinePointer + 1;
                 while (i < programLines.length && nestedLevel > 0) {
@@ -2574,11 +2609,11 @@ class Interpreter {
                         nestedLevel--;
                         if (nestedLevel === 0) {
                             currentLinePointer = i; // 不减1是因为主循环会加1跳过 execElse 避免无法正常执行 else 块
-                            debugLog(2, `当前控制流: `, CONTROL_FLOW_STACK);
+                            debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
                             if (line === 'endif') {
                                 CONTROL_FLOW_STACK.pop();
                             }
-                            debugLog(2, `更新后控制流: `, CONTROL_FLOW_STACK);
+                            debugLog(2, () => `更新后控制流: `, CONTROL_FLOW_STACK);
                             break;
                         }
                     }
@@ -2591,7 +2626,7 @@ class Interpreter {
                 throw error;
             }
             reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
-            debugLog(1, `错误详情: ${error}`);
+            debugLog(1, () => `错误详情: ${error}`);
         }
     }
 
@@ -2636,7 +2671,7 @@ class Interpreter {
             const brokenexists = CONTROL_FLOW_BROKEN_BLOCK_STACK.some(item =>
                 item.type === 'while' && item.start === currentLinePointer
             );
-            debugLog(2, `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+            debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
             const condition = Interpreter.evaluateExpression(conditionExpr) && !brokenexists;
 
@@ -2646,7 +2681,7 @@ class Interpreter {
                 return;
             }
 
-            debugLog(2, `当前控制流: `, CONTROL_FLOW_STACK);
+            debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
             // 先将while循环信息压栈, 防止首次循环条件不满足
             // 检查CONTROL_FLOW_STACK中是否已存在相同while循环信息
             const exists = CONTROL_FLOW_STACK.some(item =>
@@ -2660,7 +2695,7 @@ class Interpreter {
             }
 
             if (!condition) {
-                debugLog(2, `while循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`)
+                debugLog(2, () => `while循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`)
 
                 // 跳过while块
                 let nestedLevel = 1;
@@ -2676,7 +2711,7 @@ class Interpreter {
                             CONTROL_FLOW_STACK.pop();
                             if (brokenexists) {
                                 CONTROL_FLOW_BROKEN_BLOCK_STACK.pop();
-                                debugLog(2, `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                                debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
                             }
                             break;
                         }
@@ -2703,12 +2738,12 @@ class Interpreter {
             }
             reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
         }
-        debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
     }
 
     // 执行endwhl语句
     static executeEndWhile(): void {
-        debugLog(2, `当前控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
         // 返回到while条件
         let i = currentLinePointer - 1;
         let nestedLevel = 1;
@@ -2730,7 +2765,7 @@ class Interpreter {
     // 执行for语句
     static executeFor(params: string): void {
         params = params.replace(/^\(|\)$/g, '');
-        debugLog(2, `for循环参数: ${params}`);
+        debugLog(2, () => `for循环参数: ${params}`);
         // 匹配格式: local 变量名:类型 = 初始值; 条件; 更新表达式
         let match = params.match(/^local\s+([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)\s*;\s*(.+)\s*;\s*(.+)$/);
 
@@ -2753,15 +2788,15 @@ class Interpreter {
             for (let i = currentLinePointer + 1; i < programLines.length; i++) {
                 if (programLines[i].trim().split(/\s+/)[0] === 'for') {
                     nestedLevel++;
-                    debugLog(2, `检测到内嵌for循环, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => `检测到内嵌for循环, 嵌套级别: ${nestedLevel}`);
                 } else if (programLines[i].trim() === 'endfor') {
                     if (nestedLevel === 1) {
-                        debugLog(2, `检测到匹配的endfor语句, 嵌套级别: ${nestedLevel}`);
+                        debugLog(2, () => `检测到匹配的endfor语句, 嵌套级别: ${nestedLevel}`);
                         endForLine = i;
                         break;
                     }
                     nestedLevel--;
-                    debugLog(2, `检测到endfor语句, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => `检测到endfor语句, 嵌套级别: ${nestedLevel}`);
                 }
             }
             // 初始化循环变量
@@ -2786,7 +2821,7 @@ class Interpreter {
 
             if (conflictForStart === currentLinePointer) {
                 // 当前 for 自身重入 (如 jump 跳回): 复用循环变量, 跳过初始化
-                debugLog(2, `循环变量已存在 (for重入), 跳过初始化`);
+                debugLog(2, () => `循环变量已存在 (for重入), 跳过初始化`);
             } else {
                 // 创建循环变量 (若与全局变量同名则自动遮蔽, 局部查找优先)
                 ScopeManager.addVariable(varName, initialValue, type, currentLinePointer, endForLine, false);
@@ -2798,7 +2833,7 @@ class Interpreter {
                 item.updateExpr === updateExpr &&
                 item.varName === varName
             );
-            debugLog(2, `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+            debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
             // 评估条件
             const result = Interpreter.evaluateExpression(condition) && !brokenexists;
@@ -2809,7 +2844,7 @@ class Interpreter {
                 return;
             }
 
-            debugLog(2, `当前控制流: `, CONTROL_FLOW_STACK);
+            debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
             // 先将for循环信息压栈, 防止首次循环条件不满足
             // 检查CONTROL_FLOW_STACK中是否已存在相同的for循环信息
             const exists = CONTROL_FLOW_STACK.some(item =>
@@ -2829,7 +2864,7 @@ class Interpreter {
             }
 
             if (!result) {
-                debugLog(2, `for循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`);
+                debugLog(2, () => `for循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`);
                 // 跳过for块
                 let nestedLevel = 1;
                 let i = currentLinePointer + 1;
@@ -2844,7 +2879,7 @@ class Interpreter {
                             CONTROL_FLOW_STACK.pop();
                             if (brokenexists) {
                                 CONTROL_FLOW_BROKEN_BLOCK_STACK.pop();
-                                debugLog(2, `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                                debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
                             }
                             const varInfo = ScopeManager.getVariableInfo(varName, currentLinePointer);
                             if (varInfo) {
@@ -2882,12 +2917,12 @@ class Interpreter {
             // console.error(`错误: for循环初始化失败`);
             throw { type: ExceptionType.LOOP_INIT_ERROR, message: t('for_init_failed'), lineNumber: currentLinePointer } as Exception;
         }
-        debugLog(2, `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
     }
 
     // 执行endfor语句
     static executeEndFor(): void {
-        debugLog(2, `当前控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
         // 执行更新表达式
         if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'for') {
             const forInfo = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -2947,8 +2982,8 @@ class Interpreter {
                         reportError(ExceptionType.SYNTAX_ERROR, t('break_context_unsupported'));
                         return;
                 }
-                debugLog(2, `跳转目标: ${targetEndTag}`);
-                debugLog(2, `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                debugLog(2, () => `跳转目标: ${targetEndTag}`);
+                debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
                 // 4. 跳到对应的结束标记
                 let i = currentLinePointer + 1;
@@ -2974,7 +3009,7 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
+                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
             }
         }
     }
@@ -3005,7 +3040,7 @@ class Interpreter {
                         reportError(ExceptionType.SYNTAX_ERROR, t('continue_context_unsupported'));
                         return;
                 }
-                debugLog(2, `跳转目标: ${targetEndTag}`);
+                debugLog(2, () => `跳转目标: ${targetEndTag}`);
 
                 // 4. 跳到对应的结束标记
                 let i = currentLinePointer + 1;
@@ -3031,7 +3066,7 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, `清理后的控制流: `, CONTROL_FLOW_STACK);
+                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
             }
         }
 
@@ -3112,7 +3147,7 @@ class Interpreter {
             if (endtryLine !== -1) {
                 ScopeManager.addVariable(errorName, exception.message, DataType.STRING, currentLinePointer, endtryLine, false, false);
             }
-            debugLog(1, `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
+            debugLog(1, () => `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
 
             // 记录catch块位置 (供endtry清理)
             EXCEPTION_STACK.push({
@@ -3194,7 +3229,7 @@ class Interpreter {
 
     // 执行assert语句
     static executeAssert(params: string): void {
-        debugLog(1, `执行assert语句: ${params}`);
+        debugLog(1, () => `执行assert语句: ${params}`);
         // 解析参数, 只支持一种格式: 
         // assert (condition)
         // "assertion failure message"
@@ -3230,7 +3265,7 @@ class Interpreter {
                     lineNumber: currentLinePointer
                 } as Exception;
             } else {
-                debugLog(1, `断言条件为真: ${conditionExpr}`);
+                debugLog(1, () => `断言条件为真: ${conditionExpr}`);
                 // 跳过断言体
                 currentLinePointer += 2;
             }
@@ -3249,10 +3284,10 @@ class Interpreter {
     // 执行switch语句
     static executeSwitch(params: string): void {
         params = params.replace(/^\(|\)$/g, '');
-        debugLog(1, `执行switch语句: ${params}`);
+        debugLog(1, () => `执行switch语句: ${params}`);
         try {
             const condition = Interpreter.evaluateExpression(params);
-            debugLog(1, `switch语句的条件表达式值: ${condition}`);
+            debugLog(1, () => `switch语句的条件表达式值: ${condition}`);
 
             // 检查类型是否为int或string
             let typeError = false;
@@ -3304,7 +3339,7 @@ class Interpreter {
 
     // 执行case语句
     static executeCase(params: string): void {
-        debugLog(1, `处理 case 语句`);
+        debugLog(1, () => `处理 case 语句`);
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
             reportError(ExceptionType.SYNTAX_ERROR, t('case_outside_switch'));
@@ -3318,22 +3353,22 @@ class Interpreter {
             // 跳过case块直到break或endswc
             let nestedLevel = 1;
             let i = currentLinePointer + 1;
-            debugLog(2, `跳过已匹配的switch语句: ${params}, 嵌套级别: ${nestedLevel}`);
+            debugLog(2, () => `跳过已匹配的switch语句: ${params}, 嵌套级别: ${nestedLevel}`);
             while (i < programLines.length && nestedLevel > 0) {
                 const line = programLines[i].trim();
                 if (line.toLowerCase().startsWith('switch ')) {
                     nestedLevel++;
-                    debugLog(2, `嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => `嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
                 } else if (line === 'endswc') {
                     nestedLevel--;
-                    debugLog(2, `退出嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => `退出嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
                     if (nestedLevel === 0) {
                         currentLinePointer = i - 1; // 减1是因为主循环会加1并执行 endSwitch 清理流程栈
-                        debugLog(2, `嵌套层级为0, 当前行指向: ${currentLinePointer}`);
+                        debugLog(2, () => `嵌套层级为0, 当前行指向: ${currentLinePointer}`);
                         break;
                     }
                 } else if (line === 'break') {
-                    debugLog(2, `处理break语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => `处理break语句: ${line}, 嵌套级别: ${nestedLevel}`);
                     if (nestedLevel === 1) { // 只有在当前switch层级才处理break
                         currentLinePointer = i - 1; // 减1是因为主循环会加1并执行 break 跳出当前 switch 块
                         break;
@@ -3347,7 +3382,7 @@ class Interpreter {
         // 如果在未匹配的块中
         try {
             const caseValue = Interpreter.evaluateExpression(params);
-            debugLog(2, `case语句的条件表达式值: ${caseValue}`);
+            debugLog(2, () => `case语句的条件表达式值: ${caseValue}`);
 
             // 检查类型是否与switch条件类型匹配
             if (switchInfo.type === 'switch' && typeof caseValue !== typeof switchInfo.condition) {
@@ -3453,7 +3488,7 @@ class Interpreter {
 
     // 执行跳转指令 (严格格式: jump (condition) :tagname, 仅支持标签跳转) 
     static executeJump(params: string): void {
-        debugLog(1, `参数: ${params}`);
+        debugLog(1, () => `参数: ${params}`);
         // 1. 格式校验
         const match = params.match(/^\(([^)]+)\)\s*:\s*([a-zA-Z_]\w*)$/);
         if (!match) {
@@ -3484,7 +3519,7 @@ class Interpreter {
 
         // 3. 条件不满足时直接返回
         if (!condition) {
-            debugLog(2, `不满足jump条件`);
+            debugLog(2, () => `不满足jump条件`);
             return;
         }
 
@@ -3499,15 +3534,15 @@ class Interpreter {
 
     // 执行操作指令
     static executeOperation(command: string): void {
-        debugLog(1, `执行操作指令: ${command}`);
+        debugLog(1, () => `执行操作指令: ${command}`);
 
         // 使用表达式解析器来处理赋值操作
         try {
             const result = ExpressionEvaluator.evaluate(command.trim(), currentLinePointer);
-            debugLog(1, `获得解析结果`);
+            debugLog(1, () => `获得解析结果`);
             // 检查是否是数组元素赋值
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
-                debugLog(1, `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
+                debugLog(1, () => `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
                 const { target, value } = result;
                 // 处理 global. 前缀 (与整体赋值分支一致)
                 let targetName: string = target.arrayName;
@@ -3521,7 +3556,7 @@ class Interpreter {
                 if (!arrayVar) {
                     throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
-                debugLog(1, `获得的数组名称: ${arrayVar.name}`);
+                debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
 
                 if (arrayVar.type !== DataType.ARRAY) {
                     throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLinePointer } as Exception;
@@ -3549,12 +3584,12 @@ class Interpreter {
                 }
 
                 // 更新数组元素
-                debugLog(2, `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
+                debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
                 arrayVar.arrayElements![target.index].value = validation.convertedValue;
                 // ScopeManager.setVariable(target.arrayName, arrayVar, currentLinePointer);
                 return;
             } else if (result && typeof result === 'object' && result.type === 'assignment') {
-                debugLog(1, `处理普通变量赋值 (type: assignment) : ${command}`);
+                debugLog(1, () => `处理普通变量赋值 (type: assignment) : ${command}`);
                 // 处理普通变量赋值
                 const { target, value } = result;
                 let newTarget: string = target;
@@ -3595,7 +3630,7 @@ class Interpreter {
                         if (rhsVar.isReadonlyArray) {
                             lhsVar.isReadonlyArray = true;
                         }
-                        debugLog(1, `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                        debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
                     } else {
                         Interpreter.checkLoopVarWritable(newTarget);
                         ScopeManager.setVariable(newTarget, value, currentLinePointer, isGlobal);
@@ -3609,11 +3644,12 @@ class Interpreter {
                     } as Exception;
                 }
             } else if (command.includes('=')) {
-                debugLog(1, `处理普通变量赋值 (type: =) : ${command}`);
-                // 处理普通变量赋值
-                const [lhs, rhs] = command.split('=').map(s => s.trim());
+                debugLog(1, () => `处理普通变量赋值 (type: =) : ${command}`);
+                // 手动切分: 避免 split('=') + map(trim) 的数组分配
+                const eqIdx = command.indexOf('=');
+                let newLhs = command.substring(0, eqIdx).trim();
+                const rhs = command.substring(eqIdx + 1).trim();
 
-                let newLhs: string = lhs;
                 let isGlobal: boolean = false;
                 if (newLhs.startsWith('global.')) {
                     newLhs = newLhs.slice('global.'.length);
@@ -3673,7 +3709,7 @@ class Interpreter {
             if (e && typeof e === 'object' && (e as Exception).type !== undefined) {
                 throw e;
             }
-            debugLog(1, `计算表达式时出错 '${expr}' 在第 ${currentLinePointer + 1} 行: ${e}`);
+            debugLog(1, () => `计算表达式时出错 '${expr}' 在第 ${currentLinePointer + 1} 行: ${e}`);
             // 重新抛出错误, 以便调用者可以处理
             throw {
                 type: ExceptionType.UNKNOWN_ERROR,
@@ -3685,7 +3721,7 @@ class Interpreter {
 
     // 执行清除指令
     static executePurge(params: string): void {
-        debugLog(1, `执行清除指令: ${params}`);
+        debugLog(1, () => `执行清除指令: ${params}`);
         // 判断是否包含except
         if (params.includes('except')) {
             const match = params.match(/^(.*?)\s+except\s+(.*)$/);
@@ -3693,14 +3729,14 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('except_format_error'));
                 return;
             }
-            debugLog(1, `匹配到except关键字`);
+            debugLog(1, () => `匹配到except关键字`);
             const beforeExcept = match[1].trim().split(/\s+/);
             const afterExcept = match[2].trim().split(/\s+/);
             if (beforeExcept.length !== 1 || beforeExcept[0] !== 'all') {
                 reportError(ExceptionType.SYNTAX_ERROR, t('except_requires_all'));
                 return;
             } else if (beforeExcept.length === 1 && beforeExcept[0] === 'all') {
-                debugLog(1, `要排除的变量: ${afterExcept}`);
+                debugLog(1, () => `要排除的变量: ${afterExcept}`);
                 if (afterExcept.length === 0) {
                     throw { type: ExceptionType.SYNTAX_ERROR, message: t('except_requires_var'), lineNumber: currentLinePointer } as Exception;
                 }
@@ -3719,14 +3755,14 @@ class Interpreter {
                 // 清除所有局部变量再将排除的局部变量恢复
                 ScopeManager.cleanupLocalVariable(true);
                 LOCAL_VARS = remainedVars;
-                debugLog(1, `已将排除的变量恢复, 当前局部变量有: ${LOCAL_VARS.map(varInfo => varInfo.name)}`);
+                debugLog(1, () => `已将排除的变量恢复, 当前局部变量有: ${LOCAL_VARS.map(varInfo => varInfo.name)}`);
                 return;
             }
         }
         // 判断是否全部清除
         else if (params === 'all') {
             ScopeManager.cleanupLocalVariable(true);
-            debugLog(1, `已清除所有局部变量, 若要清除全局变量请指定清除`);
+            debugLog(1, () => `已清除所有局部变量, 若要清除全局变量请指定清除`);
             return;
         }
         // 清除全局变量
@@ -3736,9 +3772,9 @@ class Interpreter {
                 ScopeManager.cleanupGlobalVariable(globalVarName);
             }
             else {
-                debugLog(1, `全局变量 ${globalVarName} 不存在`);
+                debugLog(1, () => `全局变量 ${globalVarName} 不存在`);
             }
-            debugLog(1, `已清除全局变量 ${globalVarName}`);
+            debugLog(1, () => `已清除全局变量 ${globalVarName}`);
             return;
         }
         else {
@@ -3749,14 +3785,14 @@ class Interpreter {
                 const funcInfo = FUNCTIONS[currentFuncName];
                 const { startLine: funcStartLine, endLine: funcEndLine } = funcInfo;
                 for (let i = 0; i < cleanedVars.length; i++) {
-                    debugLog(2, `要被清除的第 ${i + 1} 个变量 ${cleanedVars[i]}`)
+                    debugLog(2, () => `要被清除的第 ${i + 1} 个变量 ${cleanedVars[i]}`)
                     let varInfo = ScopeManager.getVariableInfo(cleanedVars[i], currentLinePointer);
                     if (varInfo && varInfo.startLine >= funcStartLine && varInfo.endLine <= funcEndLine) {
                         ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
-                        debugLog(2, `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1}`);
+                        debugLog(2, () => `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1}`);
                     }
                 }
-                debugLog(1, `变量清除完成`);
+                debugLog(1, () => `变量清除完成`);
             }
             else {
                 reportError(ExceptionType.SYNTAX_ERROR, t('purge_local_outside_func'));
@@ -3777,13 +3813,13 @@ class Interpreter {
                 // 仅清理当前调用帧的局部变量 (按帧ID隔离, 递归时不影响外层帧)
                 LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== block.frameId);
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
+                debugLog(2, () => `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
                     reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', {name: funcInfo.name, type: funcInfo.returnType}));
                     currentLinePointer = block.callFrom;
                     return;
                 } else {
-                    debugLog(1, `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`)
+                    debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`)
                     currentLinePointer = block.callFrom;
                     return;
                 }
@@ -3821,6 +3857,24 @@ class Interpreter {
 }
 
 // 表达式求值器
+// 表达式树节点: 求值前先把 token 序列解析成树 (纯结构, 不含运行时值), 缓存树后每次执行只遍历求值。
+// 变量/数组访问/函数调用等节点在求值时实时查作用域, 故树可安全跨执行共享 (与 token 缓存同批安全原则)。
+interface ExprNode {
+    kind: 'literal' | 'variable' | 'binary' | 'unary' | 'call' | 'arrayAccess' | 'assignment' | 'arrayAssignment';
+    value?: any;          // literal 字面量值 (数字/字符串/布尔已在建树期确定)
+    name?: string;        // variable 变量名 / arrayAccess 数组名 (含 global. 前缀) / call 函数名
+    isGlobal?: boolean;   // variable / arrayAccess 是否全局访问
+    op?: string;          // binary / unary 运算符
+    left?: ExprNode;      // binary 左操作数
+    right?: ExprNode;     // binary 右操作数
+    operand?: ExprNode;   // unary 操作数
+    funcName?: string;    // call 函数名
+    args?: ExprNode[];    // call 参数树列表
+    index?: ExprNode;     // arrayAccess 索引表达式树
+    target?: string | { arrayName: string, index: ExprNode }; // assignment: 变量名; arrayAssignment: 数组目标
+    valueExpr?: ExprNode; // assignment / arrayAssignment 右值表达式树
+}
+
 class ExpressionEvaluator {
     private static currentLine: number;
     private static tokens: string[];
@@ -3834,21 +3888,40 @@ class ExpressionEvaluator {
     static evaluate(expression: string, currentLine: number): any {
         this.currentLine = currentLine;
         try {
-            this.tokens = this.tokenize(expression);
-            this.currentTokenIndex = 0;
+            // 表达式树缓存: 树为纯结构 (不含运行时值), 同一表达式首次执行时解析建树, 之后每次执行直接遍历求值。
+            // 变量/数组访问/函数调用等节点在求值时实时查作用域, 故树可安全跨执行共享。
+            let tree = ExpressionEvaluator.treeCache.get(expression);
+            if (tree === undefined) {
+                // 树缓存未命中: 需要词法分析 + 建树 (词法结果同样缓存, 供建树失败需重复解析的场景复用)
+                let cachedTokens = ExpressionEvaluator.tokenCache.get(expression);
+                if (cachedTokens === undefined) {
+                    cachedTokens = this.tokenize(expression);
+                    if (ExpressionEvaluator.tokenCache.size >= ExpressionEvaluator.MAX_TOKEN_CACHE) {
+                        ExpressionEvaluator.tokenCache.clear();
+                    }
+                    ExpressionEvaluator.tokenCache.set(expression, cachedTokens);
+                }
+                this.tokens = cachedTokens;
+                this.currentTokenIndex = 0;
 
-            if (this.tokens.length === 0) {
-                return undefined;
+                if (this.tokens.length === 0) {
+                    return undefined;
+                }
+
+                tree = this.buildExpressionTree();
+
+                // 检查是否还有未处理的令牌
+                if (this.currentTokenIndex < this.tokens.length) {
+                    throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_token_after_parse', {token: this.tokens[this.currentTokenIndex]}), lineNumber: this.currentLine } as Exception;
+                }
+
+                if (ExpressionEvaluator.treeCache.size >= ExpressionEvaluator.MAX_TREE_CACHE) {
+                    ExpressionEvaluator.treeCache.clear();
+                }
+                ExpressionEvaluator.treeCache.set(expression, tree);
             }
 
-            const result = this.parseExpression();
-
-            // 检查是否还有未处理的令牌
-            if (this.currentTokenIndex < this.tokens.length) {
-                throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_token_after_parse', {token: this.tokens[this.currentTokenIndex]}), lineNumber: this.currentLine } as Exception;
-            }
-
-            return result;
+            return this.evalTree(tree);
         } catch (error) {
             // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获)
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
@@ -3882,27 +3955,45 @@ class ExpressionEvaluator {
 
         while (i < expression.length) {
             const char = expression[i];
+            const code = char.charCodeAt(0);
 
-            // 跳过空白字符
-            if (/\s/.test(char)) {
-            } else if (/\d/.test(char)) {
+            // 跳过空白字符 (与正则 \s 语义一致: 含全部 Unicode 空白码点)
+            if (code === 9 || code === 10 || code === 11 || code === 12 || code === 13 ||
+                code === 32 || code === 160 || code === 5760 ||
+                (code >= 8192 && code <= 8202) ||
+                code === 8232 || code === 8233 || code === 8239 || code === 8287 ||
+                code === 12288 || code === 65279) {
+            } else if (code >= 48 && code <= 57) {
                 // 解析数字 (支持 0x/0b/0o 进制字面量)
                 let numStr = char;
                 i++;
-                if (numStr === '0' && i < expression.length && /[xXbBoO]/.test(expression[i])) {
-                    // 进制前缀
-                    numStr += expression[i];
-                    i++;
+                if (numStr === '0' && i < expression.length) {
+                    const p = expression[i].charCodeAt(0);
+                    if (p === 120 || p === 88 || p === 98 || p === 66 || p === 111 || p === 79) { // x X b B o O
+                        numStr += expression[i];
+                        i++;
+                    }
                 }
                 const prefix = numStr.length > 1 ? numStr[1].toLowerCase() : '';
-                const validChars = prefix === 'x' ? /[\da-fA-F.]/ : prefix === 'b' ? /[01.]/ : prefix === 'o' ? /[0-7.]/ : /[\d.]/;
-                while (i < expression.length && validChars.test(expression[i])) {
+                const isHex = prefix === 'x';
+                const isBin = prefix === 'b';
+                const isOct = prefix === 'o';
+                while (i < expression.length) {
+                    const c = expression[i].charCodeAt(0);
+                    const isDigit = c >= 48 && c <= 57;
+                    const isDot = c === 46;
+                    // 与原正则 validChars 严格等价: 十六进制允许 a-f/A-F, 二进制仅 0/1, 八进制仅 0-7, 十进制仅数字; 均允许小数点
+                    const ok = isDot ||
+                        (isHex ? (isDigit || (c >= 97 && c <= 102) || (c >= 65 && c <= 70))
+                            : (isBin ? (c === 48 || c === 49)
+                                : (isOct ? (c >= 48 && c <= 55) : isDigit)));
+                    if (!ok) break;
                     numStr += expression[i];
                     i++;
                 }
                 tokens.push(numStr);
                 continue;
-            } else if (char === '"' || char === "'") {
+            } else if (code === 34 || code === 39) { // " '
                 // 解析字符串
                 const quote = char;
                 let str = char;
@@ -3917,19 +4008,25 @@ class ExpressionEvaluator {
                 }
                 tokens.push(str);
                 continue;
-            } else if (/[a-zA-Z_]/.test(char)) {
+            } else if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95) { // A-Z a-z _
                 // 解析标识符或关键字
                 let identifier = char;
                 i++;
                 // 允许点号: 支持 Math.sin / global.var 等点分标识符作为单个token
-                while (i < expression.length && /[a-zA-Z0-9_.]/.test(expression[i])) {
-                    identifier += expression[i];
-                    i++;
+                while (i < expression.length) {
+                    const c = expression[i].charCodeAt(0);
+                    if ((c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 46 || c === 95) {
+                        identifier += expression[i];
+                        i++;
+                    } else {
+                        break;
+                    }
                 }
                 tokens.push(identifier);
                 continue;
-            } else if (/[+\-*/%=<>!&|]/.test(char)) {
-                // 解析运算符
+            } else if (code === 43 || code === 45 || code === 42 || code === 47 || code === 37 ||
+                code === 61 || code === 60 || code === 62 || code === 33 || code === 38 || code === 124) {
+                // 解析运算符 + - * / % = < > ! & |
                 let op = char;
                 i++;
                 // 检查是否是双字符运算符
@@ -3948,8 +4045,9 @@ class ExpressionEvaluator {
                 }
                 tokens.push(op);
                 continue;
-            } else if (/[()\[\]{},:]/.test(char)) {
-                // 解析分隔符
+            } else if (code === 40 || code === 41 || code === 91 || code === 93 ||
+                code === 123 || code === 125 || code === 44 || code === 58) {
+                // 解析分隔符 ( ) [ ] { } , :
                 tokens.push(char);
             } else {
                 throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_char', {char: char, pos: i}), lineNumber: this.currentLine } as Exception;
@@ -3960,21 +4058,18 @@ class ExpressionEvaluator {
     }
 
     // 解析表达式 (处理赋值运算符) 
-    private static parseExpression(): any {
-        debugLog(2, `解析表达式中: ${this.tokens}`);
+    private static buildExpressionTree(): ExprNode {
+        debugLog(2, () => `解析表达式中: ${this.tokens}`);
         // 检查是否是数组元素赋值
         if (this.currentTokenIndex + 2 < this.tokens.length &&
             /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex]) &&
             this.tokens[this.currentTokenIndex + 1] === '[') {
             // 保存当前索引以备恢复
             const savedIndex = this.currentTokenIndex;
-
-            // 获取数组名
-            const arrayName = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex += 2; // 跳过数组名和 '['
 
-            // 解析索引表达式
-            this.parseExpression(); // 索引表达式
+            // 解析索引表达式 (建树)
+            this.buildExpressionTree(); // 索引表达式
 
             // 检查是否有 ']'
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === ']') {
@@ -3984,15 +4079,15 @@ class ExpressionEvaluator {
                 if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '=') {
                     // 这是一个数组元素赋值表达式
                     this.currentTokenIndex = savedIndex; // 恢复索引
-                    const left = this.parseArrayAssignmentTarget();
+                    const target = this.buildArrayAssignmentTarget();
                     this.currentTokenIndex++; // 跳过 '='
-                    const right = this.parseExpression();
-                    return { type: 'array_assignment', target: left, value: right };
+                    const value = this.buildExpressionTree();
+                    return { kind: 'arrayAssignment', target: target, valueExpr: value };
                 }
             }
 
             // 不是数组赋值, 恢复索引并继续正常解析
-            debugLog(2, `不是数组赋值, 恢复索引并继续正常解析: ${this.tokens}`);
+            debugLog(2, () => `不是数组赋值, 恢复索引并继续正常解析: ${this.tokens}`);
             this.currentTokenIndex = savedIndex;
         }
 
@@ -4001,19 +4096,19 @@ class ExpressionEvaluator {
             /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex]) &&
             this.tokens[this.currentTokenIndex + 1] === '=') {
             // 这是一个简单变量赋值表达式
-            const left = this.parseAssignmentTarget();
+            const target = this.buildAssignmentTarget();
             this.currentTokenIndex++; // 跳过 '='
-            const right = this.parseExpression();
-            return { type: 'assignment', target: left, value: right };
+            const value = this.buildExpressionTree();
+            return { kind: 'assignment', target: target, valueExpr: value };
         }
 
-        let left = this.parseLogicalOr();
+        let left = this.buildLogicalOr();
 
         if (this.currentTokenIndex < this.tokens.length) {
             const op = this.tokens[this.currentTokenIndex];
             if (op === '=') {
                 this.currentTokenIndex++;
-                const right = this.parseExpression();
+                this.buildExpressionTree();
                 // 注意: 赋值运算符的处理需要在调用上下文中进行, 这里仅做解析
                 throw {
                     type: ExceptionType.SYNTAX_ERROR,
@@ -4027,133 +4122,133 @@ class ExpressionEvaluator {
         return left;
     }
 
-    // 解析逻辑或运算 (||) 
-    private static parseLogicalOr(): any {
-        debugLog(2, `解析逻辑或运算中: ${this.tokens}`);
-        let left = this.parseLogicalAnd();
+    // 构建逻辑或运算节点 (||) 
+    private static buildLogicalOr(): ExprNode {
+        debugLog(2, () => `解析逻辑或运算中: ${this.tokens}`);
+        let left = this.buildLogicalAnd();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '||') {
             this.currentTokenIndex++;
-            const right = this.parseLogicalAnd();
-            left = this.evaluateOperation('||', left, right);
+            const right = this.buildLogicalAnd();
+            left = { kind: 'binary', op: '||', left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析逻辑与运算 (&&) 
-    private static parseLogicalAnd(): any {
-        debugLog(2, `解析逻辑与运算中: ${this.tokens}`);
-        let left = this.parseEquality();
+    // 构建逻辑与运算节点 (&&) 
+    private static buildLogicalAnd(): ExprNode {
+        debugLog(2, () => `解析逻辑与运算中: ${this.tokens}`);
+        let left = this.buildEquality();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '&&') {
             this.currentTokenIndex++;
-            const right = this.parseEquality();
-            left = this.evaluateOperation('&&', left, right);
+            const right = this.buildEquality();
+            left = { kind: 'binary', op: '&&', left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析相等性运算 (==, !=) 
-    private static parseEquality(): any {
-        debugLog(2, `解析相等性运算中: ${this.tokens}`);
-        let left = this.parseRelational();
+    // 构建相等性运算节点 (==, !=) 
+    private static buildEquality(): ExprNode {
+        debugLog(2, () => `解析相等性运算中: ${this.tokens}`);
+        let left = this.buildRelational();
 
         while (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '==' || this.tokens[this.currentTokenIndex] === '!=')) {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const right = this.parseRelational();
-            left = this.evaluateOperation(op, left, right);
+            const right = this.buildRelational();
+            left = { kind: 'binary', op: op, left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析关系运算 (<, >, <=, >=) 
-    private static parseRelational(): any {
-        debugLog(2, `解析关系运算中: ${this.tokens}`);
-        let left = this.parseAdditive();
+    // 构建关系运算节点 (<, >, <=, >=) 
+    private static buildRelational(): ExprNode {
+        debugLog(2, () => `解析关系运算中: ${this.tokens}`);
+        let left = this.buildAdditive();
 
         while (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '<' || this.tokens[this.currentTokenIndex] === '>' ||
                 this.tokens[this.currentTokenIndex] === '<=' || this.tokens[this.currentTokenIndex] === '>=')) {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const right = this.parseAdditive();
-            left = this.evaluateOperation(op, left, right);
+            const right = this.buildAdditive();
+            left = { kind: 'binary', op: op, left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析加法和减法运算
-    private static parseAdditive(): any {
-        debugLog(2, `解析加法和减法运算中: ${this.tokens}`);
-        let left = this.parseMultiplicative();
+    // 构建加法和减法运算节点
+    private static buildAdditive(): ExprNode {
+        debugLog(2, () => `解析加法和减法运算中: ${this.tokens}`);
+        let left = this.buildMultiplicative();
 
         while (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '+' || this.tokens[this.currentTokenIndex] === '-')) {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const right = this.parseMultiplicative();
-            left = this.evaluateOperation(op, left, right);
+            const right = this.buildMultiplicative();
+            left = { kind: 'binary', op: op, left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析乘法、除法和取模运算
-    private static parseMultiplicative(): any {
-        debugLog(2, `解析乘法、除法和取模运算中: ${this.tokens}`);
-        let left = this.parsePower();
+    // 构建乘法、除法和取模运算节点
+    private static buildMultiplicative(): ExprNode {
+        debugLog(2, () => `解析乘法、除法和取模运算中: ${this.tokens}`);
+        let left = this.buildPower();
 
         while (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '*' || this.tokens[this.currentTokenIndex] === '/' ||
                 this.tokens[this.currentTokenIndex] === '%' || this.tokens[this.currentTokenIndex] === '**')) {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const right = this.parsePower();
-            left = this.evaluateOperation(op, left, right);
+            const right = this.buildPower();
+            left = { kind: 'binary', op: op, left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析幂运算
-    private static parsePower(): any {
-        debugLog(2, `解析幂运算中: ${this.tokens}`);
-        let left = this.parseUnary();
+    // 构建幂运算节点
+    private static buildPower(): ExprNode {
+        debugLog(2, () => `解析幂运算中: ${this.tokens}`);
+        let left = this.buildUnary();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '**') {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const right = this.parsePower(); // 右结合
-            left = this.evaluateOperation(op, left, right);
+            const right = this.buildPower(); // 右结合
+            left = { kind: 'binary', op: op, left: left, right: right };
         }
 
         return left;
     }
 
-    // 解析一元运算符
-    private static parseUnary(): any {
-        debugLog(2, `解析一元运算符中: ${this.tokens}`);
+    // 构建一元运算符节点
+    private static buildUnary(): ExprNode {
+        debugLog(2, () => `解析一元运算符中: ${this.tokens}`);
         if (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '-' || this.tokens[this.currentTokenIndex] === '+' ||
                 this.tokens[this.currentTokenIndex] === '!')) {
             const op = this.tokens[this.currentTokenIndex];
             this.currentTokenIndex++;
-            const operand = this.parseUnary();
-            return this.evaluateUnaryOperation(op, operand);
+            const operand = this.buildUnary();
+            return { kind: 'unary', op: op, operand: operand };
         }
 
-        return this.parsePrimary();
+        return this.buildPrimary();
     }
 
-    // 解析基本元素 (数字、字符串、变量、括号表达式) 
-    private static parsePrimary(): any {
-        debugLog(2, `解析基本元素中: ${this.tokens}`);
+    // 构建基本元素节点 (数字、字符串、变量、括号表达式) 
+    private static buildPrimary(): ExprNode {
+        debugLog(2, () => `解析基本元素中: ${this.tokens}`);
         if (this.currentTokenIndex >= this.tokens.length) {
             throw { type: ExceptionType.SYNTAX_ERROR, message: t('expr_unexpected_end', {pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
@@ -4163,7 +4258,7 @@ class ExpressionEvaluator {
         // 检查是否是数字
         if (/^\d+(\.\d+)?$/.test(token)) {
             this.currentTokenIndex++;
-            return parseFloat(token);
+            return { kind: 'literal', value: parseFloat(token) };
         }
 
         // 检查是否是进制字面量 (0x/0b/0o)
@@ -4171,26 +4266,26 @@ class ExpressionEvaluator {
         if (radixMatch) {
             this.currentTokenIndex++;
             const radix = token[1].toLowerCase() === 'x' ? 16 : token[1].toLowerCase() === 'b' ? 2 : 8;
-            return parseInt(token.slice(2), radix);
+            return { kind: 'literal', value: parseInt(token.slice(2), radix) };
         }
 
         // 检查是否是字符串
         if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
             this.currentTokenIndex++;
-            return token.substring(1, token.length - 1);
+            return { kind: 'literal', value: token.substring(1, token.length - 1) };
         }
 
         // 检查是否是关键字
         if (token === 'true') {
             this.currentTokenIndex++;
-            return true;
+            return { kind: 'literal', value: true };
         }
         if (token === 'false') {
             this.currentTokenIndex++;
-            return false;
+            return { kind: 'literal', value: false };
         }
         if (token === 'null') {
-            // 规范: 条件/表达式中出现 null 或 undefined 立即抛出错误
+            // 规范: 条件/表达式中出现 null 或 undefined 立即抛出错误 (建树期即抛, 与原有解析期行为一致)
             throw {
                 type: ExceptionType.TYPE_ERROR,
                 message: t('expr_null_not_allowed'),
@@ -4213,62 +4308,35 @@ class ExpressionEvaluator {
         // [a-zA-Z0-9_.]* : 后续字符可以是字母、数字、下划线或点号, * 表示该组合可出现 0 次或多次
         // $ : 匹配字符串的结束位置
         if (/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(token)) {
-            debugLog(2, `检查 ${token} 是否为变量或函数调用`)
+            debugLog(2, () => `检查 ${token} 是否为变量或函数调用`)
             this.currentTokenIndex++;
             // 全局变量标志
             let isGlobal: boolean = false;
-            // 是数组逻辑值
-            let isArray: boolean = true;
             // 检查是否是函数调用
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '(') {
-                debugLog(2, `检测到函数调用: ${token}`);
-                return this.parseFunctionCall(token);
+                debugLog(2, () => `检测到函数调用: ${token}`);
+                return this.buildFunctionCall(token);
             }
 
             if (token.startsWith('global.')) {
-                debugLog(2, `检测到全局访问前缀`);
+                debugLog(2, () => `检测到全局访问前缀`);
                 isGlobal = true;
             }
 
             // 检查是否是数组元素访问
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '[') {
-                debugLog(2, `检测到数组元素访问: ${token}`);
-                return this.parseArrayAccess(token, isGlobal);
+                debugLog(2, () => `检测到数组元素访问: ${token}`);
+                return this.buildArrayAccess(token, isGlobal);
             }
 
-            // 检查是否为数组, 返回数组
-            let varType = ScopeManager.getVariableType(token, this.currentLine, isGlobal);
-            if (varType === 'array') {
-                let array = ScopeManager.getVariable(token, this.currentLine, isArray, isGlobal);
-                debugLog(2, `返回${isGlobal ? '全局' : ''}数组: ${array.name} 在第${this.currentLine + 1}行`);
-                return array;
-            }
-            // 检查变量是否真实存在 (区分"未定义"与"值为undefined")
-            let varInfo = ScopeManager.getVariableInfo(token, this.currentLine, isGlobal);
-            if (varInfo === null) {
-                // 变量未定义: 抛引用错误 (可被try-catch捕获)
-                throw {
-                    type: ExceptionType.REFERENCE_ERROR,
-                    message: isGlobal ? t('var_undefined_expr_global', { name: token }) : t('var_undefined_expr_local', { name: token }),
-                    lineNumber: this.currentLine
-                } as Exception;
-            }
-            // 变量存在但值为 undefined (如无返回值函数的返回值变量): 使用会暴露未操作变量的问题
-            if (varInfo.value === undefined) {
-                throw {
-                    type: ExceptionType.TYPE_ERROR,
-                    message: t('var_value_undefined', { name: token }),
-                    lineNumber: this.currentLine
-                } as Exception;
-            }
-            debugLog(2, `直接返回${isGlobal ? '全局' : ''}变量值: ${token} = ${varInfo.value} 在第${this.currentLine + 1}行`);
-            return varInfo.value;
+            // 变量节点: 类型/存在性/值检查推迟到求值期实时查作用域 (缓存树不含运行时值)
+            return { kind: 'variable', name: token, isGlobal: isGlobal };
         }
 
         // 检查是否是括号表达式
         if (token === '(') {
             this.currentTokenIndex++;
-            const expr = this.parseExpression();
+            const expr = this.buildExpressionTree();
 
             if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ')') {
                 throw {
@@ -4289,90 +4357,13 @@ class ExpressionEvaluator {
         } as Exception;
     }
 
-    // 解析数组元素访问
-    private static parseArrayAccess(arrayName: string, isGlobal: boolean = false): any {
-        let newArrayName: string = arrayName;
-        if (isGlobal) {
-            if (arrayName.startsWith('global.')) {
-                newArrayName = arrayName.slice('global.'.length);
-            }
-        }
-
+    // 构建数组元素访问节点 (索引类型/范围检查推迟到求值期实时进行)
+    private static buildArrayAccess(arrayName: string, isGlobal: boolean = false): ExprNode {
         // 跳过左方括号
         this.currentTokenIndex++;
 
-        // 解析索引表达式
-        const indexExpr = this.parseExpression();
-
-        // 检查索引是否为数字
-        if (typeof indexExpr !== 'number') {
-            throw {
-                type: ExceptionType.TYPE_ERROR,
-                message: t('array_index_not_number', {pos: this.currentTokenIndex}),
-                lineNumber: this.currentLine
-            } as Exception;
-        }
-
-        // 检查索引是否为非负整数
-        if (!Number.isInteger(indexExpr) || indexExpr < 0) {
-            throw {
-                type: ExceptionType.RANGE_ERROR,
-                message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
-                lineNumber: this.currentLine
-            } as Exception;
-        }
-
-        // 跳过右方括号
-        if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ']') {
-            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_missing_right_bracket', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
-        }
-        this.currentTokenIndex++;
-
-        // 获取数组变量
-        const arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, isGlobal);
-        if (!arrayVar || arrayVar.type !== DataType.ARRAY) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
-        }
-
-        // 检查索引是否越界
-        if (indexExpr >= (arrayVar.arrayLength || 0)) {
-            throw { type: ExceptionType.RANGE_ERROR, message: t('array_index_out_of_range_access', {index: indexExpr, name: newArrayName, max: arrayVar.arrayLength ? arrayVar.arrayLength - 1 : -1, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
-        }
-
-        // 返回数组元素的值
-        const elements = arrayVar.arrayElements;
-        if (elements && indexExpr < elements.length) {
-            return elements[indexExpr].value;
-        } else {
-            throw { type: ExceptionType.UNKNOWN_ERROR, message: t('array_element_access_error', {name: newArrayName, index: indexExpr, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
-        }
-    }
-
-    // 解析数组赋值目标
-    private static parseArrayAssignmentTarget(): any {
-        const arrayName = this.tokens[this.currentTokenIndex];
-        this.currentTokenIndex += 2; // 跳过数组名和 '['
-
-        // 解析索引表达式
-        const indexExpr = this.parseExpression();
-
-        // 检查索引是否为数字
-        if (typeof indexExpr !== 'number') {
-            throw {
-                type: ExceptionType.TYPE_ERROR,
-                message: t('array_index_not_number', {pos: this.currentTokenIndex}),
-                lineNumber: this.currentLine
-            } as Exception;
-        }
-
-        // 检查索引是否为非负整数
-        if (!Number.isInteger(indexExpr) || indexExpr < 0) {
-            throw {
-                type: ExceptionType.RANGE_ERROR,
-                message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
-                lineNumber: this.currentLine
-            } as Exception;
-        }
+        // 解析索引表达式 (建树)
+        const index = this.buildExpressionTree();
 
         // 跳过右方括号
         if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ']') {
@@ -4380,11 +4371,28 @@ class ExpressionEvaluator {
         }
         this.currentTokenIndex++;
 
-        return { arrayName, index: indexExpr };
+        return { kind: 'arrayAccess', name: arrayName, isGlobal: isGlobal, index: index };
     }
 
-    // 解析赋值目标
-    private static parseAssignmentTarget(): any {
+    // 构建数组赋值目标节点 (索引类型/范围检查推迟到求值期实时进行)
+    private static buildArrayAssignmentTarget(): { arrayName: string, index: ExprNode } {
+        const arrayName = this.tokens[this.currentTokenIndex];
+        this.currentTokenIndex += 2; // 跳过数组名和 '['
+
+        // 解析索引表达式 (建树)
+        const index = this.buildExpressionTree();
+
+        // 跳过右方括号
+        if (this.currentTokenIndex >= this.tokens.length || this.tokens[this.currentTokenIndex] !== ']') {
+            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_missing_right_bracket', {name: arrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
+        }
+        this.currentTokenIndex++;
+
+        return { arrayName: arrayName, index: index };
+    }
+
+    // 构建赋值目标
+    private static buildAssignmentTarget(): string {
         // 检查是否是有效的标识符 (允许点号, 以支持 global.var 前缀赋值)
         if (this.currentTokenIndex >= this.tokens.length ||
             !/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex])) {
@@ -4401,18 +4409,18 @@ class ExpressionEvaluator {
         return varName;
     }
 
-    // 解析函数调用
-    private static parseFunctionCall(funcName: string): any {
-        debugLog(2, `解析函数调用: ${funcName}`);
+    // 构建函数调用节点 (参数求值推迟到 evalTree, 与原有从左到右按序求值一致)
+    private static buildFunctionCall(funcName: string): ExprNode {
+        debugLog(2, () => `解析函数调用: ${funcName}`);
         // 跳过左括号
         this.currentTokenIndex++;
 
-        const args: any[] = [];
+        const args: ExprNode[] = [];
 
-        // 解析参数
+        // 解析参数 (建树)
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] !== ')') {
-            debugLog(2, `解析参数`);
-            args.push(this.parseExpression());
+            debugLog(2, () => `解析参数`);
+            args.push(this.buildExpressionTree());
 
             // 检查是否有逗号
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === ',') {
@@ -4430,9 +4438,7 @@ class ExpressionEvaluator {
         }
         this.currentTokenIndex++;
 
-        // 执行函数调用
-        debugLog(2, `执行函数调用: name: ${funcName} args:${args}`)
-        return this.executeFunction(funcName, args);
+        return { kind: 'call', funcName: funcName, args: args };
     }
 
     // 执行函数调用
@@ -4475,15 +4481,15 @@ class ExpressionEvaluator {
                 return Math.random();
             case 'len':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'len'}), lineNumber: this.currentLine } as Exception;
-                debugLog(2, `执行 len 传入的 arg: ${args[0]}`);
+                debugLog(2, () => `执行 len 传入的 arg: ${args[0]}`);
                 if (typeof args[0] === 'string') {
-                    debugLog(2, `参数为 string 类型`);
+                    debugLog(2, () => `参数为 string 类型`);
                     return args[0].length;
                 }
                 // 检查是否是数组变量
                 // 注意: 这里需要特殊处理, 因为数组变量在传递时可能已经被解构
                 // 我们需要检查参数是否是数组变量对象
-                debugLog(2, `参数为数组类型 ${args[0]}`);
+                debugLog(2, () => `参数为数组类型 ${args[0]}`);
                 if (args[0] && typeof args[0] === 'object' && 'type' in args[0] && args[0].type === DataType.ARRAY) {
                     return args[0].arrayLength || 0;
                 }
@@ -4570,7 +4576,7 @@ class ExpressionEvaluator {
                     arrayElements: copySrcArr.arrayElements!.map(e => ({ value: e.value, type: e.type })),
                     isReadonlyArray: false
                 };
-                debugLog(1, `copy 深拷贝数组: ${copySrcArr.name} (长度 ${copiedArr.arrayLength})`);
+                debugLog(1, () => `copy 深拷贝数组: ${copySrcArr.name} (长度 ${copiedArr.arrayLength})`);
                 return copiedArr;
             default:
                 throw {
@@ -4581,9 +4587,138 @@ class ExpressionEvaluator {
         }
     }
 
+    // 词法缓存: token 数组纯由字符序列决定, 与运行时值无关, 同一表达式字符串缓存后跳过逐字符切词。
+    // 解析器只通过游标读取 token 数组内容、从不修改, 多个表达式共享缓存数组无副作用。
+    private static tokenCache: Map<string, string[]> = new Map();
+    private static readonly MAX_TOKEN_CACHE = 1000;
+
+    // 表达式树缓存: 树为纯结构 (不含运行时值), 首次执行时解析建树, 之后每次执行直接遍历求值。
+    // 变量/数组/函数调用等节点在求值时实时查作用域, 故缓存树跨执行共享是安全的 (与 token 缓存同批安全原则)。
+    private static treeCache: Map<string, ExprNode> = new Map();
+    private static readonly MAX_TREE_CACHE = 1000;
+
+    // ===== 求值 (运行期): 遍历表达式树求值, 变量/数组/函数调用实时查作用域 =====
+    // 语义与原有"边解析边求值"严格一致: 求值顺序 (左→右→运算, 参数按序, 数组索引先于右值),
+    // 类型检查/报错 (引用/类型/越界/除零等) 完全复刻, 唯一差异是解析不再重复执行。
+    private static evalTree(node: ExprNode): any {
+        switch (node.kind) {
+            case 'literal':
+                return node.value;
+            case 'variable': {
+                const name = node.name as string;
+                const isGlobal = !!node.isGlobal;
+                // 复刻 parsePrimary 变量分支: 数组整体返回数组对象, 未定义抛引用错误, 值为 undefined 抛类型错误
+                const varType = ScopeManager.getVariableType(name, this.currentLine, isGlobal);
+                if (varType === 'array') {
+                    const array = ScopeManager.getVariable(name, this.currentLine, true, isGlobal);
+                    debugLog(2, () => `返回${isGlobal ? '全局' : ''}数组: ${array.name} 在第${this.currentLine + 1}行`);
+                    return array;
+                }
+                const varInfo = ScopeManager.getVariableInfo(name, this.currentLine, isGlobal);
+                if (varInfo === null) {
+                    throw {
+                        type: ExceptionType.REFERENCE_ERROR,
+                        message: isGlobal ? t('var_undefined_expr_global', { name: name }) : t('var_undefined_expr_local', { name: name }),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                if (varInfo.value === undefined) {
+                    throw {
+                        type: ExceptionType.TYPE_ERROR,
+                        message: t('var_value_undefined', { name: name }),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                debugLog(2, () => `直接返回${isGlobal ? '全局' : ''}变量值: ${name} = ${varInfo.value} 在第${this.currentLine + 1}行`);
+                return varInfo.value;
+            }
+            case 'binary': {
+                const left = this.evalTree(node.left as ExprNode);
+                const right = this.evalTree(node.right as ExprNode);
+                return this.evaluateOperation(node.op as string, left, right);
+            }
+            case 'unary': {
+                const operand = this.evalTree(node.operand as ExprNode);
+                return this.evaluateUnaryOperation(node.op as string, operand);
+            }
+            case 'call': {
+                // 参数从左到右按序求值, 与原有边解析边求值的参数求值顺序一致
+                const args = (node.args as ExprNode[]).map(a => this.evalTree(a));
+                debugLog(2, () => `执行函数调用: name: ${node.funcName} args:${args}`)
+                return this.executeFunction(node.funcName as string, args);
+            }
+            case 'arrayAccess': {
+                const index = this.evalTree(node.index as ExprNode);
+                // 复刻 parseArrayAccess 的索引检查与取元素逻辑 (检查从解析期移至求值期, 语义一致)
+                if (typeof index !== 'number') {
+                    throw {
+                        type: ExceptionType.TYPE_ERROR,
+                        message: t('array_index_not_number', {pos: this.currentTokenIndex}),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                if (!Number.isInteger(index) || index < 0) {
+                    throw {
+                        type: ExceptionType.RANGE_ERROR,
+                        message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                let newArrayName: string = node.name as string;
+                if (node.isGlobal && newArrayName.startsWith('global.')) {
+                    newArrayName = newArrayName.slice('global.'.length);
+                }
+                const arrayVar = ScopeManager.getVariable(newArrayName, this.currentLine, true, !!node.isGlobal);
+                if (!arrayVar || arrayVar.type !== DataType.ARRAY) {
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: newArrayName, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
+                }
+                if (index >= (arrayVar.arrayLength || 0)) {
+                    throw { type: ExceptionType.RANGE_ERROR, message: t('array_index_out_of_range_access', {index: index, name: newArrayName, max: arrayVar.arrayLength ? arrayVar.arrayLength - 1 : -1, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
+                }
+                const elements = arrayVar.arrayElements;
+                if (elements && index < elements.length) {
+                    return elements[index].value;
+                }
+                throw { type: ExceptionType.UNKNOWN_ERROR, message: t('array_element_access_error', {name: newArrayName, index: index, pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
+            }
+            case 'assignment': {
+                const value = this.evalTree(node.valueExpr as ExprNode);
+                // 返回结构与原有边解析边求值一致, executeOperation 原样消费
+                return { type: 'assignment', target: node.target as string, value: value };
+            }
+            case 'arrayAssignment': {
+                const target = node.target as { arrayName: string, index: ExprNode };
+                const index = this.evalTree(target.index);
+                // 复刻 parseArrayAssignmentTarget 的索引检查 (先于右值求值, 与原有顺序一致)
+                if (typeof index !== 'number') {
+                    throw {
+                        type: ExceptionType.TYPE_ERROR,
+                        message: t('array_index_not_number', {pos: this.currentTokenIndex}),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                if (!Number.isInteger(index) || index < 0) {
+                    throw {
+                        type: ExceptionType.RANGE_ERROR,
+                        message: t('array_index_not_nonneg_int', {pos: this.currentTokenIndex}),
+                        lineNumber: this.currentLine
+                    } as Exception;
+                }
+                const value = this.evalTree(node.valueExpr as ExprNode);
+                return { type: 'array_assignment', target: { arrayName: target.arrayName, index: index }, value: value };
+            }
+            default:
+                throw {
+                    type: ExceptionType.SYNTAX_ERROR,
+                    message: t('unknown_operator', {op: node.kind, pos: this.currentTokenIndex}),
+                    lineNumber: this.currentLine
+                } as Exception;
+        }
+    }
+
     // 计算二元运算
     private static evaluateOperation(operator: string, left: any, right: any): any {
-        debugLog(1, `计算操作: ${operator}, 左操作数: ${JSON.stringify(left)} (左类型: ${typeof left}), 右操作数: ${JSON.stringify(right)} (右类型: ${typeof right})`);
+        debugLog(1, () => `计算操作: ${operator}, 左操作数: ${JSON.stringify(left)} (左类型: ${typeof left}), 右操作数: ${JSON.stringify(right)} (右类型: ${typeof right})`);
 
         // 提取操作数的值和类型
         const leftValue = left;
@@ -4635,47 +4770,47 @@ class ExpressionEvaluator {
                 if (typeof leftValue === 'string' || typeof rightValue === 'string') {
                     return String(leftValue) + String(rightValue);
                 }
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return leftValue + rightValue;
             case '-':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return leftValue - rightValue;
             case '*':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return leftValue * rightValue;
             case '/':
                 if (rightValue === 0) throw { type: ExceptionType.RANGE_ERROR, message: t('division_by_zero'), lineNumber: this.currentLine } as Exception;
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return leftValue / rightValue;
             case '%':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return leftValue % rightValue;
             case '**':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Math.pow(leftValue, rightValue);
             case '==':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue == rightValue);
             case '!=':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue != rightValue);
             case '<':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue < rightValue);
             case '>':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue > rightValue);
             case '<=':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue <= rightValue);
             case '>=':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue >= rightValue);
             case '&&':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue && rightValue);
             case '||':
-                debugLog(2, `${operator} operated`);
+                debugLog(2, () => `${operator} operated`);
                 return Boolean(leftValue || rightValue);
             default:
                 throw {
@@ -4703,19 +4838,6 @@ class ExpressionEvaluator {
                 } as Exception;
         }
     }
-
-    // // 设置缓存
-    // private static setCache(expression: string, value: any): void {
-    //     // 如果缓存已满, 清除最旧的条目
-    //     if (this.cache.size >= this.MAX_CACHE_SIZE) {
-    //         const firstKey = this.cache.keys().next().value;
-    //         if (firstKey !== undefined) {
-    //             this.cache.delete(firstKey);
-    //         }
-    //     }
-
-    //     this.cache.set(expression, value);
-    // }
 }
 
 // 添加Node.js环境下的文件系统模块导入
@@ -4880,7 +5002,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         isReadonlyArray: arrStruct.isReadonlyArray
                     };
                     LOCAL_VARS.push(newVar);
-                    debugLog(2, `数组返回值绑定到新变量 ${resultVar}`);
+                    debugLog(2, () => `数组返回值绑定到新变量 ${resultVar}`);
                 } else {
                     const existing = ScopeManager.getVariableInfo(resultVar, oldLinePointer);
                     if (existing && existing.type === DataType.ARRAY) {
@@ -4888,7 +5010,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         existing.arrayElementType = arrStruct.arrayElementType;
                         existing.arrayElements = arrStruct.arrayElements;
                         existing.isReadonlyArray = arrStruct.isReadonlyArray;
-                        debugLog(2, `数组返回值绑定到已有数组变量 ${resultVar}`);
+                        debugLog(2, () => `数组返回值绑定到已有数组变量 ${resultVar}`);
                     } else {
                         reportError(ExceptionType.TYPE_ERROR, t('result_var_not_array', {name: resultVar}));
                     }
@@ -4902,7 +5024,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
         // 确保结果变量在当前作用域中已声明
         // 如果变量不存在, 则添加到局部变量作用域中
         if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
-            debugLog(2, `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
+            debugLog(2, () => `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
             // 用类型默认值初始化, 避免 addVariable 类型校验失败
             let initValue: any;
             switch (funcInfo.returnType) {
@@ -4937,7 +5059,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
             if (returnVarName && funcReturnValues.hasOwnProperty(returnVarName)) {
                 const returnValue = funcReturnValues[returnVarName];
 
-                debugLog(2, `获取到函数返回值: ${funcName}[${returnVarName}] = ${returnValue}`);
+                debugLog(2, () => `获取到函数返回值: ${funcName}[${returnVarName}] = ${returnValue}`);
 
                 // 将返回值赋值给结果变量
                 ScopeManager.setVariable(resultVar, returnValue, oldLinePointer);
@@ -4967,7 +5089,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         defaultValue = null;
                 }
 
-                debugLog(2, `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
+                debugLog(2, () => `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
                 ScopeManager.setVariable(resultVar, defaultValue, oldLinePointer);
             }
         } else {
@@ -4993,14 +5115,14 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                     defaultValue = null;
             }
 
-            debugLog(2, `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
+            debugLog(2, () => `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
             ScopeManager.setVariable(resultVar, defaultValue, oldLinePointer);
         }
     } else if (resultVar !== undefined) {
         // 函数没有返回类型但有结果变量, 设置为void
         // 确保结果变量在当前作用域中已声明
         if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
-            debugLog(2, `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
+            debugLog(2, () => `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
             // 添加变量到局部作用域, 类型为UNDEFINED, 初始值为undefined
             // 变量作用域从当前行开始, 到程序结束
             ScopeManager.addVariable(resultVar, undefined, DataType.UNDEFINED, oldLinePointer, -1, false);
