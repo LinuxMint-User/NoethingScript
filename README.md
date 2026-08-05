@@ -98,11 +98,25 @@ catch (Exception err)
 endtry
 ```
 
+## 性能基准
+
+内置合成基准与 2048 端到端基准（`benchmarks/`），可对比当前版与任意基线提交：
+
+```bash
+npm run bench          # 合成基准: 当前版 vs 原生 JS (全局/局部循环、函数调用、数组读写)
+npm run bench:head     # 合成基准: 对比基线提交 (默认 HEAD~1, 自动编译基线, 含行吞吐)
+npm run bench:2048     # 2048 端到端计时 + 固定种子确定性校验 (语义零回归验证)
+node benchmarks/ns_perf_bench.js --base=<rev>   # 对比任意提交 (如 --base=7fc14c5)
+```
+
+说明：行吞吐口径为每轮循环执行 4 行（`while` 条件行 + body + `endwhl` 结构行）；倍率以原生 JS 稳态中位耗时（200 次预热 + 100 次计时）为基准，JS 侧为微秒级，绝对倍率仅供参考，相对变化与历史对比请保持同一脚本同一口径。基线产物缓存于 `.bench-head/`（已 gitignore），基线提交变化时自动重建。
+
 ## 目录结构
 
 ```
 NoethingScript/
 ├── noethingScript-Interpreter.ts   # 解释器源码
+├── benchmarks/                     # 性能基准 (合成基准 + 2048 端到端, 支持基线对比; npm run bench)
 ├── doc.md                          # 语言规范手册
 ├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md), 含 input 演示 (tests/input_demo.ns, tests/input_browser_demo.html)
 ├── examples/                       # 演示项目: 2048 命令行游戏 (examples/2048.ns) 与网页版 (examples/2048_web.html, 浏览器中直接打开)

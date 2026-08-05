@@ -4,7 +4,10 @@
   "description": "基于行的显式类型脚本语言解释器 (NoethingScript Interpreter)",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/noethingScript-Interpreter.js"
+    "start": "node dist/noethingScript-Interpreter.js",
+    "bench": "node benchmarks/ns_perf_bench.js",
+    "bench:head": "node benchmarks/ns_perf_bench.js --head",
+    "bench:2048": "node benchmarks/ns_2048_bench.js --head"
   },
   "devDependencies": {
     "@types/node": "^24.2.1",

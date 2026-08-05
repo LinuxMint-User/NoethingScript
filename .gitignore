@@ -4,5 +4,8 @@ node_modules/
 # 编译产物
 dist/
 
+# 基准测试 HEAD 基线 (git HEAD 编译产物)
+.bench-head/
+
 # 扩展打包产物
 *.vsix
