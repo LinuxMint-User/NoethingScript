@@ -212,6 +212,47 @@ interface LineInfo {
     isEmpty: boolean;    // 空行
     isComment: boolean;  // 以 // 开头
     isEndTag: boolean;   // 恰为 ':end'
+    stmt: LineStmt;      // 阶段1行级预编译产物 (加载期构建, 运行时数字类型分发)
+}
+
+// ===== 阶段1: 行级预编译 =====
+// 语句类型 (数字枚举): 替代运行时"逐行 split + 首关键字字符串 switch" 分发。
+// 与 KEYWORD_COMMANDS 一一对应, 加载期把每行分类为结构化语句, 主循环执行走数字 switch。
+enum StmtType {
+    OP = 0,            // 非关键字行 (赋值/表达式行) → executeOperation(整行)
+    GLOBAL,            // global [const] 声明
+    LOCAL,             // local [const] 声明
+    CALL,              // call func(args) [-> result]
+    RETURN,            // return [expr]
+    JUMP,              // jump (cond):label
+    PRINT,             // print expr
+    IF,                // if (cond)
+    ELSE,              // else
+    ENDIF,             // endif
+    WHILE,             // while (cond)
+    ENDWHL,            // endwhl
+    FOR,               // for (local ...; cond; update)
+    ENDFOR,            // endfor
+    BREAK,             // break
+    CONTINUE,          // continue
+    TRY,               // try
+    CATCH,             // catch (Exception e)
+    ENDTRY,            // endtry
+    ASSERT,            // assert (cond)
+    ENDASRT,           // endasrt
+    SWITCH,            // switch (expr)
+    CASE,              // case value
+    DEFAULT,           // default
+    ENDSWC,            // endswc
+    PURGE,             // purge ...
+    END_TAG,           // :end
+    CONST_PREFIX_ERROR // const global/local 位置错误 (语法错误, 与旧 executeCommand 前置检查一致)
+}
+
+// 结构化行对象: 预解析的关键字类型 + 预拼接的参数串 (参数与旧 split(/\s+/).slice(1).join(' ') 完全一致)
+interface LineStmt {
+    type: StmtType;
+    params: string;    // 关键字行参数 (首关键字之后); 非参数类语句为空串
 }
 
 // 行预处理缓存: loadProgram 时构建一次, 主循环运行时直接读, 避免每行重复 trim/判断。
@@ -1179,13 +1220,15 @@ class Interpreter {
     static loadProgram(code: string): void {
         programLines = code.split('\n');
         // 构建行预处理缓存 (与 programLines 严格一一对应, 行号/标签/作用域索引不受影响)
+        // 同时完成阶段1行级预编译: 每行分类为结构化语句 (数字类型 + 预拼接参数), 运行时免 split/关键字判定
         LINE_INFO = programLines.map(raw => {
             const content = raw.trim();
             return {
                 content,
                 isEmpty: content === '',
                 isComment: content.indexOf('//') === 0,
-                isEndTag: content === ':end'
+                isEndTag: content === ':end',
+                stmt: Interpreter.classifyLine(content)
             };
         });
         currentLinePointer = 0;
@@ -1762,15 +1805,15 @@ class Interpreter {
                             continue;
                         }
                     } else if (info.isEndTag) {
-                        Interpreter.executeCommand(line); // 先遇到函数结束标签可能处于无返回值函数中, 需要特殊处理
+                        Interpreter.executeCommand(info.stmt, line); // 先遇到函数结束标签可能处于无返回值函数中, 需要特殊处理
                     }
 
                     currentLinePointer++;
                     continue;
                 }
 
-                // 执行指令
-                Interpreter.executeCommand(line);
+                // 执行指令 (阶段1: 数字类型分发的结构化语句)
+                Interpreter.executeCommand(info.stmt, line);
                 currentLinePointer++;
             } catch (error) {
                 // input 挂起信号: 交还控制权给宿主等待下一次输入 (不报错不终止)
@@ -1861,140 +1904,151 @@ class Interpreter {
         return Interpreter.KEYWORD_SET.has(first.toLowerCase());
     }
 
-    static executeCommand(command: string): void {
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${command}`);
-        // 快速路径: 非关键字行 (纯赋值/表达式, 如 "i = i + 1") 直接交给 executeOperation,
-        // 避免 split(/\s+/) 的数组分配与 switch 分发。行为与原 default 分支一致。
-        if (!Interpreter.isKeywordCommand(command)) {
-            Interpreter.executeOperation(command);
-            return;
+    // 阶段1行级预编译: 加载期把一行命令分类为结构化语句 (数字类型 + 预拼接参数)。
+    // 分类判定与旧 isKeywordCommand 完全一致 (indexOf(' ') 取首 token, 兼容制表符行为);
+    // 关键字行参数与旧 switch 的 split(/\s+/).slice(1).join(' ') 完全一致。
+    private static classifyLine(content: string): LineStmt {
+        const sp = content.indexOf(' ');
+        const first = sp === -1 ? content : content.substring(0, sp);
+        if (!Interpreter.KEYWORD_SET.has(first.toLowerCase())) {
+            return { type: StmtType.OP, params: '' };
         }
-        // 使用正则表达式 \s+ 按一个或多个空白字符分割命令字符串
-        const parts = command.split(/\s+/);
-        if (parts.length === 0) return;
-
+        const parts = content.split(/\s+/);
         const cmd = parts[0].toLowerCase();
-
-        // 检查是否是错误的const位置 (const在global/local之前) 
-        if (cmd === 'const' && parts.length > 1) {
-            const nextCmd = parts[1].toLowerCase();
-            if (nextCmd === 'global' || nextCmd === 'local') {
-                reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_local_format'));
-                return;
-            }
-        }
-
+        const params = parts.slice(1).join(' ');
         switch (cmd) {
-            case 'global':
-                // 检查是否在global后面直接跟了const, 而不是在其他位置
-                if (parts.length > 1 && parts[1].toLowerCase() === 'const') {
-                    Interpreter.executeGlobal(parts.slice(1).join(' '));
-                } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
-                    // 检查parts[1]是否以const开头, 如果是则报语法错误
-                    if (parts[1].toLowerCase().startsWith('const')) {
-                        reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_format'));
-                        return;
-                    }
-                    Interpreter.executeGlobal(parts.slice(1).join(' '));
-                } else {
-                    reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_format'));
-                    return;
+            case 'global': return { type: StmtType.GLOBAL, params };
+            case 'local': return { type: StmtType.LOCAL, params };
+            case 'call': return { type: StmtType.CALL, params };
+            case 'return': return { type: StmtType.RETURN, params };
+            case 'jump': return { type: StmtType.JUMP, params };
+            case 'print': return { type: StmtType.PRINT, params };
+            case 'if': return { type: StmtType.IF, params };
+            case 'else': return { type: StmtType.ELSE, params: '' };
+            case 'endif': return { type: StmtType.ENDIF, params: '' };
+            case 'while': return { type: StmtType.WHILE, params };
+            case 'endwhl': return { type: StmtType.ENDWHL, params: '' };
+            case 'for': return { type: StmtType.FOR, params };
+            case 'endfor': return { type: StmtType.ENDFOR, params: '' };
+            case 'break': return { type: StmtType.BREAK, params: '' };
+            case 'continue': return { type: StmtType.CONTINUE, params: '' };
+            case 'try': return { type: StmtType.TRY, params: '' };
+            case 'catch': return { type: StmtType.CATCH, params };
+            case 'endtry': return { type: StmtType.ENDTRY, params: '' };
+            case 'assert': return { type: StmtType.ASSERT, params };
+            case 'endasrt': return { type: StmtType.ENDASRT, params: '' };
+            case 'switch': return { type: StmtType.SWITCH, params };
+            case 'case': return { type: StmtType.CASE, params };
+            case 'default': return { type: StmtType.DEFAULT, params: '' };
+            case 'endswc': return { type: StmtType.ENDSWC, params: '' };
+            case 'purge': return { type: StmtType.PURGE, params };
+            case ':end': return { type: StmtType.END_TAG, params: '' };
+            case 'const':
+                // const + global/local → 语法错误 (与旧 executeCommand 前置检查一致); 其他 const 前缀行 → OP (executeOperation 整行)
+                if (parts.length > 1 && (parts[1].toLowerCase() === 'global' || parts[1].toLowerCase() === 'local')) {
+                    return { type: StmtType.CONST_PREFIX_ERROR, params: '' };
                 }
-                break;
-            case 'local':
-                // 检查是否在local后面直接跟了const, 而不是在其他位置
-                if (parts.length > 1 && parts[1].toLowerCase() === 'const') {
-                    Interpreter.executeLocal(parts.slice(1).join(' '));
-                } else if (parts.length > 1 && parts[1].toLowerCase() !== 'const') {
-                    // 检查parts[1]是否以const开头, 如果是则报语法错误
-                    if (parts[1].toLowerCase().startsWith('const')) {
-                        reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_local_format'));
-                        return;
-                    }
-                    Interpreter.executeLocal(parts.slice(1).join(' '));
-                } else {
-                    reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_local_format'));
-                    return;
-                }
-                break;
-            case 'call':
-                Interpreter.executeCall(parts.slice(1).join(' '));
-                break;
-            case 'return':
-                Interpreter.executeReturn(parts.slice(1).join(' '));
-                break;
-            case 'jump':
-                Interpreter.executeJump(parts.slice(1).join(' '));
-                break;
-            case 'print':
-                Interpreter.executePrint(parts.slice(1).join(' '));
-                break;
-            case 'if':
-                Interpreter.executeIf(parts.slice(1).join(' '));
-                break;
-            case 'else':
+                return { type: StmtType.OP, params: '' };
+            default:
+                // 集合内但未显式列出的关键字: 与旧 switch 的 default 分支一致 → executeOperation(整行)
+                return { type: StmtType.OP, params: '' };
+        }
+    }
+
+    static executeCommand(stmt: LineStmt, content: string): void {
+        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${content}`);
+        // 数字类型分发 (阶段1: 行级预编译), 替代旧"split + 首关键字字符串 switch"路径
+        switch (stmt.type) {
+            case StmtType.OP:
+                Interpreter.executeOperation(content);
+                return;
+            case StmtType.GLOBAL:
+                Interpreter.executeGlobal(stmt.params);
+                return;
+            case StmtType.LOCAL:
+                Interpreter.executeLocal(stmt.params);
+                return;
+            case StmtType.CALL:
+                Interpreter.executeCall(stmt.params);
+                return;
+            case StmtType.RETURN:
+                Interpreter.executeReturn(stmt.params);
+                return;
+            case StmtType.JUMP:
+                Interpreter.executeJump(stmt.params);
+                return;
+            case StmtType.PRINT:
+                Interpreter.executePrint(stmt.params);
+                return;
+            case StmtType.IF:
+                Interpreter.executeIf(stmt.params);
+                return;
+            case StmtType.ELSE:
                 Interpreter.executeElse();
-                break;
-            case 'endif':
+                return;
+            case StmtType.ENDIF:
                 // 弹出if控制块
                 if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'if') {
                     CONTROL_FLOW_STACK.pop();
                 }
-                break; // 无需特殊处理
-            case 'while':
-                Interpreter.executeWhile(parts.slice(1).join(' '));
-                break;
-            case 'endwhl':
+                return;
+            case StmtType.WHILE:
+                Interpreter.executeWhile(stmt.params);
+                return;
+            case StmtType.ENDWHL:
                 Interpreter.executeEndWhile();
-                break;
-            case 'for':
-                Interpreter.executeFor(parts.slice(1).join(' '));
-                break;
-            case 'endfor':
+                return;
+            case StmtType.FOR:
+                Interpreter.executeFor(stmt.params);
+                return;
+            case StmtType.ENDFOR:
                 Interpreter.executeEndFor();
-                break;
-            case 'break':
+                return;
+            case StmtType.BREAK:
                 Interpreter.executeBreak();
-                break;
-            case 'continue':
+                return;
+            case StmtType.CONTINUE:
                 Interpreter.executeContinue();
-                break;
-            case 'try':
+                return;
+            case StmtType.TRY:
                 Interpreter.executeTry();
-                break;
-            case 'catch':
-                Interpreter.executeCatch(parts.slice(1).join(' '));
-                break;
-            case 'endtry':
+                return;
+            case StmtType.CATCH:
+                Interpreter.executeCatch(stmt.params);
+                return;
+            case StmtType.ENDTRY:
                 Interpreter.executeEndTry();
-                break;
-            case 'assert':
-                Interpreter.executeAssert(parts.slice(1).join(' '));
-                break;
-            case 'endasrt':
-                break; // 无需特殊处理
-            case 'switch':
-                Interpreter.executeSwitch(parts.slice(1).join(' '));
-                break;
-            case 'case':
-                Interpreter.executeCase(parts.slice(1).join(' '));
-                break;
-            case 'default':
+                return;
+            case StmtType.ASSERT:
+                Interpreter.executeAssert(stmt.params);
+                return;
+            case StmtType.ENDASRT:
+                return; // 无需特殊处理
+            case StmtType.SWITCH:
+                Interpreter.executeSwitch(stmt.params);
+                return;
+            case StmtType.CASE:
+                Interpreter.executeCase(stmt.params);
+                return;
+            case StmtType.DEFAULT:
                 Interpreter.executeDefault();
-                break;
-            case 'endswc':
+                return;
+            case StmtType.ENDSWC:
                 Interpreter.executeEndSwitch();
-                break;
-            case 'purge':
-                Interpreter.executePurge(parts.slice(1).join(' '));
-                break;
-            case ':end':
+                return;
+            case StmtType.PURGE:
+                Interpreter.executePurge(stmt.params);
+                return;
+            case StmtType.END_TAG:
                 Interpreter.executeFunctionEndTag();
-                break;
+                return;
+            case StmtType.CONST_PREFIX_ERROR:
+                reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_local_format'));
+                return;
             default:
-                // 处理变量赋值和其他操作指令
-                Interpreter.executeOperation(command);
-                break;
+                // 兜底: 与旧 default 分支一致 (变量赋值/表达式)
+                Interpreter.executeOperation(content);
+                return;
         }
     }
 
