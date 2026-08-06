@@ -18,6 +18,16 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 - **统一错误报告**：`[ERROR N] [行 X] 类型: 消息`、`[WARN]` 警告、`[内部错误]`（解释器缺陷）、CLI `[错误]` 四层隔离，互不混淆
 - **其他**：断言 `assert`、跳转 `jump`、清除量 `purge`、单行 `//` 与多行 `///`（独占行）注释
 
+## 环境准备
+
+NoethingScript 由 Node.js 运行，需要先安装 Node.js（`npm` 会随 Node 自动装上，无需单独安装）。
+
+- **Windows**：打开 [nodejs.org](https://nodejs.org) 下载 **LTS** 版本安装包，双击一路「下一步」即可；安装完成后打开「命令提示符」或 PowerShell，输入 `node -v` 能显示版本号即成功
+- **macOS**：安装 [Homebrew](https://brew.sh) 后执行 `brew install node`
+- **Linux**：用系统包管理器安装，如 Debian/Ubuntu 的 `sudo apt install nodejs npm`；或推荐用 [nvm](https://github.com/nvm-sh/nvm) 管理版本
+
+验证安装：任意终端输入 `node -v` 与 `npm -v`，均能显示版本号即可开始。
+
 ## 快速开始
 
 ```bash
