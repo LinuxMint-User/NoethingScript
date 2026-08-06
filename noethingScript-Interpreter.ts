@@ -4304,6 +4304,128 @@ interface ExprNode {
     slotBinding?: { frameKey: string, slot: number };      // variable / arrayAccess
     targetBinding?: { frameKey: string, slot: number };    // assignment 目标
     arrayTargetBinding?: { frameKey: string, slot: number };// arrayAssignment 数组目标
+    // 阶段2: 表达式字节码 (树首次求值时惰性编译并挂载; 与树同生命周期, 树缓存清空则一并失效)
+    bytecode?: ExprCode | null;  // null = 不可编译 (整体回退树求值)
+}
+
+// ===== 阶段2: 表达式字节码 VM =====
+// 表达式级寄存器虚拟机: 把已缓存的表达式树编译为 Int32Array 扁平指令流 (免重复切词/建树/树遍历递归),
+// 临时寄存器保存中间结果。语义与 evalTree 完全复刻 (变量检查顺序/运算符类型检查/除零/非短路等)。
+// 注: 求值器不含任何跳转指令 → AND/OR 不可能短路, 两操作数无条件先求值 (副作用严防死守)。
+
+// 表达式级操作码 (阶段2专用; 阶段3全块 VM 的指令集见 bytecode-vm-design.md §3)
+enum ExprOp {
+    LOADK = 0,     // regs[a] = consts[b]
+    LOADVAR = 1,   // regs[a] = 读变量(vars[b]) (槽位快速路径 → 无绑定/槽位空回退原查找; 先存在性后值检查)
+    UNPOS = 2,     // regs[a] = +regs[b]
+    NEG = 3,       // regs[a] = -regs[b]
+    NOT = 4,       // regs[a] = !regs[b]
+    ADD = 5, SUB = 6, MUL = 7, DIV = 8, MOD = 9, POW = 10,
+    EQ = 11, NEQ = 12, LT = 13, GT = 14, LE = 15, GE = 16,
+    AND = 17, OR = 18,
+}
+
+// 二元运算符 → 操作码映射 (仅可编译子集; 其余构造整体回退树求值)
+const EXPR_BIN_OP_TO_VM: Record<string, ExprOp> = {
+    '+': ExprOp.ADD, '-': ExprOp.SUB, '*': ExprOp.MUL, '/': ExprOp.DIV, '%': ExprOp.MOD, '**': ExprOp.POW,
+    '==': ExprOp.EQ, '!=': ExprOp.NEQ, '<': ExprOp.LT, '>': ExprOp.GT, '<=': ExprOp.LE, '>=': ExprOp.GE,
+    '&&': ExprOp.AND, '||': ExprOp.OR
+};
+const EXPR_BIN_OPS: Set<string> = new Set(Object.keys(EXPR_BIN_OP_TO_VM));
+
+// 编译期变量绑定 (槽位绑定或全局/未注册引用, 供 LOADVAR 复刻 evalTree 'variable' 分支语义)
+interface CompiledVar {
+    name: string;
+    isGlobal: boolean;
+    binding?: { frameKey: string, slot: number };
+}
+
+// 表达式编译产物
+interface ExprCode {
+    code: Int32Array;                  // [op, a, b, c] × n 扁平指令流
+    consts: any[];                     // 字面量常量池
+    vars: CompiledVar[];               // 变量绑定表
+    nTemps: number;                    // 临时寄存器数 (寄存器 0 恒为结果寄存器)
+    resultKind: 'value' | 'assignment';
+    target?: string;                   // resultKind='assignment' 时的目标变量名
+    targetBinding?: { frameKey: string, slot: number };  // assignment 目标槽位绑定
+}
+
+// 表达式树 → 字节码编译器 (仅处理 literal/variable/binary/unary; 可编译性由调用方先判定)
+class ExprBytecodeCompiler {
+    private code: number[] = [];
+    private consts: any[] = [];
+    private constIdx = new Map<any, number>();
+    private vars: CompiledVar[] = [];
+    private varIdx = new Map<string, number>();
+    private nTemps = 1;  // 寄存器 0 保留给表达式结果
+
+    private constIndex(value: any): number {
+        const existing = this.constIdx.get(value);
+        if (existing !== undefined) return existing;
+        const idx = this.consts.length;
+        this.consts.push(value);
+        this.constIdx.set(value, idx);
+        return idx;
+    }
+
+    private varIndex(name: string, isGlobal: boolean, binding?: { frameKey: string, slot: number }): number {
+        const key = binding ? `s:${binding.frameKey}:${binding.slot}` : `g:${isGlobal ? 1 : 0}:${name}`;
+        const existing = this.varIdx.get(key);
+        if (existing !== undefined) return existing;
+        const idx = this.vars.length;
+        this.vars.push({ name, isGlobal, binding });
+        this.varIdx.set(key, idx);
+        return idx;
+    }
+
+    private allocTemp(): number {
+        return this.nTemps++;
+    }
+
+    private emit(op: ExprOp, a: number, b: number, c: number): void {
+        this.code.push(op, a, b, c);
+    }
+
+    // 把节点值计算到寄存器 dst (先算子节点入临时寄存器, 再运算入 dst; 求值顺序与 evalTree 一致: 左→右→运算)。
+    // 公开供 ExpressionEvaluator.compileExprToBytecode 以任意节点为根编译 (结果寄存器恒为 0)。
+    compileNode(node: ExprNode, dst: number): void {
+        switch (node.kind) {
+            case 'literal':
+                this.emit(ExprOp.LOADK, dst, this.constIndex(node.value), 0);
+                break;
+            case 'variable':
+                this.emit(ExprOp.LOADVAR, dst, this.varIndex(node.name as string, !!node.isGlobal, node.slotBinding), 0);
+                break;
+            case 'unary': {
+                const t = this.allocTemp();
+                this.compileNode(node.operand as ExprNode, t);
+                const op = node.op as string;
+                if (op === '-') this.emit(ExprOp.NEG, dst, t, 0);
+                else if (op === '+') this.emit(ExprOp.UNPOS, dst, t, 0);
+                else this.emit(ExprOp.NOT, dst, t, 0);
+                break;
+            }
+            case 'binary': {
+                const t1 = this.allocTemp();
+                const t2 = this.allocTemp();
+                this.compileNode(node.left as ExprNode, t1);
+                this.compileNode(node.right as ExprNode, t2);
+                this.emit(EXPR_BIN_OP_TO_VM[node.op as string], dst, t1, t2);
+                break;
+            }
+        }
+    }
+
+    build(): ExprCode {
+        return {
+            code: new Int32Array(this.code),
+            consts: this.consts,
+            vars: this.vars,
+            nTemps: this.nTemps,
+            resultKind: 'value'
+        };
+    }
 }
 
 class ExpressionEvaluator {
@@ -4359,6 +4481,17 @@ class ExpressionEvaluator {
                 programTrees.set(expression, tree);
             }
 
+            // 阶段2: 表达式字节码路径 — 可编译表达式 (字面量/变量/一元/二元, 含赋值右值) 走
+            // Int32Array 扁平指令流的寄存器 VM; 不可编译构造 (函数调用/数组访问/数组赋值等) 编译期
+            // 判定为 null 后整表达式原子回退树求值 (绝不部分混合执行, 杜绝寄存器状态不同步)。
+            // 字节码携带静态槽位绑定, 惰性编译并挂载于树节点 (树按程序指纹隔离, 字节码与树同生命周期)。
+            if (tree.bytecode === undefined) {
+                tree.bytecode = ExpressionEvaluator.compileExprToBytecode(tree);
+            }
+            if (tree.bytecode !== null) {
+                return this.runExprCode(tree.bytecode, currentLine);
+            }
+
             return this.evalTree(tree);
         } catch (error) {
             // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获)
@@ -4384,6 +4517,214 @@ class ExpressionEvaluator {
                 lineNumber: currentLine
             } as Exception;
         }
+    }
+
+    // ===== 阶段2: 表达式字节码 VM (编译/缓存/执行) =====
+
+    // 共享寄存器数组: 表达式求值为单遍线性执行, 无递归重入 (求值期间不会再次调用 evaluate/runExprCode),
+    // 故可跨表达式复用, 消除每次求值的 new Array 分配 (GC 压力)。每条指令写后才读, 无需清零。
+    private static scratchRegs: any[] = [];
+
+    // 可编译性判定: 仅 literal/variable/binary/unary (运算符限定), 其余构造整体回退树求值
+    private static isExprCompilable(node: ExprNode): boolean {
+        switch (node.kind) {
+            case 'literal':
+            case 'variable':
+                return true;
+            case 'unary': {
+                const op = node.op as string;
+                return (op === '+' || op === '-' || op === '!') && ExpressionEvaluator.isExprCompilable(node.operand as ExprNode);
+            }
+            case 'binary': {
+                const op = node.op as string;
+                return EXPR_BIN_OPS.has(op) &&
+                    ExpressionEvaluator.isExprCompilable(node.left as ExprNode) &&
+                    ExpressionEvaluator.isExprCompilable(node.right as ExprNode);
+            }
+            default:
+                return false; // call / arrayAccess / assignment / arrayAssignment
+        }
+    }
+
+    // 表达式树 → ExprCode (根节点为赋值时编译右值, 返回结构复刻 evalTree 'assignment' 分支); 不可编译返回 null
+    private static compileExprToBytecode(tree: ExprNode): ExprCode | null {
+        if (tree.kind === 'assignment') {
+            const rhs = tree.valueExpr as ExprNode;
+            if (!ExpressionEvaluator.isExprCompilable(rhs)) return null;
+            const compiler = new ExprBytecodeCompiler();
+            compiler.compileNode(rhs, 0); // 结果恒入寄存器 0
+            const built = compiler.build();
+            built.resultKind = 'assignment';
+            built.target = tree.target as string;
+            built.targetBinding = tree.targetBinding;
+            return built;
+        }
+        if (!ExpressionEvaluator.isExprCompilable(tree)) return null;
+        const compiler = new ExprBytecodeCompiler();
+        compiler.compileNode(tree, 0);
+        return compiler.build();
+    }
+
+    // 读取变量 (LOADVAR 语义): 槽位快速路径 → 回退原查找; 检查顺序: 存在性 (REFERENCE_ERROR) → 值 (undefined→TYPE_ERROR)
+    private static loadVar(v: CompiledVar, currentLine: number): any {
+        if (v.binding) {
+            const varInfo = ExpressionEvaluator.readSlot(v.binding);
+            if (varInfo !== null) {
+                if (varInfo.type === DataType.ARRAY) return varInfo;
+                if (varInfo.value === undefined) {
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('var_value_undefined', { name: v.name }), lineNumber: currentLine } as Exception;
+                }
+                return varInfo.value;
+            }
+        }
+        const varInfo = ScopeManager.getVariableInfo(v.name, currentLine, v.isGlobal);
+        if (varInfo === null) {
+            throw {
+                type: ExceptionType.REFERENCE_ERROR,
+                message: v.isGlobal ? t('var_undefined_expr_global', { name: v.name }) : t('var_undefined_expr_local', { name: v.name }),
+                lineNumber: currentLine
+            } as Exception;
+        }
+        if (varInfo.type === DataType.ARRAY) {
+            DEBUG_LEVEL >= 2 && debugLog(2, () => `返回${v.isGlobal ? '全局' : ''}数组: ${varInfo.name} 在第${currentLine + 1}行`);
+            return varInfo;
+        }
+        if (varInfo.value === undefined) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('var_value_undefined', { name: v.name }), lineNumber: currentLine } as Exception;
+        }
+        DEBUG_LEVEL >= 2 && debugLog(2, () => `直接返回${v.isGlobal ? '全局' : ''}变量值: ${v.name} = ${varInfo.value} 在第${currentLine + 1}行`);
+        return varInfo.value;
+    }
+
+    // 表达式字节码执行器: Int32Array 扁平指令循环, 寄存器 0 为结果寄存器。
+    // 语义与 evalTree 逐分支复刻 (变量: 槽位快速路径 → 回退原查找, 先存在性(REFERENCE_ERROR)后值(undefined→TYPE_ERROR);
+    // 一元/二元: 数字快速路径 + evaluateOperation/evaluateUnaryOperation 完整类型检查与除零检查;
+    // AND/OR 非短路: 本求值器无跳转指令, 两操作数必已无条件求值)。
+    private static runExprCode(ec: ExprCode, currentLine: number): any {
+        const code = ec.code;
+        const consts = ec.consts;
+        // 单指令快速路径 (纯字面量/单变量): 免循环与寄存器数组, 直接返回结果
+        if (code.length === 4) {
+            const result = code[0] === ExprOp.LOADK
+                ? consts[code[2]]
+                : ExpressionEvaluator.loadVar(ec.vars[code[2]], currentLine);
+            if (ec.resultKind === 'assignment') {
+                return { type: 'assignment', target: ec.target as string, value: result, binding: ec.targetBinding };
+            }
+            return result;
+        }
+        const vars = ec.vars;
+        const regs = ExpressionEvaluator.scratchRegs;
+        if (regs.length < ec.nTemps) {
+            regs.length = ec.nTemps;
+        }
+        const end = code.length;
+        for (let pc = 0; pc < end; pc += 4) {
+            const op = code[pc];
+            const a = code[pc + 1];
+            const b = code[pc + 2];
+            const c = code[pc + 3];
+            switch (op) {
+                case ExprOp.LOADK:
+                    regs[a] = consts[b];
+                    break;
+                case ExprOp.LOADVAR:
+                    // 语义与 evalTree 'variable' 分支一致: 槽位快速路径 → 回退原查找; 先存在性后值检查
+                    regs[a] = ExpressionEvaluator.loadVar(vars[b], currentLine);
+                    break;
+                case ExprOp.UNPOS: {
+                    const o = regs[b];
+                    regs[a] = (typeof o === 'number') ? +o : this.evaluateUnaryOperation('+', o);
+                    break;
+                }
+                case ExprOp.NEG: {
+                    const o = regs[b];
+                    regs[a] = (typeof o === 'number') ? -o : this.evaluateUnaryOperation('-', o);
+                    break;
+                }
+                case ExprOp.NOT:
+                    regs[a] = this.evaluateUnaryOperation('!', regs[b]);
+                    break;
+                case ExprOp.ADD: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l + r : this.evaluateOperation('+', l, r);
+                    break;
+                }
+                case ExprOp.SUB: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l - r : this.evaluateOperation('-', l, r);
+                    break;
+                }
+                case ExprOp.MUL: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l * r : this.evaluateOperation('*', l, r);
+                    break;
+                }
+                case ExprOp.DIV: {
+                    const l = regs[b], r = regs[c];
+                    if (typeof l === 'number' && typeof r === 'number') {
+                        if (r === 0) throw { type: ExceptionType.RANGE_ERROR, message: t('division_by_zero'), lineNumber: currentLine } as Exception;
+                        regs[a] = l / r;
+                    } else {
+                        regs[a] = this.evaluateOperation('/', l, r);
+                    }
+                    break;
+                }
+                case ExprOp.MOD: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l % r : this.evaluateOperation('%', l, r);
+                    break;
+                }
+                case ExprOp.POW: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Math.pow(l, r) : this.evaluateOperation('**', l, r);
+                    break;
+                }
+                case ExprOp.EQ: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l == r) : this.evaluateOperation('==', l, r);
+                    break;
+                }
+                case ExprOp.NEQ: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l != r) : this.evaluateOperation('!=', l, r);
+                    break;
+                }
+                case ExprOp.LT: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l < r) : this.evaluateOperation('<', l, r);
+                    break;
+                }
+                case ExprOp.GT: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l > r) : this.evaluateOperation('>', l, r);
+                    break;
+                }
+                case ExprOp.LE: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l <= r) : this.evaluateOperation('<=', l, r);
+                    break;
+                }
+                case ExprOp.GE: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l >= r) : this.evaluateOperation('>=', l, r);
+                    break;
+                }
+                case ExprOp.AND:
+                    // 非短路: 两操作数已无条件求值 (本求值器无跳转指令, 不可能短路)
+                    regs[a] = this.evaluateOperation('&&', regs[b], regs[c]);
+                    break;
+                case ExprOp.OR:
+                    // 非短路: 同上
+                    regs[a] = this.evaluateOperation('||', regs[b], regs[c]);
+                    break;
+            }
+        }
+        // 赋值表达式: 返回结构与 evalTree 'assignment' 分支一致, executeOperation 原样消费
+        if (ec.resultKind === 'assignment') {
+            return { type: 'assignment', target: ec.target as string, value: regs[0], binding: ec.targetBinding };
+        }
+        return regs[0];
     }
 
     // 词法分析: 将表达式分解为令牌
