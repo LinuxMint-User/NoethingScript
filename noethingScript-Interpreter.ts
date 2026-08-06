@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.4.0";
+const NSIVersion: string = "2.4.4";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量

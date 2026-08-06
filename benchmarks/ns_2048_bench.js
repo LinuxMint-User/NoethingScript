@@ -10,7 +10,7 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
-const { ROOT, interpPath, ensureBaseline } = require('./helpers');
+const { ROOT, interpPath, ensureBaseline, printEnv } = require('./helpers');
 
 const withHead = process.argv.includes('--head');
 const baseArg = process.argv.find(a => a.startsWith('--base='));
@@ -65,6 +65,7 @@ if (headPath) runOnce(headPath);
 const rounds = 5;
 let cSum = 0, hSum = 0;
 console.log('2048 端到端 (固定种子 20240806 + 固定按键序列, ' + rounds + ' 轮)');
+printEnv();
 const pad = (s, n) => String(s).padStart(n);
 console.log(pad('', 14) + ' | ' + pad('HEAD', 8) + pad('CURR', 8) + pad('变化', 8));
 console.log('-'.repeat(46));

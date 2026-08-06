@@ -5,6 +5,7 @@
 const vm = require('vm');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const cp = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
@@ -12,6 +13,14 @@ const BASELINE_DIR = path.join(ROOT, '.bench-head');
 const HEAD_SRC = path.join(BASELINE_DIR, 'noethingScript-Interpreter.ts');
 const HEAD_DIST = path.join(BASELINE_DIR, 'dist', 'noethingScript-Interpreter.js');
 const CURR_DIST = path.join(ROOT, 'dist', 'noethingScript-Interpreter.js');
+
+// 基准运行环境 (CPU/Node/平台): 基准结果与软硬件强相关, 每次运行自动打印, 便于跨环境/跨历史对比
+function printEnv() {
+    const cpu = os.cpus()[0];
+    console.log('运行环境: Node ' + process.versions.node + ' / ' +
+        (cpu ? cpu.model.trim() : '未知 CPU') +
+        ' (' + os.cpus().length + ' 线程) / ' + os.platform() + ' ' + os.release());
+}
 
 // 解释器路径: 'head' -> 基线提交编译产物; 'curr' -> 当前 dist
 function interpPath(which) {
@@ -86,4 +95,4 @@ function benchNS(nsi, code, runs = 3) {
     return median(t);
 }
 
-module.exports = { ROOT, interpPath, ensureBaseline, loadInterp, benchJS, benchNS, median };
+module.exports = { ROOT, interpPath, ensureBaseline, loadInterp, benchJS, benchNS, median, printEnv };

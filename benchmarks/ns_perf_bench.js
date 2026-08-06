@@ -9,7 +9,7 @@
 //             静态声明/调用/返回等一次性行另计。吞吐 = 执行行数 / NS 中位耗时。
 // 倍率口径: NS 耗时 / 原生 JS 稳态中位耗时 (JS 侧为微秒级, 绝对倍率受计时噪声
 //            影响, 相对变化才有意义; 建议与历史记录对比时保持同一脚本同一口径)。
-const { interpPath, ensureBaseline, loadInterp, benchJS, benchNS } = require('./helpers');
+const { interpPath, ensureBaseline, loadInterp, benchJS, benchNS, printEnv } = require('./helpers');
 
 const withHead = process.argv.includes('--head');
 const baseArg = process.argv.find(a => a.startsWith('--base='));
@@ -108,6 +108,7 @@ const head = withHead ? loadInterp(ensureBaseline(baseRev)) : null;
 const baseLabel = withHead ? (baseRev || 'HEAD~1') : null;
 
 console.log('NoethingScript 合成基准 (NS 中位 3 次 / JS 原生 200 预热 + 100 次取中位)');
+printEnv();
 console.log('解释器: 当前版 dist/ vs 基线 ' + (baseLabel || '(无, 仅当前版)'));
 console.log('');
 

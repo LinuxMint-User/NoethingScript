@@ -1,6 +1,6 @@
 {
   "name": "noethingscript",
-  "version": "2.4.0",
+  "version": "2.4.4",
   "description": "基于行的显式类型脚本语言解释器 (NoethingScript Interpreter)",
   "scripts": {
     "build": "tsc",
