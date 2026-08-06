@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.5.0";
+const NSIVersion: string = "2.6.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -25,8 +25,14 @@ function isInputSuspend(e: any): boolean {
 // 自定义debug日志函数
 // 惰性参数: 调用点可将字符串模板等重代价表达式包成 0 参函数 (如 debugLog(2, () => `...${x}...`)),
 // 仅在 DEBUG_LEVEL 达标需要输出时才求值, 避免无条件构造模板字符串 / 调用 Object.keys 等开销。
+// 编译期静默标志: NSVM 编译期间的表达式预解析 (SETARRAY 探测) 禁止输出调试日志。
+// 编译期解析发生在运行期 debug 级别已生效之后, 且行指针非目标行, 输出会污染调试结果 (与行解释器
+// 在语句执行时刻输出解析日志的时机不符); 探测仅判定结构, 不产生任何对外可见输出。
+var silentCompileParse = false;
+
 function debugLog(level: number, ...args: any[]): void {
     if (DEBUG_LEVEL >= level) {
+        if (silentCompileParse) return;
         const lineInfo = typeof currentLinePointer !== 'undefined'
             ? ` [Line ${currentLinePointer + 1}]`
             : '';
@@ -2766,6 +2772,244 @@ class Interpreter {
         }
     }
 
+    // NEWARRAY 执行器: 复刻 executeArrayDeclaration 完整语义 (格式正则/标识符/元素拆分已在编译期预解析进 meta,
+    // 错误消息/调试输出/作用域检查与注册时机逐字节一致)
+    static executeArrayDeclarationCompiled(meta: NSVMArrayDeclMeta): void {
+        const { arrayName, lengthExpr, elementTypeStr, initValue, elementValues, isGlobal, isConst, params } = meta;
+        debugLog(3, () => `执行${isGlobal ? '全局' : '局部'}${isConst ? '常量' : '变量'}数组声明: ${params}`);
+
+        // 获取数组长度
+        let arrayLength: number;
+        try {
+            // 尝试解析长度表达式 (支持数字字面量、全局常量或表达式, 如 ROWS * COLS)
+            const lengthValue = Interpreter.evaluateExpression(lengthExpr);
+            if (typeof lengthValue !== 'number' || !Number.isInteger(lengthValue) || lengthValue < 0) {
+                reportError(ExceptionType.RANGE_ERROR, t('array_length_non_negative'));
+                return;
+            }
+            arrayLength = lengthValue;
+        } catch (error) {
+            // 长度表达式中的 input() 挂起信号穿透 (如 global array a[input()]:int)
+            if (isInputSuspend(error)) throw error;
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_length_expr_unresolvable', {expr: lengthExpr}));
+            return;
+        }
+
+        // 获取元素类型
+        const elementType = Interpreter.getDataTypeFromString(elementTypeStr);
+
+        // 检查元素类型是否有效
+        if (elementType === DataType.UNDEFINED) {
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_element_type_unsupported', {type: elementTypeStr}));
+            return;
+        }
+
+        // 检查元素类型是否为不允许的类型
+        if (elementType === DataType.ARRAY) {
+            reportError(ExceptionType.SYNTAX_ERROR, t('array_of_array_forbidden'));
+            return;
+        }
+
+        // 初始化数组元素
+        const arrayElements: ArrayElement[] = [];
+
+        if (elementValues === null) {
+            // 处理arrfill关键字
+            debugLog(2, () => `数组${arrayName}使用arrfill初始化`);
+            let fillValue: any;
+            switch (elementType) {
+                case DataType.NUMBER:
+                    reportWarn(t('array_number_fill_0'));
+                    fillValue = 0.0;
+                    break;
+                case DataType.INT:
+                    fillValue = 0;
+                    break;
+                case DataType.FLOAT:
+                    fillValue = 0.0;
+                    break;
+                case DataType.STRING:
+                    fillValue = "";
+                    break;
+                case DataType.BOOL:
+                    fillValue = false;
+                    break;
+                default:
+                    reportError(ExceptionType.SYNTAX_ERROR, t('array_element_type_unsupported', {type: elementTypeStr}));
+                    return;
+            }
+
+            // 填充数组
+            for (let i = 0; i < arrayLength; i++) {
+                arrayElements.push({
+                    value: fillValue,
+                    type: elementType
+                });
+            }
+            debugLog(2, () => `数组填充完毕`);
+        } else {
+            debugLog(2, () => `数组${arrayName}使用手动初始化`);
+            // 检查元素数量是否匹配
+            if (elementValues.length !== arrayLength) {
+                reportError(ExceptionType.RANGE_ERROR, t('array_init_count_mismatch', {actual: elementValues.length, expected: arrayLength}));
+                return;
+            }
+
+            // 解析每个元素
+            for (let i = 0; i < elementValues.length; i++) {
+                try {
+                    const elementValue = Interpreter.parseInitValue(elementValues[i].trim(), elementType);
+                    arrayElements.push({
+                        value: elementValue,
+                        type: elementType
+                    });
+                } catch (error) {
+                    reportError(ExceptionType.SYNTAX_ERROR, t('array_element_unresolvable', {index: i, value: elementValues[i]}));
+                    return;
+                }
+            }
+        }
+
+        // 创建数组变量
+        // 局部数组: 从控制流栈取最近函数帧的结束行与帧ID (递归时隔离不同调用帧; FUNCTION_SCOPES已废弃不可用)
+        let localEndLine = -1;
+        let localFrameId: number | undefined;
+        if (!isGlobal) {
+            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                const block = CONTROL_FLOW_STACK[i];
+                if (block.type === 'function') {
+                    localEndLine = block.endLine;
+                    localFrameId = block.frameId;
+                    break;
+                }
+            }
+        }
+        const arrayVariable: Variable = {
+            name: arrayName,
+            value: "请使用arrayElements属性访问数组元素", // 数组变量的值不适用直接访问
+            type: DataType.ARRAY,
+            isGlobal: isGlobal,
+            isConst: isConst,
+            startLine: currentLinePointer,
+            endLine: isGlobal ? -1 : localEndLine,
+            frameId: localFrameId,
+            arrayLength: arrayLength,
+            arrayElementType: elementType,
+            arrayElements: arrayElements
+        };
+
+        // 添加到作用域管理器
+        if (isGlobal) {
+            // 检查全局变量是否已存在
+            if (GLOBAL_VARS.hasOwnProperty(arrayName)) {
+                reportError(ExceptionType.REFERENCE_ERROR, t('name_already_defined', {name: arrayName}));
+                return;
+            }
+            GLOBAL_VARS[arrayName] = arrayVariable;
+        } else {
+            // 检查是否在函数内
+            const currentFunc = ScopeManager.getCurrentFunction(currentLinePointer);
+            if (!currentFunc) {
+                reportError(ExceptionType.REFERENCE_ERROR, t('local_array_outside_func', {name: arrayName}));
+                return;
+            }
+            // 循环变量作用域内禁止声明同名数组 (doc规则2, 与普通局部变量一致)
+            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                const block = CONTROL_FLOW_STACK[i];
+                if (block.type === 'function') break;
+                if (block.type === 'for' && block.varName === arrayName) {
+                    reportError(ExceptionType.REFERENCE_ERROR, t('loop_var_shadow_forbidden', {name: arrayName}));
+                    return;
+                }
+            }
+            // 检查相同作用域与调用帧内是否已存在同名数组 (与普通局部变量一致: 同名+同作用域+同帧判定重复, 不同调用帧允许同名以支持递归)
+            for (const localVar of LOCAL_VARS) {
+                if (localVar.name === arrayName &&
+                    localVar.frameId === arrayVariable.frameId &&
+                    localVar.startLine === arrayVariable.startLine &&
+                    localVar.endLine === arrayVariable.endLine) {
+                    reportError(ExceptionType.REFERENCE_ERROR, t('name_defined_same_scope', {name: arrayName}));
+                    return;
+                }
+            }
+            LOCAL_VARS.push(arrayVariable);
+            rebuildSlotIndex(); // 槽位索引同步 (局部数组已添加)
+        }
+    }
+
+    // SETARRAY 执行器: 复刻 executeOperation 数组赋值分支完整语义 (编译期预解析整行表达式树, 运行期以整表达式
+    // token 上下文直接求值; 索引检查先于右值求值, 错误消息/调试输出/槽位快速路径逐字节一致)。
+    // 独立方法: 主分发循环 SETARRAY case 仅一句委托调用, 复杂逻辑外提避免内联拖累循环的 V8 优化
+    // (BISECT: SETARRAY case 内联完整实现时 2048 端到端慢 ~20%, 与 GETARRAY 同因)。
+    static executeArrayAssignmentCompiled(meta: NSVMSetArrayMeta, currentLine: number): void {
+        const { tree, nTokens, content } = meta;
+        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${content}`);
+        debugLog(1, () => `执行操作指令: ${content}`);
+        const result = ExpressionEvaluator.evalTreeWithContext(tree, nTokens, currentLine);
+        debugLog(1, () => `获得解析结果`);
+        const { target, value, binding } = result as { target: { arrayName: string, index: number }, value: any, binding?: { frameKey: string, slot: number } };
+        debugLog(1, () => `侦测到数组赋值 目标:${target.arrayName} 索引:${target.index}`);
+        // 处理 global. 前缀 (与整体赋值分支一致)
+        let targetName: string = target.arrayName;
+        let isGlobal: boolean = false;
+        if (targetName.startsWith('global.')) {
+            targetName = targetName.slice('global.'.length);
+            isGlobal = true;
+        }
+        // 槽位快速路径: 局部数组 O(1) 读取; 槽位为空 (被 purge 等移除) 或无绑定 (全局/未注册) 回退原查找
+        let arrayVar: Variable | null;
+        if (binding) {
+            arrayVar = ExpressionEvaluator.readSlot(binding);
+            if (arrayVar === null) {
+                arrayVar = ScopeManager.getVariable(targetName, currentLine, true, isGlobal);
+            }
+        } else {
+            arrayVar = ScopeManager.getVariable(targetName, currentLine, true, isGlobal);
+        }
+        // 检查变量是否存在且是数组类型
+        if (!arrayVar) {
+            throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLine } as Exception;
+        }
+        debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
+
+        if (arrayVar.type !== DataType.ARRAY) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLine } as Exception;
+        }
+
+        if (arrayVar.isConst) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('const_array_assignment', {name: targetName}), lineNumber: currentLine } as Exception;
+        }
+
+        if (arrayVar.isReadonlyArray) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('readonly_array_assignment', {name: targetName}), lineNumber: currentLine } as Exception;
+        }
+
+        // 检查索引是否在数组范围内
+        if (target.index >= arrayVar.arrayLength!) {
+            throw { type: ExceptionType.RANGE_ERROR, message: t('arr_index_out_of_range', {index: target.index, length: arrayVar.arrayLength}), lineNumber: currentLine } as Exception;
+        }
+
+        // 更新数组元素
+        // 检查元素类型是否匹配
+        const elementType = arrayVar.arrayElementType!;
+        // 快速类型兼容路径: 原生值类型与目标类型直接匹配时免 validateType 调用 (每次调用分配结果对象)
+        if ((elementType === DataType.INT && typeof value === 'number' && Number.isInteger(value)) ||
+            ((elementType === DataType.FLOAT || elementType === DataType.NUMBER) && typeof value === 'number') ||
+            (elementType === DataType.STRING && typeof value === 'string') ||
+            (elementType === DataType.BOOL && typeof value === 'boolean')) {
+            arrayVar.arrayElements![target.index].value = value;
+            return;
+        }
+        const validation = ScopeManager.validateType(value, elementType);
+        if (!validation.isValid) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('array_element_type_mismatch', {expected: elementType, actual: typeof value}), lineNumber: currentLine } as Exception;
+        }
+
+        // 更新数组元素
+        debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
+        arrayVar.arrayElements![target.index].value = validation.convertedValue;
+    }
+
     // 辅助方法: 分割数组元素, 正确处理字符串中的逗号
     static splitArrayElements(elementsStr: string): string[] {
         const elements: string[] = [];
@@ -4343,6 +4587,7 @@ enum ExprOp {
     ADD = 5, SUB = 6, MUL = 7, DIV = 8, MOD = 9, POW = 10,
     EQ = 11, NEQ = 12, LT = 13, GT = 14, LE = 15, GE = 16,
     AND = 17, OR = 18,
+    GETARRAY = 19,   // regs[a] = regs[arrReg][regs[idxReg]] (数组元素读取, 语义复刻 evalTree 'arrayAccess': 索引检查先于数组查找/越界)
 }
 
 // 二元运算符 → 操作码映射 (仅可编译子集; 其余构造整体回退树求值)
@@ -4356,6 +4601,7 @@ const EXPR_BIN_OPS: Set<string> = new Set(Object.keys(EXPR_BIN_OP_TO_VM));
 // 编译期变量绑定 (槽位绑定或全局/未注册引用, 供 LOADVAR 复刻 evalTree 'variable' 分支语义)
 interface CompiledVar {
     name: string;
+    lookupName: string;  // 去掉 'global.' 前缀的查找名 (编译期预计算, 免运行期字符串操作)
     isGlobal: boolean;
     binding?: { frameKey: string, slot: number };
 }
@@ -4369,6 +4615,8 @@ interface ExprCode {
     resultKind: 'value' | 'assignment';
     target?: string;                   // resultKind='assignment' 时的目标变量名
     targetBinding?: { frameKey: string, slot: number };  // assignment 目标槽位绑定
+    nTokens: number;                   // 整表达式 token 数 (数组访问错误消息的 pos, 复刻 evalTree 的 currentTokenIndex=tokens.length)
+    hasArray: boolean;                 // 指令流是否含 GETARRAY (含数组访问的表达式走独立执行循环, 避免 GETARRAY 复杂分支拖累主分发循环的 V8 优化)
 }
 
 // 表达式树 → 字节码编译器 (仅处理 literal/variable/binary/unary; 可编译性由调用方先判定)
@@ -4379,6 +4627,7 @@ class ExprBytecodeCompiler {
     private vars: CompiledVar[] = [];
     private varIdx = new Map<string, number>();
     private nTemps = 1;  // 寄存器 0 保留给表达式结果
+    private sawArray = false;  // 是否已编译数组访问 (含 GETARRAY → hasArray 标记)
 
     private constIndex(value: any): number {
         const existing = this.constIdx.get(value);
@@ -4394,7 +4643,8 @@ class ExprBytecodeCompiler {
         const existing = this.varIdx.get(key);
         if (existing !== undefined) return existing;
         const idx = this.vars.length;
-        this.vars.push({ name, isGlobal, binding });
+        const lookupName = isGlobal && name.startsWith('global.') ? name.slice('global.'.length) : name;
+        this.vars.push({ name, lookupName, isGlobal, binding });
         this.varIdx.set(key, idx);
         return idx;
     }
@@ -4417,6 +4667,15 @@ class ExprBytecodeCompiler {
             case 'variable':
                 this.emit(ExprOp.LOADVAR, dst, this.varIndex(node.name as string, !!node.isGlobal, node.slotBinding), 0);
                 break;
+            case 'arrayAccess': {
+                // 数组元素读取: 索引先求值入临时寄存器, 再 GETARRAY (数组查找/检查在 GETARRAY 执行期进行,
+                // 复刻 evalTree 'arrayAccess' 的检查顺序: 索引类型/非负检查 → 数组存在与类型 → 越界 → 取值)
+                this.sawArray = true;
+                const idx = this.allocTemp();
+                this.compileNode(node.index as ExprNode, idx);
+                this.emit(ExprOp.GETARRAY, dst, this.varIndex(node.name as string, !!node.isGlobal, node.slotBinding), idx);
+                break;
+            }
             case 'unary': {
                 const t = this.allocTemp();
                 this.compileNode(node.operand as ExprNode, t);
@@ -4437,13 +4696,15 @@ class ExprBytecodeCompiler {
         }
     }
 
-    build(): ExprCode {
+    build(nTokens: number): ExprCode {
         return {
             code: new Int32Array(this.code),
             consts: this.consts,
             vars: this.vars,
             nTemps: this.nTemps,
-            resultKind: 'value'
+            resultKind: 'value',
+            nTokens: nTokens,
+            hasArray: this.sawArray
         };
     }
 }
@@ -4514,7 +4775,9 @@ class ExpressionEvaluator {
 
             return this.evalTree(tree);
         } catch (error) {
-            // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获)
+            // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获); 已是 NS 异常则原样返回。
+            // 内联于 evaluate 而非外提: 外提会缩小 evaluate 体积, Turbofan 会将其内联进 NSVMExecutor.run 的
+            // OSR 图 (连带 compileExprToBytecode), 使 run OSR 编译耗时从 ~13ms 增至 ~18ms (冷启动回归来源)。
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
                 throw error;
             }
@@ -4536,6 +4799,70 @@ class ExpressionEvaluator {
                 message: msg,
                 lineNumber: currentLine
             } as Exception;
+        }
+    }
+
+    // 统一将表达式求值中的原生 JS Error 转换为 NS 异常 (可被 try-catch 捕获); 已是 NS 异常则原样返回
+    private static wrapEvalError(error: any, currentLine: number): Exception {
+        if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
+            return error as Exception;
+        }
+        const msg = (error as Error).message || String(error);
+        let type: ExceptionType;
+        if (/^TypeError|类型错误|类型不匹配|需要 \d+ 个参数|只能用于|必须是数字|要求.*操作数|expects .* argument|must be a|must be of type|requires .* operand/.test(msg)) {
+            type = ExceptionType.TYPE_ERROR;
+        } else if (/^RangeError|范围错误|越界|除零|必须是非负整数|out of range|division by zero|must be non-negative|must be within/.test(msg)) {
+            type = ExceptionType.RANGE_ERROR;
+        } else if (/未知函数|未定义的数组|unknown function|is not defined/.test(msg)) {
+            type = ExceptionType.REFERENCE_ERROR;
+        } else if (/意外的|缺少|无效的|未知操作|意外结束|意外字符|unexpected|missing|invalid|unknown operation|unexpected end/.test(msg)) {
+            type = ExceptionType.SYNTAX_ERROR;
+        } else {
+            type = ExceptionType.UNKNOWN_ERROR;
+        }
+        return {
+            type: type,
+            message: msg,
+            lineNumber: currentLine
+        } as Exception;
+    }
+
+    // 编译期预解析 (NSVM SETARRAY 探测): 仅建树不执行, 与运行期 evaluate 的解析完全一致
+    // (tokenize/建树缓存复用); 返回树与整表达式 token 数 (错误消息 pos), 解析失败返回 null。
+    // 解析期间置 silentCompileParse 禁止调试输出 (编译期行指针非目标行, 日志会污染运行期输出)。
+    static parseExpressionTree(expression: string, currentLine: number): { tree: ExprNode; nTokens: number } | null {
+        const prevSilent = silentCompileParse;
+        silentCompileParse = true;
+        try {
+            this.currentLine = currentLine;
+            let cachedTokens = this.tokenCache.get(expression);
+            if (cachedTokens === undefined) {
+                cachedTokens = this.tokenize(expression);
+                if (this.tokenCache.size >= this.MAX_TOKEN_CACHE) this.tokenCache.clear();
+                this.tokenCache.set(expression, cachedTokens);
+            }
+            this.tokens = cachedTokens;
+            this.currentTokenIndex = 0;
+            if (this.tokens.length === 0) return null;
+            const tree = this.buildExpressionTree();
+            if (this.currentTokenIndex < this.tokens.length) return null;
+            return { tree: tree, nTokens: this.tokens.length };
+        } catch (e) {
+            return null;
+        } finally {
+            silentCompileParse = prevSilent;
+        }
+    }
+
+    // NSVM SETARRAY 指令专用: 以整表达式 token 上下文直接求值已解析树 (跳过 tokenize/建树/编译尝试/结果分发)。
+    // currentTokenIndex = nTokens 使错误消息 pos 与行解释器整表达式求值逐字节一致; 原生 JS Error 包装同 evaluate。
+    static evalTreeWithContext(tree: ExprNode, nTokens: number, currentLine: number): any {
+        this.currentLine = currentLine;
+        this.currentTokenIndex = nTokens;
+        try {
+            return this.evalTree(tree);
+        } catch (error) {
+            throw this.wrapEvalError(error, currentLine);
         }
     }
 
@@ -4561,19 +4888,26 @@ class ExpressionEvaluator {
                     ExpressionEvaluator.isExprCompilable(node.left as ExprNode) &&
                     ExpressionEvaluator.isExprCompilable(node.right as ExprNode);
             }
+            case 'arrayAccess':
+                // 数组元素读取回退树求值 (设计稿 §348/370: 数组访问为不可编译构造 → 整表达式原子回退树求值)。
+                // BISECT 结论: evaluate 的树缓存已消除重复解析, evalTree 对短数组读表达式快于 GETARRAY 字节码循环
+                // (GETARRAY 完整实现 2048 端到端 +6~8%, 回退后无劣化), 故编译策略不生成 GETARRAY 指令;
+                // GETARRAY 指令保留于 VM 指令集 (设计稿 §7), 供未来复杂表达式编译策略启用。
+                return false;
             default:
-                return false; // call / arrayAccess / assignment / arrayAssignment
+                return false; // call / assignment / arrayAssignment
         }
     }
 
     // 表达式树 → ExprCode (根节点为赋值时编译右值, 返回结构复刻 evalTree 'assignment' 分支); 不可编译返回 null
     private static compileExprToBytecode(tree: ExprNode): ExprCode | null {
+        const nTokens = this.tokens.length; // 错误消息 pos (复刻 evalTree 中 currentTokenIndex=tokens.length)
         if (tree.kind === 'assignment') {
             const rhs = tree.valueExpr as ExprNode;
             if (!ExpressionEvaluator.isExprCompilable(rhs)) return null;
             const compiler = new ExprBytecodeCompiler();
             compiler.compileNode(rhs, 0); // 结果恒入寄存器 0
-            const built = compiler.build();
+            const built = compiler.build(nTokens);
             built.resultKind = 'assignment';
             built.target = tree.target as string;
             built.targetBinding = tree.targetBinding;
@@ -4582,7 +4916,7 @@ class ExpressionEvaluator {
         if (!ExpressionEvaluator.isExprCompilable(tree)) return null;
         const compiler = new ExprBytecodeCompiler();
         compiler.compileNode(tree, 0);
-        return compiler.build();
+        return compiler.build(nTokens);
     }
 
     // 读取变量 (LOADVAR 语义): 槽位快速路径 → 回退原查找; 检查顺序: 存在性 (REFERENCE_ERROR) → 值 (undefined→TYPE_ERROR)
@@ -4616,10 +4950,31 @@ class ExpressionEvaluator {
         return varInfo.value;
     }
 
+    // GETARRAY 错误路径 (冷): 逐项检查复刻 evalTree 'arrayAccess', 构造精确错误消息。
+    // 独立成方法使热路径 case 保持极简, 避免大段 throw 分支拖累 runExprCode 分发循环优化。
+    private static getArrayAccessError(arr: Variable | null, idx: any, cv: CompiledVar, currentLine: number, pos: number): Exception {
+        if (typeof idx !== 'number') {
+            return { type: ExceptionType.TYPE_ERROR, message: t('array_index_not_number', {pos}), lineNumber: currentLine } as Exception;
+        }
+        if (!Number.isInteger(idx) || idx < 0) {
+            return { type: ExceptionType.RANGE_ERROR, message: t('array_index_not_nonneg_int', {pos}), lineNumber: currentLine } as Exception;
+        }
+        if (arr === null || arr.type !== DataType.ARRAY) {
+            return { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: cv.lookupName, pos}), lineNumber: currentLine } as Exception;
+        }
+        if (idx >= (arr.arrayLength || 0)) {
+            return { type: ExceptionType.RANGE_ERROR, message: t('array_index_out_of_range_access', {index: idx, name: cv.lookupName, max: arr.arrayLength ? arr.arrayLength - 1 : -1, pos}), lineNumber: currentLine } as Exception;
+        }
+        return { type: ExceptionType.UNKNOWN_ERROR, message: t('array_element_access_error', {name: cv.lookupName, index: idx, pos}), lineNumber: currentLine } as Exception;
+    }
+
     // 表达式字节码执行器: Int32Array 扁平指令循环, 寄存器 0 为结果寄存器。
     // 语义与 evalTree 逐分支复刻 (变量: 槽位快速路径 → 回退原查找, 先存在性(REFERENCE_ERROR)后值(undefined→TYPE_ERROR);
     // 一元/二元: 数字快速路径 + evaluateOperation/evaluateUnaryOperation 完整类型检查与除零检查;
     // AND/OR 非短路: 本求值器无跳转指令, 两操作数必已无条件求值)。
+    // 性能架构: 主循环不含 GETARRAY (含数组访问的表达式经 hasArray 分发到 runExprCodeArr)。
+    // 原因: GETARRAY 的查找/检查/错误分支会让 V8 对含它的分发循环整体降速 (BISECT: GETARRAY 置空时
+    // 2048 端到端 -14.6%, 完整实现 +6~8%), 而 2048 中绝大多数表达式不含数组访问。
     private static runExprCode(ec: ExprCode, currentLine: number): any {
         const code = ec.code;
         const consts = ec.consts;
@@ -4652,6 +5007,152 @@ class ExpressionEvaluator {
                     // 语义与 evalTree 'variable' 分支一致: 槽位快速路径 → 回退原查找; 先存在性后值检查
                     regs[a] = ExpressionEvaluator.loadVar(vars[b], currentLine);
                     break;
+                case ExprOp.UNPOS: {
+                    const o = regs[b];
+                    regs[a] = (typeof o === 'number') ? +o : this.evaluateUnaryOperation('+', o);
+                    break;
+                }
+                case ExprOp.NEG: {
+                    const o = regs[b];
+                    regs[a] = (typeof o === 'number') ? -o : this.evaluateUnaryOperation('-', o);
+                    break;
+                }
+                case ExprOp.NOT:
+                    regs[a] = this.evaluateUnaryOperation('!', regs[b]);
+                    break;
+                case ExprOp.ADD: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l + r : this.evaluateOperation('+', l, r);
+                    break;
+                }
+                case ExprOp.SUB: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l - r : this.evaluateOperation('-', l, r);
+                    break;
+                }
+                case ExprOp.MUL: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l * r : this.evaluateOperation('*', l, r);
+                    break;
+                }
+                case ExprOp.DIV: {
+                    const l = regs[b], r = regs[c];
+                    if (typeof l === 'number' && typeof r === 'number') {
+                        if (r === 0) throw { type: ExceptionType.RANGE_ERROR, message: t('division_by_zero'), lineNumber: currentLine } as Exception;
+                        regs[a] = l / r;
+                    } else {
+                        regs[a] = this.evaluateOperation('/', l, r);
+                    }
+                    break;
+                }
+                case ExprOp.MOD: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? l % r : this.evaluateOperation('%', l, r);
+                    break;
+                }
+                case ExprOp.POW: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Math.pow(l, r) : this.evaluateOperation('**', l, r);
+                    break;
+                }
+                case ExprOp.EQ: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l == r) : this.evaluateOperation('==', l, r);
+                    break;
+                }
+                case ExprOp.NEQ: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l != r) : this.evaluateOperation('!=', l, r);
+                    break;
+                }
+                case ExprOp.LT: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l < r) : this.evaluateOperation('<', l, r);
+                    break;
+                }
+                case ExprOp.GT: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l > r) : this.evaluateOperation('>', l, r);
+                    break;
+                }
+                case ExprOp.LE: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l <= r) : this.evaluateOperation('<=', l, r);
+                    break;
+                }
+                case ExprOp.GE: {
+                    const l = regs[b], r = regs[c];
+                    regs[a] = (typeof l === 'number' && typeof r === 'number') ? Boolean(l >= r) : this.evaluateOperation('>=', l, r);
+                    break;
+                }
+                case ExprOp.AND:
+                    // 非短路: 两操作数已无条件求值 (本求值器无跳转指令, 不可能短路)
+                    regs[a] = this.evaluateOperation('&&', regs[b], regs[c]);
+                    break;
+                case ExprOp.OR:
+                    // 非短路: 同上
+                    regs[a] = this.evaluateOperation('||', regs[b], regs[c]);
+                    break;
+            }
+        }
+        // 赋值表达式: 返回结构与 evalTree 'assignment' 分支一致, executeOperation 原样消费
+        if (ec.resultKind === 'assignment') {
+            return { type: 'assignment', target: ec.target as string, value: regs[0], binding: ec.targetBinding };
+        }
+        return regs[0];
+    }
+
+    // 含数组访问的表达式执行循环: 与主循环语义完全一致, 额外支持 GETARRAY。
+    // 独立循环避免 GETARRAY 复杂分支拖累主分发循环优化; 此循环仅被 hasArray 的表达式调用 (调用次数少)。
+    private static runExprCodeArr(ec: ExprCode, currentLine: number): any {
+        const code = ec.code;
+        const consts = ec.consts;
+        const vars = ec.vars;
+        const regs = ExpressionEvaluator.scratchRegs;
+        if (regs.length < ec.nTemps) {
+            regs.length = ec.nTemps;
+        }
+        const end = code.length;
+        for (let pc = 0; pc < end; pc += 4) {
+            const op = code[pc];
+            const a = code[pc + 1];
+            const b = code[pc + 2];
+            const c = code[pc + 3];
+            switch (op) {
+                case ExprOp.LOADK:
+                    regs[a] = consts[b];
+                    break;
+                case ExprOp.LOADVAR:
+                    // 语义与 evalTree 'variable' 分支一致: 槽位快速路径 → 回退原查找; 先存在性后值检查
+                    regs[a] = ExpressionEvaluator.loadVar(vars[b], currentLine);
+                    break;
+                case ExprOp.GETARRAY: {
+                    // 数组元素读取: 语义与 evalTree 'arrayAccess' 分支一致。热路径: 数组查找 + 单条件取值全部内联;
+                    // 条件不满足时回退独立错误方法 (冷路径, 复刻逐项检查与精确错误消息)。
+                    // 数组查找: 槽位快速路径 → 槽位为空时完整回退 getVariable (查局部作用域+全局, 与 evalTree 一致);
+                    // 无槽位的全局访问直查 GLOBAL_VARS (语义等价于 getVariable(isGlobal=true), lookupName 已去前缀, 免 debugLog 开销)。
+                    const idx = regs[c];
+                    const cv = vars[b];
+                    let arr: Variable | null;
+                    if (cv.binding) {
+                        arr = ExpressionEvaluator.readSlot(cv.binding);
+                        if (arr === null) {
+                            arr = ScopeManager.getVariable(cv.lookupName, currentLine, true, cv.isGlobal);
+                        }
+                    } else if (cv.isGlobal) {
+                        arr = (GLOBAL_VARS[cv.lookupName] !== undefined) ? GLOBAL_VARS[cv.lookupName] : null;
+                    } else {
+                        arr = ScopeManager.getVariable(cv.lookupName, currentLine, true, false);
+                    }
+                    const els = arr !== null && arr.type === DataType.ARRAY ? arr.arrayElements : null;
+                    if (typeof idx === 'number' && Number.isInteger(idx) && idx >= 0 &&
+                        els !== null && els !== undefined && idx < els.length &&
+                        idx < (arr!.arrayLength || 0)) {
+                        regs[a] = els[idx].value;
+                        break;
+                    }
+                    throw ExpressionEvaluator.getArrayAccessError(arr, idx, cv, currentLine, ec.nTokens);
+                }
                 case ExprOp.UNPOS: {
                     const o = regs[b];
                     regs[a] = (typeof o === 'number') ? +o : this.evaluateUnaryOperation('+', o);
@@ -6070,6 +6571,12 @@ enum NSVMOp {
                      // c=调用元数据常量索引 {funcName, callParams, content, argExprs, resultVar}
                      // 实参模式: 0=值(标量/表达式), 1=arrayref, 2=arraymut, 3=arraycopy, 4=literal (数组字面量)
                      // 实参个数 argc 一律从 consts[b] 模式表长度读取, 绝不从操作数 c 字段携带 (设计稿注意点1)
+    NEWARRAY = 21,   // a=数组声明元数据常量索引 (NSVMArrayDeclMeta, 编译期预解析: 名称/长度表达式/元素类型/初始化元素串)
+                     // 复刻 executeArrayDeclaration 完整语义: 长度求值+非负整数检查 → 元素类型检查 → arrfill/手动初始化
+                     // → 数组 Variable 创建与 GLOBAL_VARS/LOCAL_VARS 登记 (含重复/作用域检查与槽位索引重建)
+    SETARRAY = 22,   // a=数组赋值元数据常量索引 (NSVMSetArrayMeta: content + 预解析整行表达式树 + nTokens)
+                     // 复刻 executeOperation 数组赋值分支: 表达式求值 (evalTree arrayAssignment, 索引检查先于右值) →
+                     // 数组查找 (槽位→回退) → 存在/类型/const/readonly/越界/元素类型检查 → 写元素
 }
 
 // CALLFUNC 调用元数据 (编译期预解析, 运行期直读, 免 executeCall 的字符串正则/拆分/模式判定)
@@ -6079,6 +6586,28 @@ interface NSVMCallMeta {
     content: string;       // 原始源码行 (复刻 executeCommand 的"执行指令"调试输出)
     argExprs: string[];    // 逐实参表达式字符串 (已拆分, 忽略数组字面量/字符串内逗号)
     resultVar: string | undefined; // 返回变量名 (-> result)
+}
+
+// NEWARRAY 数组声明元数据 (编译期预解析 executeArrayDeclaration 的静态部分: 格式正则/标识符/元素拆分,
+// 运行期直读; 长度表达式求值/元素类型检查/初始化解析等动态语义仍在执行器内复刻)
+interface NSVMArrayDeclMeta {
+    arrayName: string;       // 数组名 (已通过 isValidIdentifier 检查)
+    lengthExpr: string;      // 长度表达式串 "[...]" 内原样保留 (运行期 evaluateExpression)
+    elementTypeStr: string;  // 元素类型名字符串
+    initValue: string;       // 初始化值原串 (trim 后; 'arrfill' 或 '[..]')
+    elementValues: string[] | null; // 预拆分的元素表达式 (null = arrfill)
+    isGlobal: boolean;       // 全局数组声明
+    isConst: boolean;        // const 前缀
+    params: string;          // 传给 executeArrayDeclaration 的参数串 (debugLog 3 逐字节一致)
+    content: string;         // 原始源码行 (复刻 executeCommand 的"执行指令"调试输出)
+}
+
+// SETARRAY 数组赋值元数据 (编译期预解析整行表达式为树; 运行期以整表达式 token 上下文直接求值,
+// pos 错误消息与行解释器逐字节一致)
+interface NSVMSetArrayMeta {
+    content: string;    // 原始源码行 (执行操作指令 调试输出)
+    tree: ExprNode;     // 整行表达式树 (kind 恒为 arrayAssignment, 编译期已判定)
+    nTokens: number;    // 整行 token 数 (错误消息 pos, 复刻 evalTree 中 currentTokenIndex=tokens.length)
 }
 
 // 异常处理器 (编译期构建, 对应一个 try-catch 结构)
@@ -6215,6 +6744,42 @@ class NSVMCompiler {
         return null;
     }
 
+    // 数组声明预解析 (编译期): 复刻 executeGlobal/executeLocal 的 const 剥离 + 'array ' 判定, 再按
+    // executeArrayDeclaration 的格式正则/标识符/初始化结构拆分静态部分; 任一不满足 → null (回退 STMT,
+    // 由行解释器在运行期以完全相同的时机报错)。长度表达式求值/元素类型检查/初始化解析留待执行器动态处理。
+    private static parseArrayDecl(params: string, isGlobal: boolean): NSVMArrayDeclMeta | null {
+        let isConst = false;
+        let remaining = params;
+        const constMatch = remaining.match(/^const\s+(.+)$/);
+        if (constMatch) { isConst = true; remaining = constMatch[1]; }
+        if (!remaining.startsWith('array ')) return null;
+        const decl = remaining.substring(6).trim(); // 传给 executeArrayDeclaration 的参数串
+        const m = decl.match(/^([a-zA-Z0-9_]+)\[([^\]]+)\]:([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
+        if (!m) return null;
+        if (!Interpreter.isValidIdentifier(m[1])) return null;
+        const initValue = m[4].trim();
+        let elementValues: string[] | null = null; // null = arrfill
+        if (initValue === 'arrfill') {
+            elementValues = null;
+        } else if (initValue.startsWith('[') && initValue.endsWith(']')) {
+            const elementsStr = initValue.substring(1, initValue.length - 1).trim();
+            elementValues = elementsStr ? Interpreter.splitArrayElements(elementsStr) : [];
+        } else {
+            return null; // 非 arrfill 非 [..] 初始化 → 运行期报 array_init_format, 回退 STMT
+        }
+        return {
+            arrayName: m[1],
+            lengthExpr: m[2],
+            elementTypeStr: m[3],
+            initValue,
+            elementValues,
+            isGlobal,
+            isConst,
+            params: decl,
+            content: LINE_INFO[this.curLine].content
+        };
+    }
+
     // 编译整个程序: 全局块 + 每个函数块; 任一编译失败返回 false (整体回退行解释器)
     static compileProgram(): boolean {
         try {
@@ -6302,9 +6867,35 @@ class NSVMCompiler {
 
             const stmt = info.stmt;
             switch (stmt.type) {
-                case StmtType.OP:
+                case StmtType.OP: {
+                    // SETARRAY 指令化: 编译期预解析整行表达式树, 仅 arrayAssignment 结构指令化
+                    // (数组元素赋值 arr[i] = expr); 其余 (普通赋值/纯表达式) 回退 STMT 由行解释器处理。
+                    // 预过滤: 仅首 token 为标识符且紧随 '[' 的行可能为数组赋值 (复刻 buildExpressionTree 探测),
+                    // 其余行免编译期解析 (避免无谓开销)
+                    if (/^[a-zA-Z_][a-zA-Z0-9_.]*\s*\[/.test(content)) {
+                        const parsed = ExpressionEvaluator.parseExpressionTree(content, line);
+                        if (parsed !== null && parsed.tree.kind === 'arrayAssignment') {
+                            const metaK = this.constIndex({ content, tree: parsed.tree, nTokens: parsed.nTokens } as NSVMSetArrayMeta);
+                            this.emit(NSVMOp.SETARRAY, metaK, 0, 0);
+                            break;
+                        }
+                    }
+                    this.emit(NSVMOp.STMT, line, 0, 0);
+                    break;
+                }
                 case StmtType.GLOBAL:
-                case StmtType.LOCAL:
+                case StmtType.LOCAL: {
+                    // NEWARRAY 指令化: 仅数组声明 (global/local array ...[..]:type = ...) 且静态部分可完整
+                    // 预解析时发射 NEWARRAY; 其余声明 (普通变量/格式不符) 回退 STMT 由行解释器运行期报错
+                    const declMeta = this.parseArrayDecl(stmt.params, stmt.type === StmtType.GLOBAL);
+                    if (declMeta !== null) {
+                        const metaK = this.constIndex(declMeta);
+                        this.emit(NSVMOp.NEWARRAY, metaK, 0, 0);
+                    } else {
+                        this.emit(NSVMOp.STMT, line, 0, 0);
+                    }
+                    break;
+                }
                 case StmtType.PRINT:
                 case StmtType.PURGE:
                 case StmtType.CONST_PREFIX_ERROR:
@@ -6847,6 +7438,20 @@ class NSVMExecutor {
                             Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
                             frame.pc++;
                             break;
+                        case NSVMOp.NEWARRAY: {
+                            // 数组声明指令: 预解析元数据直读, 执行器复刻 executeArrayDeclaration 完整语义
+                            const declMeta = consts[a] as NSVMArrayDeclMeta;
+                            DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${declMeta.content}`);
+                            Interpreter.executeArrayDeclarationCompiled(declMeta);
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.SETARRAY:
+                            // 复杂语义已外提至独立方法 (executeArrayAssignmentCompiled), case 仅委托调用,
+                            // 避免复杂分支内联拖累主分发循环的 V8 优化 (BISECT: 内联实现 2048 端到端慢 ~20%)
+                            Interpreter.executeArrayAssignmentCompiled(consts[a] as NSVMSetArrayMeta, currentLinePointer);
+                            frame.pc++;
+                            break;
                         case NSVMOp.JMP:
                             frame.pc = a;
                             break;
@@ -6894,223 +7499,10 @@ class NSVMExecutor {
                             break;
                         }
                         case NSVMOp.CALLFUNC: {
-                            // 严格按设计稿注意点1: 实参个数 argc 一律从 modesK 模式表长度读取, 绝不从操作数 c 携带
-                            const modesK = consts[b] as Int32Array;
-                            const argc = modesK.length;
-                            const fnK = consts[a] as string;
-                            const meta = consts[c] as NSVMCallMeta;
-                            const funcInfo = FUNCTIONS[fnK];
-                            const oldPc = frame.pc;
-                            // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
-                            debugLog(2, () => `执行指令 ${meta.content}`);
-                            debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
-                            debugLog(2, () => `函数信息:`, funcInfo);
-                            // 阶段1: 解析实参 (复刻 executeCall 解析段; 失败即 reportError + 调用方继续, 无绑定污染)
-                            const args: any[] = [];
-                            let parseFailed = false;
-                            for (let i = 0; i < argc; i++) {
-                                if (modesK[i] === 0) {
-                                    try {
-                                        args.push(Interpreter.parseValue(meta.argExprs[i], funcInfo.params[i].type));
-                                    } catch (error) {
-                                        // 实参表达式中的 input() 挂起信号穿透
-                                        if (isInputSuspend(error)) throw error;
-                                        reportError(ExceptionType.TYPE_ERROR, t('func_arg_type_error', {name: fnK, argIndex: i + 1}));
-                                        parseFailed = true;
-                                        break;
-                                    }
-                                } else {
-                                    args.push(null); // 数组实参: 绑定阶段按模式处理
-                                }
-                            }
-                            if (parseFailed) { frame.pc++; break; }
-                            // 保存调用所在行号 / 分配帧ID / 记录本帧首个局部变量位置 (复刻 executeCall)
-                            const oldLinePointer = currentLinePointer;
-                            const frameId = ++CALL_FRAME_ID;
-                            const callVarStart = LOCAL_VARS.length;
-                            debugLog(2, () => `函数 ${fnK} 开始传递参数`);
-                            debugLog(2, () => `函数信息:`, funcInfo);
-                            debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
-                            debugLog(2, () => `开始参数传递循环`);
-                            debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
-                            // 阶段2: 绑定参数到 callee 帧参数槽位 (寄存器直写, 复刻 executeCall 绑定循环)
-                            for (let i = 0; i < argc; i++) {
-                                debugLog(3, () => `循环索引: ${i}`);
-                                const param = funcInfo.params[i];
-                                const paramName = param.name;
-                                debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
-                                const mode = modesK[i];
-                                if (param.type === DataType.ARRAY) {
-                                    if (mode === 4) {
-                                        // 数组字面量: 创建临时数组 (只读视图) — 复刻 executeCall literal 分支
-                                        const elementsStr = meta.argExprs[i].slice(1, -1);
-                                        const elementStrs = Interpreter.splitArrayElements(elementsStr);
-                                        let literalElements: ArrayElement[] = [];
-                                        try {
-                                            literalElements = elementStrs.map(es => {
-                                                const ess = es.trim();
-                                                if ((ess.startsWith('"') && ess.endsWith('"')) || (ess.startsWith("'") && ess.endsWith("'"))) {
-                                                    return { value: ess.slice(1, -1), type: DataType.STRING };
-                                                }
-                                                if (ess === 'true') return { value: true, type: DataType.BOOL };
-                                                if (ess === 'false') return { value: false, type: DataType.BOOL };
-                                                const num = Number(ess);
-                                                if (ess !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
-                                                throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: ess}) } as Exception;
-                                            });
-                                        } catch (e) {
-                                            reportError(ExceptionType.TYPE_ERROR, t('array_literal_arg_parse_failed', {error: (e as Error).message}));
-                                            LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
-                                            rebuildSlotIndex();
-                                            frame.pc++;
-                                            break;
-                                        }
-                                        const literalVar: Variable = {
-                                            name: paramName,
-                                            value: "请使用arrayElements属性访问数组元素",
-                                            type: DataType.ARRAY,
-                                            isGlobal: false,
-                                            isConst: false,
-                                            startLine: funcInfo.startLine + 1,
-                                            endLine: funcInfo.endLine,
-                                            frameId: frameId,
-                                            arrayLength: literalElements.length,
-                                            arrayElementType: literalElements.length > 0 ? literalElements[0].type : DataType.NUMBER,
-                                            arrayElements: literalElements,
-                                            isReadonlyArray: true
-                                        };
-                                        LOCAL_VARS.push(literalVar);
-                                        (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
-                                        debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
-                                        continue;
-                                    }
-                                    // 数组引用 / mut / copy — 复刻 executeCall 数组分支 (parseArrayArgument 先提取变量名)
-                                    const arrArgMode = mode === 1 ? 'ref' : mode === 2 ? 'mut' : 'copy';
-                                    const argStr = meta.argExprs[i].trim();
-                                    let arrArgName = argStr;
-                                    if (mode === 2) arrArgName = argStr.match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/)![1];
-                                    else if (mode === 3) arrArgName = argStr.match(/^copy\s*\(\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)$/)![1];
-                                    const arrVar = ScopeManager.getVariable(arrArgName, currentLinePointer, true, arrArgName.startsWith('global.'));
-                                    if (!arrVar || arrVar.type !== DataType.ARRAY) {
-                                        reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArgName}));
-                                        LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
-                                        rebuildSlotIndex();
-                                        frame.pc++;
-                                        break;
-                                    }
-                                    const paramVar: Variable = {
-                                        name: paramName,
-                                        value: "请使用arrayElements属性访问数组元素",
-                                        type: DataType.ARRAY,
-                                        isGlobal: false,
-                                        isConst: false,
-                                        startLine: funcInfo.startLine + 1,
-                                        endLine: funcInfo.endLine,
-                                        frameId: frameId,
-                                        arrayLength: arrVar.arrayLength,
-                                        arrayElementType: arrVar.arrayElementType,
-                                        arrayElements: arrArgMode === 'copy'
-                                            ? arrVar.arrayElements!.map((e: ArrayElement) => ({ value: e.value, type: e.type }))
-                                            : arrVar.arrayElements,
-                                        isReadonlyArray: arrArgMode === 'copy' ? false : !param.isMutable
-                                    };
-                                    LOCAL_VARS.push(paramVar);
-                                    (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
-                                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
-                                    continue;
-                                }
-                                const argValue = args[i] !== undefined ? args[i] : null;
-                                ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
-                                debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
-                            }
-                            debugLog(2, () => `参数传递循环结束`);
-                            // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数
-                            let functionBodyStartLine = funcInfo.startLine + 1;
-                            while (functionBodyStartLine < funcInfo.endLine) {
-                                const checkLine = programLines[functionBodyStartLine].trim();
-                                if (checkLine === '' || checkLine.indexOf(':') === 0) {
-                                    functionBodyStartLine++;
-                                    continue;
-                                }
-                                break;
-                            }
-                            if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
-                                ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
-                            }
-                            debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
-                            debugLog(2, () => `函数 ${fnK} 参数传递完成`);
-
-                            // 额外的调试信息, 检查参数是否真的被添加 (复刻 executeCall debug 3; 循环门控 DEBUG_LEVEL>=3 免热路径开销)
-                            if (DEBUG_LEVEL >= 3) {
-                                debugLog(3, () => `检查参数是否正确添加:`);
-                                for (let i = 0; i < argc; i++) {
-                                    const paramName = funcInfo.params[i].name;
-                                    let found = false;
-                                    for (let j = 0; j < LOCAL_VARS.length; j++) {
-                                        if (LOCAL_VARS[j].name === paramName) {
-                                            debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        debugLog(3, () => `参数 ${paramName} 未找到`);
-                                    }
-                                }
-
-                                // 进一步调试: 检查每个参数在 LOCAL_VARS 中的详细信息 (复刻 executeCall debug 3)
-                                debugLog(3, () => `详细检查参数:`);
-                                for (let i = 0; i < argc; i++) {
-                                    const paramName = funcInfo.params[i].name;
-                                    const paramType = funcInfo.params[i].type;
-                                    let paramFound = false;
-                                    for (let j = 0; j < LOCAL_VARS.length; j++) {
-                                        if (LOCAL_VARS[j].name === paramName) {
-                                            debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
-                                            // 验证类型是否匹配
-                                            if (LOCAL_VARS[j].type !== paramType) {
-                                                debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
-                                            }
-                                            paramFound = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!paramFound) {
-                                        debugLog(3, () => `参数 ${paramName} 未找到`);
-                                    }
-                                }
-                            }
-
-                            // 设置 currentLinePointer 为函数体开始行 (复刻 executeCall: 主循环会自动加一执行函数体内部的代码)
-                            currentLinePointer = funcInfo.startLine;
-                            debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
-                            // 添加作用域调试信息
-                            debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
-                            debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-                            debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-                            // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
-                            CONTROL_FLOW_STACK.push({
-                                type: 'function',
-                                funcName: fnK,
-                                startLine: funcInfo.startLine,
-                                endLine: funcInfo.endLine,
-                                callFrom: oldLinePointer,
-                                returnVarName: meta.resultVar,
-                                frameId: frameId,
-                                frameVarStart: callVarStart
-                            });
-                            debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
-                            // 切换到 callee 的 VM 块
-                            const fb = NSVMExecutor.funcBlocks.get(fnK);
-                            if (fb) {
-                                NSVMExecutor.frames.push({
-                                    block: fb, pc: 0, retAddr: oldPc + 1,
-                                    caller: frame, callFrom: oldLinePointer
-                                });
-                                frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
-                                break;
-                            }
-                            frame.pc++;
+                            // CALLFUNC 完整语义外提至 executeCallCompiled (case 仅委托): 巨大内联块拖累主分发
+                            // 循环的 V8 优化 (BISECT: 内联实现 2048 端到端慢 ~3%), 委托后主循环恢复热路径优化
+                            const nextFrame = NSVMExecutor.executeCallCompiled(consts, a, b, c, frame);
+                            if (nextFrame !== null) frame = nextFrame;
                             break;
                         }
                         case NSVMOp.RETV:
@@ -7431,6 +7823,228 @@ class NSVMExecutor {
                 // handled: 继续执行
             }
         }
+    }
+
+    // CALLFUNC 执行器 (case 外提): 完整复刻 executeCall 语义。case 内联巨大块会拖累主分发循环的
+    // Turbofan 优化, 外提后主循环恢复热路径优化。返回新帧 (切帧成功) 或 null (失败/未切帧, 内部已 pc++)。
+    static executeCallCompiled(consts: any[], a: number, b: number, c: number, frame: NSVMFrame): NSVMFrame | null {
+        // 严格按设计稿注意点1: 实参个数 argc 一律从 modesK 模式表长度读取, 绝不从操作数 c 携带
+        const modesK = consts[b] as Int32Array;
+        const argc = modesK.length;
+        const fnK = consts[a] as string;
+        const meta = consts[c] as NSVMCallMeta;
+        const funcInfo = FUNCTIONS[fnK];
+        const oldPc = frame.pc;
+        // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
+        debugLog(2, () => `执行指令 ${meta.content}`);
+        debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
+        debugLog(2, () => `函数信息:`, funcInfo);
+        // 阶段1: 解析实参 (复刻 executeCall 解析段; 失败即 reportError + 调用方继续, 无绑定污染)
+        const args: any[] = [];
+        let parseFailed = false;
+        for (let i = 0; i < argc; i++) {
+            if (modesK[i] === 0) {
+                try {
+                    args.push(Interpreter.parseValue(meta.argExprs[i], funcInfo.params[i].type));
+                } catch (error) {
+                    // 实参表达式中的 input() 挂起信号穿透
+                    if (isInputSuspend(error)) throw error;
+                    reportError(ExceptionType.TYPE_ERROR, t('func_arg_type_error', {name: fnK, argIndex: i + 1}));
+                    parseFailed = true;
+                    break;
+                }
+            } else {
+                args.push(null); // 数组实参: 绑定阶段按模式处理
+            }
+        }
+        if (parseFailed) { frame.pc++; return null; }
+        // 保存调用所在行号 / 分配帧ID / 记录本帧首个局部变量位置 (复刻 executeCall)
+        const oldLinePointer = currentLinePointer;
+        const frameId = ++CALL_FRAME_ID;
+        const callVarStart = LOCAL_VARS.length;
+        debugLog(2, () => `函数 ${fnK} 开始传递参数`);
+        debugLog(2, () => `函数信息:`, funcInfo);
+        debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
+        debugLog(2, () => `开始参数传递循环`);
+        debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        // 阶段2: 绑定参数到 callee 帧参数槽位 (寄存器直写, 复刻 executeCall 绑定循环)
+        for (let i = 0; i < argc; i++) {
+            debugLog(3, () => `循环索引: ${i}`);
+            const param = funcInfo.params[i];
+            const paramName = param.name;
+            debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
+            const mode = modesK[i];
+            if (param.type === DataType.ARRAY) {
+                if (mode === 4) {
+                    // 数组字面量: 创建临时数组 (只读视图) — 复刻 executeCall literal 分支
+                    const elementsStr = meta.argExprs[i].slice(1, -1);
+                    const elementStrs = Interpreter.splitArrayElements(elementsStr);
+                    let literalElements: ArrayElement[] = [];
+                    try {
+                        literalElements = elementStrs.map(es => {
+                            const ess = es.trim();
+                            if ((ess.startsWith('"') && ess.endsWith('"')) || (ess.startsWith("'") && ess.endsWith("'"))) {
+                                return { value: ess.slice(1, -1), type: DataType.STRING };
+                            }
+                            if (ess === 'true') return { value: true, type: DataType.BOOL };
+                            if (ess === 'false') return { value: false, type: DataType.BOOL };
+                            const num = Number(ess);
+                            if (ess !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
+                            throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: ess}) } as Exception;
+                        });
+                    } catch (e) {
+                        reportError(ExceptionType.TYPE_ERROR, t('array_literal_arg_parse_failed', {error: (e as Error).message}));
+                        LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                        rebuildSlotIndex();
+                        frame.pc++;
+                        return null;
+                    }
+                    const literalVar: Variable = {
+                        name: paramName,
+                        value: "请使用arrayElements属性访问数组元素",
+                        type: DataType.ARRAY,
+                        isGlobal: false,
+                        isConst: false,
+                        startLine: funcInfo.startLine + 1,
+                        endLine: funcInfo.endLine,
+                        frameId: frameId,
+                        arrayLength: literalElements.length,
+                        arrayElementType: literalElements.length > 0 ? literalElements[0].type : DataType.NUMBER,
+                        arrayElements: literalElements,
+                        isReadonlyArray: true
+                    };
+                    LOCAL_VARS.push(literalVar);
+                    (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
+                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    continue;
+                }
+                // 数组引用 / mut / copy — 复刻 executeCall 数组分支 (parseArrayArgument 先提取变量名)
+                const arrArgMode = mode === 1 ? 'ref' : mode === 2 ? 'mut' : 'copy';
+                const argStr = meta.argExprs[i].trim();
+                let arrArgName = argStr;
+                if (mode === 2) arrArgName = argStr.match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/)![1];
+                else if (mode === 3) arrArgName = argStr.match(/^copy\s*\(\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)$/)![1];
+                const arrVar = ScopeManager.getVariable(arrArgName, currentLinePointer, true, arrArgName.startsWith('global.'));
+                if (!arrVar || arrVar.type !== DataType.ARRAY) {
+                    reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArgName}));
+                    LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                    rebuildSlotIndex();
+                    frame.pc++;
+                    return null;
+                }
+                const paramVar: Variable = {
+                    name: paramName,
+                    value: "请使用arrayElements属性访问数组元素",
+                    type: DataType.ARRAY,
+                    isGlobal: false,
+                    isConst: false,
+                    startLine: funcInfo.startLine + 1,
+                    endLine: funcInfo.endLine,
+                    frameId: frameId,
+                    arrayLength: arrVar.arrayLength,
+                    arrayElementType: arrVar.arrayElementType,
+                    arrayElements: arrArgMode === 'copy'
+                        ? arrVar.arrayElements!.map((e: ArrayElement) => ({ value: e.value, type: e.type }))
+                        : arrVar.arrayElements,
+                    isReadonlyArray: arrArgMode === 'copy' ? false : !param.isMutable
+                };
+                LOCAL_VARS.push(paramVar);
+                (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
+                debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                continue;
+            }
+            const argValue = args[i] !== undefined ? args[i] : null;
+            ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
+            debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
+        }
+        debugLog(2, () => `参数传递循环结束`);
+        // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数
+        let functionBodyStartLine = funcInfo.startLine + 1;
+        while (functionBodyStartLine < funcInfo.endLine) {
+            const checkLine = programLines[functionBodyStartLine].trim();
+            if (checkLine === '' || checkLine.indexOf(':') === 0) {
+                functionBodyStartLine++;
+                continue;
+            }
+            break;
+        }
+        if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
+            ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
+        }
+        debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
+        debugLog(2, () => `函数 ${fnK} 参数传递完成`);
+
+        // 额外的调试信息, 检查参数是否真的被添加 (复刻 executeCall debug 3; 循环门控 DEBUG_LEVEL>=3 免热路径开销)
+        if (DEBUG_LEVEL >= 3) {
+            debugLog(3, () => `检查参数是否正确添加:`);
+            for (let i = 0; i < argc; i++) {
+                const paramName = funcInfo.params[i].name;
+                let found = false;
+                for (let j = 0; j < LOCAL_VARS.length; j++) {
+                    if (LOCAL_VARS[j].name === paramName) {
+                        debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    debugLog(3, () => `参数 ${paramName} 未找到`);
+                }
+            }
+
+            // 进一步调试: 检查每个参数在 LOCAL_VARS 中的详细信息 (复刻 executeCall debug 3)
+            debugLog(3, () => `详细检查参数:`);
+            for (let i = 0; i < argc; i++) {
+                const paramName = funcInfo.params[i].name;
+                const paramType = funcInfo.params[i].type;
+                let paramFound = false;
+                for (let j = 0; j < LOCAL_VARS.length; j++) {
+                    if (LOCAL_VARS[j].name === paramName) {
+                        debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
+                        // 验证类型是否匹配
+                        if (LOCAL_VARS[j].type !== paramType) {
+                            debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
+                        }
+                        paramFound = true;
+                        break;
+                    }
+                }
+                if (!paramFound) {
+                    debugLog(3, () => `参数 ${paramName} 未找到`);
+                }
+            }
+        }
+
+        // 设置 currentLinePointer 为函数体开始行 (复刻 executeCall: 主循环会自动加一执行函数体内部的代码)
+        currentLinePointer = funcInfo.startLine;
+        debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
+        // 添加作用域调试信息
+        debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
+        debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
+        CONTROL_FLOW_STACK.push({
+            type: 'function',
+            funcName: fnK,
+            startLine: funcInfo.startLine,
+            endLine: funcInfo.endLine,
+            callFrom: oldLinePointer,
+            returnVarName: meta.resultVar,
+            frameId: frameId,
+            frameVarStart: callVarStart
+        });
+        debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
+        // 切换到 callee 的 VM 块
+        const fb = NSVMExecutor.funcBlocks.get(fnK);
+        if (fb) {
+            NSVMExecutor.frames.push({
+                block: fb, pc: 0, retAddr: oldPc + 1,
+                caller: frame, callFrom: oldLinePointer
+            });
+            return NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+        }
+        frame.pc++;
+        return null;
     }
 }
 
