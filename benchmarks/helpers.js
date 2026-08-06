@@ -49,7 +49,11 @@ function loadInterp(p) {
         process: {}, Buffer, setTimeout, clearTimeout
     };
     vm.createContext(sandbox);
-    vm.runInContext(fs.readFileSync(p, 'utf8'), sandbox);
+    // 函数包装加载: vm 上下文中脚本顶层 var 会绑定为全局对象属性, 每次访问走全局代理 (实测比函数作用域慢 ~7x);
+    // 包一层函数让顶层 var 变为函数作用域 (等价 require 的模块作用域 / 浏览器脚本上下文), 反映解释器真实执行性能。
+    const wrapped = '(function(module, exports, require) {\n' +
+        fs.readFileSync(p, 'utf8') + '\n})();';
+    vm.runInContext(wrapped, sandbox);
     return sandbox.window.NSI;
 }
 
