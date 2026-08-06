@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.6.2";
+const NSIVersion: string = "2.6.3";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -564,7 +564,191 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         // 数组返回值绑定 (handleReturnValueAssignment)
         func_no_valid_array_return: '函数 {name} 未返回有效的数组值',
         result_var_not_array: '结果变量 {name} 不是数组类型, 无法接收数组返回值',
-        func_no_array_return: '函数 {name} 未返回数组值'
+        func_no_array_return: '函数 {name} 未返回数组值',
+        // ===== 调试输出 (debugLog) 区域A: L790-1600 =====
+        dbg_validate_type: '验证数据类型: 值 {value}, 类型 {type}',
+        dbg_uninit_var_undefined: '未初始化变量, 存储 undefined',
+        dbg_validate_default_branch: '数据类型验证到达默认分支',
+        dbg_kind_var: '变量',
+        dbg_kind_const: '常量',
+        dbg_kind_array: '数组',
+        dbg_last_line: '末行',
+        dbg_try_add_var: '尝试添加{kind}: {name}, 值: {value}, 类型: {type}, 作用域: {scopeStart}-{scopeEnd}, 是否全局: {isGlobal}',
+        dbg_global_var_added: '全局变量 {name} 添加成功',
+        dbg_local_var_added: '局部变量 {name} 添加成功',
+        dbg_scope_global: '全局',
+        dbg_scope_local: '局部',
+        dbg_lookup_var: '查找{scope}{kind}: {name} (行 {line})',
+        dbg_local_var_count_prefix: '当前局部变量 (含数组) 数量: {count}, ',
+        dbg_var_counts: '{localInfo}当前全局变量数量: {globalCount}',
+        dbg_array_suffix: ' (数组) ',
+        dbg_check_var_scope: '检查 {name}{arraySuffix}: 作用域{scopeStart}-{scopeEnd} 当前行{currentLine} 在范围内: {inScope}',
+        dbg_get_var_local: '获取{kind} {name} (局部): 值={value}, 类型={type}, 行号={line}',
+        dbg_local_var_details: '局部变量详情:',
+        dbg_global_var_details: '全局变量详情:',
+        dbg_global_len: '长度={len}',
+        dbg_global_val: '值={val}',
+        dbg_get_var_global: '获取{kind} {name} (全局): {scopeInfo}, 类型={type}, 行号={line}',
+        dbg_warn_var_undefined: '警告: 变量 {name} 未定义 (行 {line})',
+        dbg_lookup_var_info: '查找{scope}变量信息: {name} (行 {line})',
+        dbg_get_var_info_local: '获取变量信息 {name} (局部): 值={value}, 类型={type}, 作用域={scopeStart}-{scopeEnd}, 行号={line}',
+        dbg_get_var_info_global: '获取变量信息 {name} (全局): 值={value}, 类型={type}, 作用域={scopeStart}-{scopeEnd}, 行号={line}',
+        dbg_set_var: '设置{scope}变量 {name} (行 {line})',
+        dbg_has_var: '查找{scope}变量: {name} (行 {line})',
+        dbg_check_var: '  检查 {name}: 作用域{scopeStart}-{scopeEnd} ',
+        dbg_in_scope: '当前行{currentLine} 在范围内: {inScope}',
+        dbg_found_var: '  找到变量: {name} = {value}',
+        dbg_found_global_var: '  找到全局变量: {name} = {value}',
+        dbg_func_incomplete: '未完整注册的函数',
+        dbg_func_complete: '已完整注册的函数',
+        dbg_register_func_status: '{status}: {name}',
+        dbg_register_func_scope: '注册函数作用域: {name} (行 {scopeStart}-{scopeEnd})',
+        dbg_current_registered_funcs: '当前注册的函数:',
+        dbg_find_func_for_line: '查找第 {line} 行所在函数',
+        dbg_global_var_cleared: '已清除全局变量 {name}',
+        dbg_global_var_not_exists: '全局变量 {name} 不存在',
+        dbg_all_local_vars_cleared: '已清除所有局部变量',
+        dbg_clear_local_var: '清除指定局部变量 {name}, 作用域: {scopeStart}-{scopeEnd}',
+        dbg_clear_local_var_except: '清除指定局部变量 {name} 之外的所有变量, 作用域: {scopeStart}-{scopeEnd}',
+        dbg_check_void_func: '检查函数 {name} 是否为 void 函数',
+        dbg_scan_start: '开始扫描标签和函数定义',
+        dbg_tag_found: '找到标签: {name} (行 {line})',
+        dbg_func_end_tag: '检测到函数结束标记, 更新函数信息',
+        dbg_updated_func_registry: '更新后的函数注册信息',
+        dbg_parse_func: '解析函数: {name}, startLine: {startLine}, params: {params}',
+        dbg_scan_end: '扫描标签和函数定义结束',
+        dbg_slot_table_built: '槽位符号表构建完成: {count} 个局部声明',
+        // ===== 调试输出 (debugLog) 区域B: L1600-3540 =====
+        dbg_debug_level_set: 'Debug级别设置为: {level}',
+        dbg_doc_debug_lower: '文档内指定调试级别 {docLevel} 低于外部指定调试级别 {extLevel}, 忽略文档内调试级别',
+        dbg_exception_caught: '异常被捕获: {message} (行 {line})',
+        dbg_program_stopped_error: '程序因错误而停止',
+        dbg_program_finished: '程序执行完毕',
+        dbg_execute_instr: '执行指令 {content}',
+        dbg_exception_msg: '{message}',
+        dbg_block_type: '代码块类型',
+        dbg_switch_default: 'switch 分支 运行至 default',
+        dbg_start_func_call: '开始执行函数调用: {params}',
+        dbg_func_info: '函数信息:',
+        dbg_func_start_passing: '函数 {funcName} 开始传递参数',
+        dbg_param_count: '参数数量: {count}, 实际参数:',
+        dbg_param_loop_start: '开始参数传递循环',
+        dbg_func_call_args: '函数调用: {funcName}, 参数:',
+        dbg_curr_line: '当前行: {line}',
+        dbg_loop_index: '循环索引: {i}',
+        dbg_set_param: '设置参数: {paramName} (类型: {paramType})',
+        dbg_array_param_literal: '数组参数 {paramName} 绑定完成 (模式: literal, 长度: {length}, 只读: true)',
+        dbg_array_param_bound: '数组参数 {paramName} 绑定完成 (模式: {mode}, 长度: {length}, 只读: {readonly})',
+        dbg_param_bound_slot: '参数 {paramName} 绑定到帧槽位 {slot}',
+        dbg_param_loop_end: '参数传递循环结束',
+        dbg_current_local_var_details: '当前局部变量详情:',
+        dbg_func_param_done: '函数 {funcName} 参数传递完成',
+        dbg_check_params_added: '检查参数是否正确添加:',
+        dbg_param_index: '参数 {paramName} 的索引: {index}',
+        dbg_param_not_found: '参数 {paramName} 未找到',
+        dbg_check_params_detail: '详细检查参数:',
+        dbg_param_detail: '参数 {paramName} 详情: 索引={index}, 值={value}, 类型={type}, 作用域={scopeStart}-{scopeEnd}',
+        dbg_warn_param_type: '警告: 参数 {paramName} 类型不匹配, 期望={expected}, 实际={actual}',
+        dbg_func_body_start: '函数体开始行: {line}',
+        dbg_func_scope_details: '函数 {funcName} 变量作用域详情:',
+        dbg_return_var_scope: '  返回值变量: {name}, 作用域: {scopeStart}-{scopeEnd}',
+        dbg_param_scope: '  参数作用域: {scopeStart}-{scopeEnd}',
+        dbg_control_flow_stack: '当前流程控制栈:',
+        dbg_exec_array_decl: '执行{scope}{kind}数组声明: {params}',
+        dbg_array_arrfill: '数组{arrayName}使用arrfill初始化',
+        dbg_array_fill_done: '数组填充完毕',
+        dbg_array_manual_init: '数组{arrayName}使用手动初始化',
+        dbg_exec_op_instr: '执行操作指令: {content}',
+        dbg_parse_result: '获得解析结果',
+        dbg_detect_array_assign: '侦测到数组赋值 目标:{arrayName} 索引:{index}',
+        dbg_array_name: '获得的数组名称: {name}',
+        dbg_update_array_elem: '更新数组元素: {oldValue} 为 {newValue}',
+        dbg_exec_return: '执行返回语句: {params}',
+        dbg_no_return_undefined: '无返回值, 设置为undefined',
+        dbg_return_from_var: '从变量获取返回值: {value}',
+        dbg_store_return: '存储返回值到RETURN_VALUES[{funcName}][{returnValueStr}]: {returnValue}',
+        dbg_return_pool: '当前返回值池内容: ',
+        dbg_local_vars_after_cleanup: '函数调用清理后的局部变量表',
+        dbg_control_stack_cleaned: '清理后控制流栈:',
+        dbg_control_cleaned: '清理后的控制流: ',
+        dbg_calc_cond: '计算条件表达式: {expr} (行 {line})',
+        dbg_cond_result: '条件表达式结果: {result} (类型: {type})',
+        dbg_if_false_line: 'if 条件为假在第 {line} 行',
+        dbg_current_control_flow: '当前控制流: ',
+        dbg_updated_control_flow: '更新后控制流: ',
+        dbg_error_detail: '错误详情: {error}',
+        dbg_broken_block_stack: '当前循环结束后控制跳过块栈: ',
+        dbg_while_skip: 'while循环条件不满足, 跳过循环, 当前行 {line}, break 标记为 {broken}',
+        dbg_control_flow_after_loop: '当前循环结束后控制流: ',
+        dbg_for_params: 'for循环参数: {params}',
+        dbg_nested_for: '检测到内嵌for循环, 嵌套级别: {level}',
+        dbg_matching_endfor: '检测到匹配的endfor语句, 嵌套级别: {level}',
+        dbg_endfor_detected: '检测到endfor语句, 嵌套级别: {level}',
+        dbg_loop_var_exists: '循环变量已存在 (for重入), 跳过初始化',
+        dbg_for_skip: 'for循环条件不满足, 跳过循环, 当前行 {line}, break 标记为 {broken}',
+        // ===== 调试输出 (debugLog) 区域C: L3540-4600 =====
+        dbg_jump_target: '跳转目标: {targetEndTag}',
+        dbg_catch_exception: '捕获异常: {message} (行 {line})',
+        dbg_exec_assert: '执行assert语句: {params}',
+        dbg_assert_true: '断言条件为真: {expr}',
+        dbg_exec_switch: '执行switch语句: {params}',
+        dbg_switch_cond_value: 'switch语句的条件表达式值: {value}',
+        dbg_handle_case: '处理 case 语句',
+        dbg_skip_matched_switch: '跳过已匹配的switch语句: {params}, 嵌套级别: {level}',
+        dbg_nested_switch: '嵌套switch语句: {line}, 嵌套级别: {level}',
+        dbg_exit_nested_switch: '退出嵌套switch语句: {line}, 嵌套级别: {level}',
+        dbg_nested_level_zero: '嵌套层级为0, 当前行指向: {line}',
+        dbg_handle_break: '处理break语句: {line}, 嵌套级别: {level}',
+        dbg_case_value: 'case语句的条件表达式值: {value}',
+        dbg_jump_params: '参数: {params}',
+        dbg_jump_cond_false: '不满足jump条件',
+        dbg_arr_ref_assign: '数组整体赋值(引用): {newTarget} -> {rhsName}',
+        dbg_handle_assign: '处理普通变量赋值 (type: assignment) : {command}',
+        dbg_handle_assign_eq: '处理普通变量赋值 (type: =) : {command}',
+        dbg_expr_eval_err: '计算表达式时出错 \'{expr}\' 在第 {line} 行: {error}',
+        dbg_exec_purge: '执行清除指令: {params}',
+        dbg_except_matched: '匹配到except关键字',
+        dbg_except_vars: '要排除的变量: {vars}',
+        dbg_except_restored: '已将排除的变量恢复, 当前局部变量有: {vars}',
+        dbg_purge_all_done: '已清除所有局部变量, 若要清除全局变量请指定清除',
+        dbg_purge_var_num: '要被清除的第 {index} 个变量 {name}',
+        dbg_purged_var: '已清除变量 {name}, 作用域: {start}-{end}',
+        dbg_purge_done: '变量清除完成',
+        dbg_func_end_local_vars: '函数 {name} 结束标记后的局部变量表:',
+        dbg_func_void_return: '函数 {name} 是无返回值函数, 返回调用位置',
+        // ===== 调试输出 (debugLog) 区域D: L4600-6100 =====
+        dbg_return_array: '返回{scope}数组: {name} 在第{line}行',
+        dbg_return_var_value: '直接返回{scope}变量值: {name} = {value} 在第{line}行',
+        dbg_parse_expr: '解析表达式中: {tokens}',
+        dbg_parse_not_array_assign: '不是数组赋值, 恢复索引并继续正常解析: {tokens}',
+        dbg_parse_logic_or: '解析逻辑或运算中: {tokens}',
+        dbg_parse_logic_and: '解析逻辑与运算中: {tokens}',
+        dbg_parse_equality: '解析相等性运算中: {tokens}',
+        dbg_parse_relational: '解析关系运算中: {tokens}',
+        dbg_parse_additive: '解析加法和减法运算中: {tokens}',
+        dbg_parse_multiplicative: '解析乘法、除法和取模运算中: {tokens}',
+        dbg_parse_power: '解析幂运算中: {tokens}',
+        dbg_parse_unary: '解析一元运算符中: {tokens}',
+        dbg_parse_primary: '解析基本元素中: {tokens}',
+        dbg_check_token: '检查 {token} 是否为变量或函数调用',
+        dbg_detect_func_call: '检测到函数调用: {token}',
+        dbg_detect_global_prefix: '检测到全局访问前缀',
+        dbg_detect_array_access: '检测到数组元素访问: {token}',
+        dbg_parse_func_call: '解析函数调用: {funcName}',
+        dbg_parse_args: '解析参数',
+        dbg_len_arg: '执行 len 传入的 arg: {arg}',
+        dbg_arg_string_type: '参数为 string 类型',
+        dbg_arg_array_type: '参数为数组类型 {arg}',
+        dbg_copy_array: 'copy 深拷贝数组: {name} (长度 {length})',
+        dbg_exec_func_call: '执行函数调用: name: {funcName} args:{args}',
+        // ===== 调试输出 (debugLog) 区域E: L6100-8500 =====
+        dbg_calc_operation: '计算操作: {operator}, 左操作数: {left} (左类型: {leftType}), 右操作数: {right} (右类型: {rightType})',
+        dbg_array_ret_new_var: '数组返回值绑定到新变量 {name}',
+        dbg_array_ret_existing_var: '数组返回值绑定到已有数组变量 {name}',
+        dbg_result_var_undeclared: '结果变量 {name} 未声明, 添加到局部作用域',
+        dbg_get_func_return: '获取到函数返回值: {funcName}[{returnVarName}] = {returnValue}',
+        dbg_func_no_ret_default: '函数无返回值, 设置默认值: {name} = {value}',
+        dbg_nsvm_compile_failed: 'NSVM 编译失败, 回退行解释器: {error}'
     },
     en: {
         // English messages. Placeholders {name} are filled by t().
@@ -745,7 +929,191 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         // Array return value binding (handleReturnValueAssignment)
         func_no_valid_array_return: 'Function {name} did not return a valid array value',
         result_var_not_array: 'Result variable {name} is not an array type and cannot receive an array return value',
-        func_no_array_return: 'Function {name} did not return an array value'
+        func_no_array_return: 'Function {name} did not return an array value',
+        // ===== Debug output (debugLog) region A: L790-1600 =====
+        dbg_validate_type: 'Validate data type: value {value}, type {type}',
+        dbg_uninit_var_undefined: 'Uninitialized variable, storing undefined',
+        dbg_validate_default_branch: 'Data type validation reached the default branch',
+        dbg_kind_var: 'variable',
+        dbg_kind_const: 'constant',
+        dbg_kind_array: 'array',
+        dbg_last_line: 'last line',
+        dbg_try_add_var: 'Trying to add {kind}: {name}, value: {value}, type: {type}, scope: {scopeStart}-{scopeEnd}, isGlobal: {isGlobal}',
+        dbg_global_var_added: 'Global variable {name} added successfully',
+        dbg_local_var_added: 'Local variable {name} added successfully',
+        dbg_scope_global: 'global',
+        dbg_scope_local: 'local',
+        dbg_lookup_var: 'Looking up {scope}{kind}: {name} (line {line})',
+        dbg_local_var_count_prefix: 'Current local variable (incl. arrays) count: {count}, ',
+        dbg_var_counts: '{localInfo}Current global variable count: {globalCount}',
+        dbg_array_suffix: ' (array) ',
+        dbg_check_var_scope: 'Checking {name}{arraySuffix}: scope {scopeStart}-{scopeEnd}, current line {currentLine}, in range: {inScope}',
+        dbg_get_var_local: 'Getting {kind} {name} (local): value={value}, type={type}, line={line}',
+        dbg_local_var_details: 'Local variable details:',
+        dbg_global_var_details: 'Global variable details:',
+        dbg_global_len: 'length={len}',
+        dbg_global_val: 'value={val}',
+        dbg_get_var_global: 'Getting {kind} {name} (global): {scopeInfo}, type={type}, line={line}',
+        dbg_warn_var_undefined: 'Warning: variable {name} is not defined (line {line})',
+        dbg_lookup_var_info: 'Looking up {scope}variable info: {name} (line {line})',
+        dbg_get_var_info_local: 'Getting variable info {name} (local): value={value}, type={type}, scope={scopeStart}-{scopeEnd}, line={line}',
+        dbg_get_var_info_global: 'Getting variable info {name} (global): value={value}, type={type}, scope={scopeStart}-{scopeEnd}, line={line}',
+        dbg_set_var: 'Setting {scope} variable {name} (line {line})',
+        dbg_has_var: 'Looking up {scope}variable: {name} (line {line})',
+        dbg_check_var: '  Checking {name}: scope {scopeStart}-{scopeEnd} ',
+        dbg_in_scope: 'current line {currentLine} in range: {inScope}',
+        dbg_found_var: '  Found variable: {name} = {value}',
+        dbg_found_global_var: '  Found global variable: {name} = {value}',
+        dbg_func_incomplete: 'Incompletely registered function',
+        dbg_func_complete: 'Fully registered function',
+        dbg_register_func_status: '{status}: {name}',
+        dbg_register_func_scope: 'Registering function scope: {name} (line {scopeStart}-{scopeEnd})',
+        dbg_current_registered_funcs: 'Currently registered functions:',
+        dbg_find_func_for_line: 'Finding the function containing line {line}',
+        dbg_global_var_cleared: 'Cleared global variable {name}',
+        dbg_global_var_not_exists: 'Global variable {name} does not exist',
+        dbg_all_local_vars_cleared: 'Cleared all local variables',
+        dbg_clear_local_var: 'Clearing specified local variable {name}, scope: {scopeStart}-{scopeEnd}',
+        dbg_clear_local_var_except: 'Clearing all variables except the specified local variable {name}, scope: {scopeStart}-{scopeEnd}',
+        dbg_check_void_func: 'Checking whether function {name} is a void function',
+        dbg_scan_start: 'Starting to scan labels and function definitions',
+        dbg_tag_found: 'Found label: {name} (line {line})',
+        dbg_func_end_tag: 'Detected function end tag, updating function info',
+        dbg_updated_func_registry: 'Updated function registration info',
+        dbg_parse_func: 'Parsing function: {name}, startLine: {startLine}, params: {params}',
+        dbg_scan_end: 'Finished scanning labels and function definitions',
+        dbg_slot_table_built: 'Slot symbol table built: {count} local declarations',
+        // ===== Debug output (debugLog) region B: L1600-3540 =====
+        dbg_debug_level_set: 'Debug level set to: {level}',
+        dbg_doc_debug_lower: 'Debug level {docLevel} specified in document is lower than external debug level {extLevel}, ignoring in-document debug level',
+        dbg_exception_caught: 'Exception caught: {message} (line {line})',
+        dbg_program_stopped_error: 'Program stopped due to an error',
+        dbg_program_finished: 'Program finished',
+        dbg_execute_instr: 'Executing instruction {content}',
+        dbg_exception_msg: '{message}',
+        dbg_block_type: 'Code block type',
+        dbg_switch_default: 'switch branch reached default',
+        dbg_start_func_call: 'Starting function call: {params}',
+        dbg_func_info: 'Function info:',
+        dbg_func_start_passing: 'Function {funcName} starts passing parameters',
+        dbg_param_count: 'Parameter count: {count}, actual arguments:',
+        dbg_param_loop_start: 'Starting parameter passing loop',
+        dbg_func_call_args: 'Function call: {funcName}, arguments:',
+        dbg_curr_line: 'Current line: {line}',
+        dbg_loop_index: 'Loop index: {i}',
+        dbg_set_param: 'Setting parameter: {paramName} (type: {paramType})',
+        dbg_array_param_literal: 'Array parameter {paramName} bound (mode: literal, length: {length}, readonly: true)',
+        dbg_array_param_bound: 'Array parameter {paramName} bound (mode: {mode}, length: {length}, readonly: {readonly})',
+        dbg_param_bound_slot: 'Parameter {paramName} bound to frame slot {slot}',
+        dbg_param_loop_end: 'Parameter passing loop ended',
+        dbg_current_local_var_details: 'Current local variable details:',
+        dbg_func_param_done: 'Function {funcName} parameter passing completed',
+        dbg_check_params_added: 'Checking whether parameters were added correctly:',
+        dbg_param_index: 'Index of parameter {paramName}: {index}',
+        dbg_param_not_found: 'Parameter {paramName} not found',
+        dbg_check_params_detail: 'Detailed parameter check:',
+        dbg_param_detail: 'Parameter {paramName} details: index={index}, value={value}, type={type}, scope={scopeStart}-{scopeEnd}',
+        dbg_warn_param_type: 'Warning: parameter {paramName} type mismatch, expected={expected}, actual={actual}',
+        dbg_func_body_start: 'Function body start line: {line}',
+        dbg_func_scope_details: 'Function {funcName} variable scope details:',
+        dbg_return_var_scope: '  Return value variable: {name}, scope: {scopeStart}-{scopeEnd}',
+        dbg_param_scope: '  Parameter scope: {scopeStart}-{scopeEnd}',
+        dbg_control_flow_stack: 'Current control flow stack:',
+        dbg_exec_array_decl: 'Executing {scope}{kind} array declaration: {params}',
+        dbg_array_arrfill: 'Array {arrayName} initialized with arrfill',
+        dbg_array_fill_done: 'Array fill complete',
+        dbg_array_manual_init: 'Array {arrayName} initialized manually',
+        dbg_exec_op_instr: 'Executing operation instruction: {content}',
+        dbg_parse_result: 'Got parse result',
+        dbg_detect_array_assign: 'Detected array assignment target:{arrayName} index:{index}',
+        dbg_array_name: 'Obtained array name: {name}',
+        dbg_update_array_elem: 'Updating array element: {oldValue} to {newValue}',
+        dbg_exec_return: 'Executing return statement: {params}',
+        dbg_no_return_undefined: 'No return value, setting to undefined',
+        dbg_return_from_var: 'Getting return value from variable: {value}',
+        dbg_store_return: 'Storing return value to RETURN_VALUES[{funcName}][{returnValueStr}]: {returnValue}',
+        dbg_return_pool: 'Current return value pool contents: ',
+        dbg_local_vars_after_cleanup: 'Local variable table after function call cleanup',
+        dbg_control_stack_cleaned: 'Control flow stack after cleanup:',
+        dbg_control_cleaned: 'Control flow after cleanup: ',
+        dbg_calc_cond: 'Evaluating condition expression: {expr} (line {line})',
+        dbg_cond_result: 'Condition expression result: {result} (type: {type})',
+        dbg_if_false_line: 'if condition is false at line {line}',
+        dbg_current_control_flow: 'Current control flow: ',
+        dbg_updated_control_flow: 'Updated control flow: ',
+        dbg_error_detail: 'Error details: {error}',
+        dbg_broken_block_stack: 'Broken block stack after loop: ',
+        dbg_while_skip: 'while loop condition not met, skipping loop, current line {line}, break flag is {broken}',
+        dbg_control_flow_after_loop: 'Control flow after loop: ',
+        dbg_for_params: 'for loop parameters: {params}',
+        dbg_nested_for: 'Detected nested for loop, nesting level: {level}',
+        dbg_matching_endfor: 'Detected matching endfor statement, nesting level: {level}',
+        dbg_endfor_detected: 'Detected endfor statement, nesting level: {level}',
+        dbg_loop_var_exists: 'Loop variable already exists (for re-entry), skipping initialization',
+        dbg_for_skip: 'for loop condition not met, skipping loop, current line {line}, break flag is {broken}',
+        // ===== Debug output (debugLog) region C: L3540-4600 =====
+        dbg_jump_target: 'Jump target: {targetEndTag}',
+        dbg_catch_exception: 'Exception caught: {message} (line {line})',
+        dbg_exec_assert: 'Executing assert statement: {params}',
+        dbg_assert_true: 'Assertion condition is true: {expr}',
+        dbg_exec_switch: 'Executing switch statement: {params}',
+        dbg_switch_cond_value: 'Value of switch condition expression: {value}',
+        dbg_handle_case: 'Handling case statement',
+        dbg_skip_matched_switch: 'Skipping matched switch statement: {params}, nesting level: {level}',
+        dbg_nested_switch: 'Nested switch statement: {line}, nesting level: {level}',
+        dbg_exit_nested_switch: 'Exiting nested switch statement: {line}, nesting level: {level}',
+        dbg_nested_level_zero: 'Nesting level is 0, current line pointer: {line}',
+        dbg_handle_break: 'Handling break statement: {line}, nesting level: {level}',
+        dbg_case_value: 'Value of case condition expression: {value}',
+        dbg_jump_params: 'Parameters: {params}',
+        dbg_jump_cond_false: 'jump condition not met',
+        dbg_arr_ref_assign: 'Whole array assignment (reference): {newTarget} -> {rhsName}',
+        dbg_handle_assign: 'Handling normal variable assignment (type: assignment): {command}',
+        dbg_handle_assign_eq: 'Handling normal variable assignment (type: =): {command}',
+        dbg_expr_eval_err: 'Error evaluating expression \'{expr}\' at line {line}: {error}',
+        dbg_exec_purge: 'Executing purge command: {params}',
+        dbg_except_matched: 'Matched the except keyword',
+        dbg_except_vars: 'Variables to exclude: {vars}',
+        dbg_except_restored: 'Excluded variables restored, current local variables: {vars}',
+        dbg_purge_all_done: 'Cleared all local variables; specify global to clear global variables',
+        dbg_purge_var_num: 'Purge target #{index}: {name}',
+        dbg_purged_var: 'Cleared variable {name}, scope: {start}-{end}',
+        dbg_purge_done: 'Variable purge complete',
+        dbg_func_end_local_vars: 'Local variable table after the end tag of function {name}:',
+        dbg_func_void_return: 'Function {name} is a void function, returning to the call location',
+        // ===== Debug output (debugLog) region D: L4600-6100 =====
+        dbg_return_array: 'Returning{scope} array: {name} at line {line}',
+        dbg_return_var_value: 'Directly returning{scope} variable value: {name} = {value} at line {line}',
+        dbg_parse_expr: 'Parsing expression: {tokens}',
+        dbg_parse_not_array_assign: 'Not an array assignment, restoring index and continuing normal parsing: {tokens}',
+        dbg_parse_logic_or: 'Parsing logical OR operation: {tokens}',
+        dbg_parse_logic_and: 'Parsing logical AND operation: {tokens}',
+        dbg_parse_equality: 'Parsing equality operation: {tokens}',
+        dbg_parse_relational: 'Parsing relational operation: {tokens}',
+        dbg_parse_additive: 'Parsing addition and subtraction operation: {tokens}',
+        dbg_parse_multiplicative: 'Parsing multiplication, division and modulo operation: {tokens}',
+        dbg_parse_power: 'Parsing power operation: {tokens}',
+        dbg_parse_unary: 'Parsing unary operator: {tokens}',
+        dbg_parse_primary: 'Parsing primary element: {tokens}',
+        dbg_check_token: 'Checking whether {token} is a variable or a function call',
+        dbg_detect_func_call: 'Detected function call: {token}',
+        dbg_detect_global_prefix: 'Detected global access prefix',
+        dbg_detect_array_access: 'Detected array element access: {token}',
+        dbg_parse_func_call: 'Parsing function call: {funcName}',
+        dbg_parse_args: 'Parsing arguments',
+        dbg_len_arg: 'Executing len with argument: {arg}',
+        dbg_arg_string_type: 'Argument is of string type',
+        dbg_arg_array_type: 'Argument is of array type {arg}',
+        dbg_copy_array: 'copy deep copies array: {name} (length {length})',
+        dbg_exec_func_call: 'Executing function call: name: {funcName} args:{args}',
+        // ===== Debug output (debugLog) region E: L6100-8500 =====
+        dbg_calc_operation: 'Calculating operation: {operator}, left operand: {left} (left type: {leftType}), right operand: {right} (right type: {rightType})',
+        dbg_array_ret_new_var: 'Array return value bound to new variable {name}',
+        dbg_array_ret_existing_var: 'Array return value bound to existing array variable {name}',
+        dbg_result_var_undeclared: 'Result variable {name} is not declared, adding to local scope',
+        dbg_get_func_return: 'Got function return value: {funcName}[{returnVarName}] = {returnValue}',
+        dbg_func_no_ret_default: 'Function has no return value, setting default: {name} = {value}',
+        dbg_nsvm_compile_failed: 'NSVM compilation failed, falling back to line interpreter: {error}'
     }
 };
 
@@ -797,10 +1165,10 @@ interface Exception {
 class ScopeManager {
     // 验证数据类型
     static validateType(value: any, type: DataType): { isValid: boolean, convertedValue: any } {
-        DEBUG_LEVEL >= 1 && debugLog(1, () => `验证数据类型: 值 ${value === "" ? '""' : value}, 类型 ${type}`);
+        DEBUG_LEVEL >= 1 && debugLog(1, () => t('dbg_validate_type', { value: value === "" ? '""' : value, type }));
         // 未初始化变量 (无 = 值 的声明) 或 无返回值函数返回值变量: 值为 undefined
         if (value === undefined) {
-            debugLog(1, () => `未初始化变量, 存储 undefined`);
+            debugLog(1, () => t('dbg_uninit_var_undefined'));
             return { isValid: true, convertedValue: undefined };
         }
 
@@ -843,7 +1211,7 @@ class ScopeManager {
                 }
                 return { isValid: false, convertedValue: undefined };
             default:
-                debugLog(1, () => `数据类型验证到达默认分支`)
+                debugLog(1, () => t('dbg_validate_default_branch'))
                 return { isValid: true, convertedValue: value };
         }
     }
@@ -853,7 +1221,7 @@ class ScopeManager {
     // 并直接把变量登记到帧槽位 SLOT_INDEX[frameId][slot], 免后续 indexSlotVar 的 Map 查找。
     static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number, slot?: number): boolean {
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 函数参数绑定/变量声明每次调用)
-        if (DEBUG_LEVEL >= 1) debugLog(1, () => `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_try_add_var', { kind: isConst ? t('dbg_kind_const') : t('dbg_kind_var'), name, value, type, scopeStart: startLine + 1, scopeEnd: endLine === -1 ? t('dbg_last_line') : endLine + 1, isGlobal }));
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
@@ -890,7 +1258,7 @@ class ScopeManager {
                 return false;
             }
             GLOBAL_VARS[name] = variable;
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => `全局变量 ${name} 添加成功`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_global_var_added', { name }));
         } else {
             if (slot === undefined) {
                 // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
@@ -909,7 +1277,7 @@ class ScopeManager {
                 const m = SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {});
                 m[slot] = variable;
             }
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => `局部变量 ${name} 添加成功`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_local_var_added', { name }));
         }
         // 注意: 不再在此处同步槽位索引 — 由各调用方在"声明批次"结束后统一调用 rebuildSlotIndex(),
         // 避免函数参数绑定等连续多次 addVariable 时重复全量重建 (热路径开销)。
@@ -927,8 +1295,8 @@ class ScopeManager {
         let name: string = vname;
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 表达式求值/parseValue 每次变量读取都走这里)
         if (DEBUG_LEVEL >= 2) {
-            debugLog(2, () => `查找${isGlobal ? '全局' : ''}${isArray ? '数组' : '变量'}: ${name} (行 ${currentLine + 1})`);
-            debugLog(2, () => `${isGlobal ? '' : `当前局部变量 (含数组) 数量: ${LOCAL_VARS.length}, `}当前全局变量数量: ${Object.keys(GLOBAL_VARS).length}`);
+            debugLog(2, () => t('dbg_lookup_var', { scope: isGlobal ? t('dbg_scope_global') : '', kind: isArray ? t('dbg_kind_array') : t('dbg_kind_var'), name, line: currentLine + 1 }));
+            debugLog(2, () => t('dbg_var_counts', { localInfo: isGlobal ? '' : t('dbg_local_var_count_prefix', { count: LOCAL_VARS.length }), globalCount: Object.keys(GLOBAL_VARS).length }));
         }
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -943,26 +1311,26 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                if (DEBUG_LEVEL >= 3) debugLog(3, () => `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
+                if (DEBUG_LEVEL >= 3) debugLog(3, () => t('dbg_check_var_scope', { name: varInfo.name, arraySuffix: isArray ? t('dbg_array_suffix') : '', scopeStart: varInfo.startLine + 1, scopeEnd: varInfo.endLine === -1 ? t('dbg_last_line') : varInfo.endLine + 1, currentLine: currentLine + 1, inScope }));
 
                 if (varInfo.name === name && inScope) {
-                    if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
+                    if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_local', { kind: isArray ? t('dbg_kind_array') : t('dbg_kind_var'), name, value: varInfo.value, type: varInfo.type, line: currentLine + 1 }));
                     return isArray ? varInfo : varInfo.value;
                 }
             }
 
-            if (DEBUG_LEVEL >= 2) debugLog(2, () => `局部变量详情:`, LOCAL_VARS);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_local_var_details'), LOCAL_VARS);
         }
 
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `全局变量详情:`, GLOBAL_VARS);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_global_var_details'), GLOBAL_VARS);
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (全局): ${isArray ? `长度=${GLOBAL_VARS[name].arrayLength}` : `值=${GLOBAL_VARS[name].value}`}, 类型=${GLOBAL_VARS[name].type}, 行号=${currentLine + 1}`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_global', { kind: isArray ? t('dbg_kind_array') : t('dbg_kind_var'), name, scopeInfo: isArray ? t('dbg_global_len', { len: GLOBAL_VARS[name].arrayLength }) : t('dbg_global_val', { val: GLOBAL_VARS[name].value }), type: GLOBAL_VARS[name].type, line: currentLine + 1 }));
             return isArray ? GLOBAL_VARS[name] : GLOBAL_VARS[name].value;
 
         }
 
-        if (DEBUG_LEVEL >= 1) debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_warn_var_undefined', { name, line: currentLine + 1 }));
         return undefined;
     }
 
@@ -970,7 +1338,7 @@ class ScopeManager {
     static getVariableInfo(vname: string, currentLine: number, isGlobal: boolean = false): Variable | null {
         let name: string = vname;
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: executeReturn 返回值查找回退路径)
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量信息: ${name} (行 ${currentLine + 1})`);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_lookup_var_info', { scope: isGlobal ? t('dbg_scope_global') : '', name, line: currentLine + 1 }));
 
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -987,7 +1355,7 @@ class ScopeManager {
                     // 对于函数参数, 作用域从startLine到endLine
                     // 特殊处理: 如果endLine为-1, 表示这是一个函数返回值变量, 作用域从startLine到函数结束
                     if (currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
-                        if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
+                        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_info_local', { name, value: varInfo.value, type: varInfo.type, scopeStart: varInfo.startLine + 1, scopeEnd: varInfo.endLine === -1 ? t('dbg_last_line') : varInfo.endLine + 1, line: currentLine + 1 }));
                         return varInfo;
                     }
                 }
@@ -996,11 +1364,11 @@ class ScopeManager {
 
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_info_global', { name, value: GLOBAL_VARS[name].value, type: GLOBAL_VARS[name].type, scopeStart: GLOBAL_VARS[name].startLine + 1, scopeEnd: GLOBAL_VARS[name].endLine === -1 ? t('dbg_last_line') : GLOBAL_VARS[name].endLine + 1, line: currentLine + 1 }));
             return GLOBAL_VARS[name];
         }
 
-        if (DEBUG_LEVEL >= 1) debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_warn_var_undefined', { name, line: currentLine + 1 }));
         return null;
     }
 
@@ -1035,7 +1403,7 @@ class ScopeManager {
     // 设置变量值
     static setVariable(vname: string, value: any, currentLine: number, isGlobal: boolean = false): boolean {
         let name: string = vname;
-        debugLog(2, () => `设置${isGlobal ? '全局' : '局部'}变量 ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => t('dbg_set_var', { scope: isGlobal ? t('dbg_scope_global') : t('dbg_scope_local'), name, line: currentLine + 1 }));
 
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -1088,7 +1456,7 @@ class ScopeManager {
     // 检查变量是否存在
     static hasVariable(vname: string, currentLine: number, isGlobal: boolean = false): boolean {
         let name: string = vname;
-        debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量: ${name} (行 ${currentLine + 1})`);
+        debugLog(2, () => t('dbg_has_var', { scope: isGlobal ? t('dbg_scope_global') : '', name, line: currentLine + 1 }));
         let foundVar = null;
 
         if (isGlobal) {
@@ -1103,11 +1471,10 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, () => `  检查 ${varInfo.name}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} ` +
-                    `当前行${currentLine + 1} 在范围内: ${inScope}`);
+                debugLog(3, () => t('dbg_check_var', { name: varInfo.name, scopeStart: varInfo.startLine + 1, scopeEnd: varInfo.endLine === -1 ? t('dbg_last_line') : varInfo.endLine + 1 }) + t('dbg_in_scope', { currentLine: currentLine + 1, inScope }));
 
                 if (varInfo.name === name && inScope) {
-                    debugLog(2, () => `  找到变量: ${name} = ${varInfo.value === "" ? '""' : varInfo.value}`);
+                    debugLog(2, () => t('dbg_found_var', { name, value: varInfo.value === "" ? '""' : varInfo.value }));
                     foundVar = varInfo;
                     return true; // 优先返回最近声明的变量
                 }
@@ -1117,23 +1484,23 @@ class ScopeManager {
         // 检查全局变量
         const globalExists = GLOBAL_VARS.hasOwnProperty(name);
         if (globalExists) {
-            debugLog(2, () => `  找到全局变量: ${name} = ${GLOBAL_VARS[name].value === "" ? '""' : GLOBAL_VARS[name].value}`);
+            debugLog(2, () => t('dbg_found_global_var', { name, value: GLOBAL_VARS[name].value === "" ? '""' : GLOBAL_VARS[name].value }));
         }
         return globalExists;
     }
 
     // 注册函数
     static registerFunction(funcInfo: FunctionInfo): void {
-        debugLog(2, () => `${funcInfo.endLine === -1 ? '未完整注册的函数' : '已完整注册的函数'}: ${funcInfo.name}`);
-        debugLog(3, () => `注册函数作用域: ${funcInfo.name} (行 ${funcInfo.startLine + 1}-${funcInfo.endLine === -1 ? '末行' : funcInfo.endLine + 1})`);
+        debugLog(2, () => t('dbg_register_func_status', { status: funcInfo.endLine === -1 ? t('dbg_func_incomplete') : t('dbg_func_complete'), name: funcInfo.name }));
+        debugLog(3, () => t('dbg_register_func_scope', { name: funcInfo.name, scopeStart: funcInfo.startLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
 
         FUNCTIONS[funcInfo.name] = funcInfo; // 直接覆盖同名函数定义，不支持函数重载
-        debugLog(2, () => `当前注册的函数:`, FUNCTIONS);
+        debugLog(2, () => t('dbg_current_registered_funcs'), FUNCTIONS);
     }
 
     // 获取当前行所在的函数名
     static getCurrentFunction(currentLine: number): string | null {
-        debugLog(3, () => `查找第 ${currentLine + 1} 行所在函数`);
+        debugLog(3, () => t('dbg_find_func_for_line', { line: currentLine + 1 }));
         for (const funcName in FUNCTIONS) {
             const funcInfo = FUNCTIONS[funcName];
             if (currentLine >= funcInfo.startLine && currentLine <= funcInfo.endLine) {
@@ -1169,10 +1536,10 @@ class ScopeManager {
     static cleanupGlobalVariable(varName: string) {
         if (GLOBAL_VARS.hasOwnProperty(varName)) {
             delete GLOBAL_VARS[varName];
-            debugLog(1, () => `已清除全局变量 ${varName}`);
+            debugLog(1, () => t('dbg_global_var_cleared', { name: varName }));
         }
         else {
-            debugLog(1, () => `全局变量 ${varName} 不存在`);
+            debugLog(1, () => t('dbg_global_var_not_exists', { name: varName }));
         }
     }
 
@@ -1181,7 +1548,7 @@ class ScopeManager {
         if (cleanAll) {
             LOCAL_VARS = [];
             rebuildSlotIndex();
-            debugLog(1, () => `已清除所有局部变量`);
+            debugLog(1, () => t('dbg_all_local_vars_cleared'));
             return;
         }
         if (!cleanAll && exceptMode === undefined) {
@@ -1189,13 +1556,13 @@ class ScopeManager {
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && !exceptMode) {
-            debugLog(2, () => `清除指定局部变量 ${varName}, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
+            debugLog(2, () => t('dbg_clear_local_var', { name: varName, scopeStart: startLine + 1, scopeEnd: endLine === -1 ? t('dbg_last_line') : endLine + 1 }));
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => !(varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             rebuildSlotIndex();
             return;
         }
         if (!cleanAll && varName && startLine !== undefined && endLine !== undefined && exceptMode) {
-            debugLog(2, () => `清除指定局部变量 ${varName} 之外的所有变量, 作用域: ${startLine + 1}-${endLine === -1 ? '末行' : endLine + 1}`);
+            debugLog(2, () => t('dbg_clear_local_var_except', { name: varName, scopeStart: startLine + 1, scopeEnd: endLine === -1 ? t('dbg_last_line') : endLine + 1 }));
             LOCAL_VARS = LOCAL_VARS.filter(varInfo => (varInfo.name === varName && varInfo.startLine === startLine && varInfo.endLine === endLine && varInfo.frameId === frameId));
             rebuildSlotIndex();
             return;
@@ -1216,7 +1583,7 @@ class ScopeManager {
 
     // 检查函数返回类型是否为undefined (void函数) 
     static isVoidFunction(funcInfo: FunctionInfo): boolean {
-        debugLog(3, () => `检查函数 ${funcInfo.name} 是否为 void 函数`);
+        debugLog(3, () => t('dbg_check_void_func', { name: funcInfo.name }));
         return funcInfo.returnType === DataType.UNDEFINED;
     }
 }
@@ -1269,7 +1636,7 @@ class Interpreter {
 
     // 扫描标签和函数定义
     static scanTagsAndFunctions(): void {
-        debugLog(1, () => `开始扫描标签和函数定义`);
+        debugLog(1, () => t('dbg_scan_start'));
         TAGS = {};
         FUNCTIONS = {};
         let currentFunction: FunctionInfo | null = null;
@@ -1296,7 +1663,7 @@ class Interpreter {
             if (line !== ':end' && line.match(/^:([a-zA-Z_]\w*)$/)) {
                 const tagName = line.substring(1).trim();
                 TAGS[tagName] = i;
-                debugLog(1, () => `找到标签: ${tagName} (行 ${i + 1})`);
+                debugLog(1, () => t('dbg_tag_found', { name: tagName, line: i + 1 }));
                 continue;
             }
 
@@ -1311,11 +1678,11 @@ class Interpreter {
                     }
                     if (currentFunction) {
                         // 更新FUNCTION中的函数作用域信息
-                        debugLog(2, () => `检测到函数结束标记, 更新函数信息`);
+                        debugLog(2, () => t('dbg_func_end_tag'));
                         let funcInfo = currentFunction;
                         funcInfo.endLine = i;
                         ScopeManager.registerFunction(funcInfo);
-                        debugLog(2, () => `更新后的函数注册信息`, FUNCTIONS);
+                        debugLog(2, () => t('dbg_updated_func_registry'), FUNCTIONS);
                         // 检查非void函数是否包含return语句
                         if (currentFunction.returnType !== DataType.UNDEFINED) {
                             let hasReturn = false;
@@ -1430,7 +1797,7 @@ class Interpreter {
                         returnVarName: returnVarName || undefined
                         // hasReturnStatement: false
                     };
-                    debugLog(3, () => `解析函数: ${funcName}, startLine: ${i}, params: ${JSON.stringify(params)}`);
+                    debugLog(3, () => t('dbg_parse_func', { name: funcName, startLine: i, params: JSON.stringify(params) }));
                     inFunction = true;
                     ScopeManager.registerFunction(currentFunction);
                 }
@@ -1440,7 +1807,7 @@ class Interpreter {
         if (inFunction) {
             reportError(ExceptionType.SYNTAX_ERROR, t('func_unclosed_at_eof'));
         }
-        debugLog(1, () => `扫描标签和函数定义结束`);
+        debugLog(1, () => t('dbg_scan_end'));
     }
 
     // 构建局部变量静态符号表 (槽位映射): 程序加载时一次性执行。
@@ -1592,7 +1959,7 @@ class Interpreter {
                 }
             }
         }
-        debugLog(1, () => `槽位符号表构建完成: ${SLOT_DECLS.length} 个局部声明`);
+        debugLog(1, () => t('dbg_slot_table_built', { count: SLOT_DECLS.length }));
     }
 
 
@@ -1770,9 +2137,9 @@ class Interpreter {
                     const debugLevel = parseInt(debugLevelStr);
                     if (!isNaN(debugLevel) && debugLevel >= DEBUG_LEVEL) {
                         DEBUG_LEVEL = debugLevel;
-                        debugLog(1, () => `Debug级别设置为: ${DEBUG_LEVEL}`);
+                        debugLog(1, () => t('dbg_debug_level_set', { level: DEBUG_LEVEL }));
                     } else {
-                        debugLog(1, () => `文档内指定调试级别 ${debugLevel} 低于外部指定调试级别 ${DEBUG_LEVEL}, 忽略文档内调试级别`);
+                        debugLog(1, () => t('dbg_doc_debug_lower', { docLevel: debugLevel, extLevel: DEBUG_LEVEL }));
                     }
                     // 跳过debug行
                     currentLinePointer = 1;
@@ -1887,7 +2254,7 @@ class Interpreter {
                         }
                         // 记录待绑定的异常, 供 executeCatch 使用
                         PENDING_EXCEPTION = exception;
-                        debugLog(1, () => `异常被捕获: ${exception.message} (行 ${currentLinePointer + 1})`);
+                        debugLog(1, () => t('dbg_exception_caught', { message: exception.message, line: currentLinePointer + 1 }));
                         // 跳转到 catch 行, 让主循环执行 executeCatch 绑定异常变量
                         currentLinePointer = catchLine;
                         continue;
@@ -1910,9 +2277,9 @@ class Interpreter {
         }
 
         if (EXCEPTION_STACK.length > 0) {
-            debugLog(1, () => '程序因错误而停止');
+            debugLog(1, () => t('dbg_program_stopped_error'));
         } else {
-            debugLog(1, () => '程序执行完毕');
+            debugLog(1, () => t('dbg_program_finished'));
         }
     }
 
@@ -1987,7 +2354,7 @@ class Interpreter {
     }
 
     static executeCommand(stmt: LineStmt, content: string): void {
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${content}`);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_execute_instr', { content }));
         // 数字类型分发 (阶段1: 行级预编译), 替代旧"split + 首关键字字符串 switch"路径
         switch (stmt.type) {
             case StmtType.OP:
@@ -2142,7 +2509,7 @@ class Interpreter {
             ScopeManager.addVariable(varName, value, type, currentLinePointer, -1, true, isConst);
         } catch (error) {
             const exception = error as Exception;
-            debugLog(1, () => `${exception.message}`);
+            debugLog(1, () => t('dbg_exception_msg', { message: exception.message }));
             return;
         }
     }
@@ -2194,7 +2561,7 @@ class Interpreter {
             return;
         }
         const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
-        debugLog(1, () => `代码块类型`, block.type);
+        debugLog(1, () => t('dbg_block_type'), block.type);
         switch (block.type) {
             case 'if':
                 targetEndTag = 'endif';
@@ -2216,7 +2583,7 @@ class Interpreter {
                 break;
             default:
                 targetEndTag = '';
-                debugLog(1, () => 'switch 分支 运行至 default');
+                debugLog(1, () => t('dbg_switch_default'));
                 break;
         }
         let j = currentLinePointer + 1;
@@ -2249,7 +2616,7 @@ class Interpreter {
             ScopeManager.addVariable(varName, value, type, startLine, endLine, false, isConst);
         } catch (error) {
             const exception = error as Exception;
-            debugLog(1, () => exception.message);
+            debugLog(1, () => t('dbg_exception_msg', { message: exception.message }));
             return;
         }
         rebuildSlotIndex(); // 槽位索引同步 (局部变量声明批次完成)
@@ -2257,7 +2624,7 @@ class Interpreter {
 
     // 执行函数调用
     static executeCall(params: string): void {
-        debugLog(1, () => `开始执行函数调用: ${params}`);
+        debugLog(1, () => t('dbg_start_func_call', { params }));
         // 匹配格式: 函数名(参数1, 参数2, ...) -> 结果变量 或 函数名(参数1, 参数2, ...)
         // 用 indexOf('->') 预判分支, 只跑一个正则 (热路径: 每次调用都做)
         let funcName: string;
@@ -2295,7 +2662,7 @@ class Interpreter {
         }
 
         const funcInfo = FUNCTIONS[funcName];
-        debugLog(2, () => `函数信息:`, funcInfo);
+        debugLog(2, () => t('dbg_func_info'), funcInfo);
 
         // 检查返回值变量
         if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) {
@@ -2409,18 +2776,18 @@ class Interpreter {
         const frameId = ++CALL_FRAME_ID;
 
         // 传递参数 - 修正行号范围
-        debugLog(2, () => `函数 ${funcName} 开始传递参数`);
-        debugLog(2, () => `函数信息:`, funcInfo);
-        debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
-        debugLog(2, () => `开始参数传递循环`);
-        debugLog(2, () => `函数调用: ${funcName}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        debugLog(2, () => t('dbg_func_start_passing', { funcName }));
+        debugLog(2, () => t('dbg_func_info'), funcInfo);
+        debugLog(2, () => t('dbg_param_count', { count: funcInfo.params.length }), args);
+        debugLog(2, () => t('dbg_param_loop_start'));
+        debugLog(2, () => t('dbg_func_call_args', { funcName }), args, () => t('dbg_curr_line', { line: currentLinePointer + 1 }));
         // 记录本帧首个局部变量位置 (返回时截断 LOCAL_VARS 到该位置清理本帧变量)
         const callVarStart = LOCAL_VARS.length;
         for (let i = 0; i < funcInfo.params.length; i++) {
-            debugLog(3, () => `循环索引: ${i}`);
+            debugLog(3, () => t('dbg_loop_index', { i }));
             const param = funcInfo.params[i];
             const paramName = param.name;
-            debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
+            debugLog(2, () => t('dbg_set_param', { paramName, paramType: param.type }));
 
             if (param.type === DataType.ARRAY) {
                 // 数组参数: 绑定引用/副本/字面量
@@ -2455,7 +2822,7 @@ class Interpreter {
                     };
                     LOCAL_VARS.push(literalVar);
                     (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
-                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    debugLog(2, () => t('dbg_array_param_literal', { paramName, length: literalElements.length }));
                     continue;
                 }
 
@@ -2486,16 +2853,16 @@ class Interpreter {
                 };
                 LOCAL_VARS.push(paramVar);
                 (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
-                debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArg.mode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                debugLog(2, () => t('dbg_array_param_bound', { paramName, mode: arrArg.mode, length: arrVar.arrayLength, readonly: paramVar.isReadonlyArray }));
                 continue;
             }
 
             const argValue = args[i] !== undefined ? args[i] : null;
             // 槽位绑定: 参数槽位 = 参数顺序索引 (与静态建表一致), 跳过线性查重 + 免后续 indexSlotVar
             ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
-            debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
+            debugLog(2, () => t('dbg_param_bound_slot', { paramName, slot: i }));
         }
-        debugLog(2, () => `参数传递循环结束`);
+        debugLog(2, () => t('dbg_param_loop_end'));
 
         // 如果是有返回值的函数, 在调用位置声明返回值变量
         // 设置currentLinePointer为函数体开始行, 准备执行函数
@@ -2523,54 +2890,54 @@ class Interpreter {
                 ScopeManager.addVariable(returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
             }
         }
-        debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
-        debugLog(2, () => `函数 ${funcName} 参数传递完成`);
+        debugLog(3, () => t('dbg_current_local_var_details'), LOCAL_VARS);
+        debugLog(2, () => t('dbg_func_param_done', { funcName }));
 
         // 额外的调试信息, 检查参数是否真的被添加
-        debugLog(3, () => `检查参数是否正确添加:`);
+        debugLog(3, () => t('dbg_check_params_added'));
         for (let i = 0; i < funcInfo.params.length; i++) {
             const paramName = funcInfo.params[i].name;
             let found = false;
             for (let j = 0; j < LOCAL_VARS.length; j++) {
                 if (LOCAL_VARS[j].name === paramName) {
-                    debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
+                    debugLog(3, () => t('dbg_param_index', { paramName, index: j }));
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                debugLog(3, () => `参数 ${paramName} 未找到`);
+                debugLog(3, () => t('dbg_param_not_found', { paramName }));
             }
         }
 
         // 进一步调试: 检查每个参数在LOCAL_VARS中的详细信息
-        debugLog(3, () => `详细检查参数:`);
+        debugLog(3, () => t('dbg_check_params_detail'));
         for (let i = 0; i < funcInfo.params.length; i++) {
             const paramName = funcInfo.params[i].name;
             const paramType = funcInfo.params[i].type;
             let paramFound = false;
             for (let j = 0; j < LOCAL_VARS.length; j++) {
                 if (LOCAL_VARS[j].name === paramName) {
-                    debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
+                    debugLog(3, () => t('dbg_param_detail', { paramName, index: j, value: LOCAL_VARS[j].value, type: LOCAL_VARS[j].type, scopeStart: LOCAL_VARS[j].startLine + 1, scopeEnd: LOCAL_VARS[j].endLine === -1 ? t('dbg_last_line') : LOCAL_VARS[j].endLine + 1 }));
                     // 验证类型是否匹配
                     if (LOCAL_VARS[j].type !== paramType) {
-                        debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
+                        debugLog(3, () => t('dbg_warn_param_type', { paramName, expected: paramType, actual: LOCAL_VARS[j].type }));
                     }
                     paramFound = true;
                     break;
                 }
             }
             if (!paramFound) {
-                debugLog(3, () => `参数 ${paramName} 未找到`);
+                debugLog(3, () => t('dbg_param_not_found', { paramName }));
             }
         }
 
         currentLinePointer = funcInfo.startLine; // 主循环会自动加一执行函数体内部的代码
-        debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
+        debugLog(2, () => t('dbg_func_body_start', { line: functionBodyStartLine + 1 }));
         // 添加作用域调试信息
-        debugLog(2, () => `函数 ${funcName} 变量作用域详情:`);
-        debugLog(2, () => `  返回值变量: ${returnVarName}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-        debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        debugLog(2, () => t('dbg_func_scope_details', { funcName }));
+        debugLog(2, () => t('dbg_return_var_scope', { name: returnVarName, scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
+        debugLog(2, () => t('dbg_param_scope', { scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
         CONTROL_FLOW_STACK.push({
             type: 'function',
             funcName: funcInfo.name,
@@ -2581,12 +2948,12 @@ class Interpreter {
             frameId: frameId,
             frameVarStart: callVarStart
         });
-        debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
+        debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
     }
 
     // 执行数组声明
     static executeArrayDeclaration(params: string, isGlobal: boolean, isConst: boolean): void {
-        debugLog(3, () => `执行${isGlobal ? '全局' : '局部'}${isConst ? '常量' : '变量'}数组声明: ${params}`);
+        debugLog(3, () => t('dbg_exec_array_decl', { scope: isGlobal ? t('dbg_scope_global') : t('dbg_scope_local'), kind: isConst ? t('dbg_kind_const') : t('dbg_kind_var'), params }));
         // 匹配格式: arrName[arrLength]:type = {...} 或 arrName[arrLength]:type = arrfill
         const arrayMatch = params.match(/^([a-zA-Z0-9_]+)\[([^\]]+)\]:([a-zA-Z0-9_]+)\s*=\s*(.+)$/);
         if (!arrayMatch) {
@@ -2643,7 +3010,7 @@ class Interpreter {
 
         // 处理arrfill关键字
         if (initValue === 'arrfill') {
-            debugLog(2, () => `数组${arrayName}使用arrfill初始化`);
+            debugLog(2, () => t('dbg_array_arrfill', { arrayName }));
             let fillValue: any;
             switch (elementType) {
                 case DataType.NUMBER:
@@ -2674,9 +3041,9 @@ class Interpreter {
                     type: elementType
                 });
             }
-            debugLog(2, () => `数组填充完毕`);
+            debugLog(2, () => t('dbg_array_fill_done'));
         } else if (initValue.startsWith('[') && initValue.endsWith(']')) {
-            debugLog(2, () => `数组${arrayName}使用手动初始化`);
+            debugLog(2, () => t('dbg_array_manual_init', { arrayName }));
             // 处理手动初始化
             const elementsStr = initValue.substring(1, initValue.length - 1).trim();
             let elementValues: string[] = [];
@@ -2781,7 +3148,7 @@ class Interpreter {
     // 错误消息/调试输出/作用域检查与注册时机逐字节一致)
     static executeArrayDeclarationCompiled(meta: NSVMArrayDeclMeta): void {
         const { arrayName, lengthExpr, elementTypeStr, initValue, elementValues, isGlobal, isConst, params } = meta;
-        debugLog(3, () => `执行${isGlobal ? '全局' : '局部'}${isConst ? '常量' : '变量'}数组声明: ${params}`);
+        debugLog(3, () => t('dbg_exec_array_decl', { scope: isGlobal ? t('dbg_scope_global') : t('dbg_scope_local'), kind: isConst ? t('dbg_kind_const') : t('dbg_kind_var'), params }));
 
         // 获取数组长度
         let arrayLength: number;
@@ -2820,7 +3187,7 @@ class Interpreter {
 
         if (elementValues === null) {
             // 处理arrfill关键字
-            debugLog(2, () => `数组${arrayName}使用arrfill初始化`);
+            debugLog(2, () => t('dbg_array_arrfill', { arrayName }));
             let fillValue: any;
             switch (elementType) {
                 case DataType.NUMBER:
@@ -2851,9 +3218,9 @@ class Interpreter {
                     type: elementType
                 });
             }
-            debugLog(2, () => `数组填充完毕`);
+            debugLog(2, () => t('dbg_array_fill_done'));
         } else {
-            debugLog(2, () => `数组${arrayName}使用手动初始化`);
+            debugLog(2, () => t('dbg_array_manual_init', { arrayName }));
             // 检查元素数量是否匹配
             if (elementValues.length !== arrayLength) {
                 reportError(ExceptionType.RANGE_ERROR, t('array_init_count_mismatch', {actual: elementValues.length, expected: arrayLength}));
@@ -2948,12 +3315,12 @@ class Interpreter {
     // (BISECT: SETARRAY case 内联完整实现时 2048 端到端慢 ~20%, 与 GETARRAY 同因)。
     static executeArrayAssignmentCompiled(meta: NSVMSetArrayMeta, currentLine: number): void {
         const { tree, nTokens, content } = meta;
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${content}`);
-        debugLog(1, () => `执行操作指令: ${content}`);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_execute_instr', { content }));
+        debugLog(1, () => t('dbg_exec_op_instr', { content }));
         const result = ExpressionEvaluator.evalTreeWithContext(tree, nTokens, currentLine);
-        debugLog(1, () => `获得解析结果`);
+        debugLog(1, () => t('dbg_parse_result'));
         const { target, value, binding } = result as { target: { arrayName: string, index: number }, value: any, binding?: { frameKey: string, slot: number } };
-        debugLog(1, () => `侦测到数组赋值 目标:${target.arrayName} 索引:${target.index}`);
+        debugLog(1, () => t('dbg_detect_array_assign', { arrayName: target.arrayName, index: target.index }));
         // 处理 global. 前缀 (与整体赋值分支一致)
         let targetName: string = target.arrayName;
         let isGlobal: boolean = false;
@@ -2975,7 +3342,7 @@ class Interpreter {
         if (!arrayVar) {
             throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLine } as Exception;
         }
-        debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
+        debugLog(1, () => t('dbg_array_name', { name: arrayVar.name }));
 
         if (arrayVar.type !== DataType.ARRAY) {
             throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLine } as Exception;
@@ -3011,7 +3378,7 @@ class Interpreter {
         }
 
         // 更新数组元素
-        debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
+        debugLog(2, () => t('dbg_update_array_elem', { oldValue: arrayVar.arrayElements![target.index].value, newValue: validation.convertedValue }));
         arrayVar.arrayElements![target.index].value = validation.convertedValue;
     }
 
@@ -3050,7 +3417,7 @@ class Interpreter {
 
     // 执行返回语句
     static executeReturn(params: string): void {
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `执行返回语句: ${params}`);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_exec_return', { params }));
         // 根据用户需求修改返回值处理逻辑
         // return语句后只能是单个变量
         const returnValueStr = params.trim();
@@ -3106,7 +3473,7 @@ class Interpreter {
                         return;
                     }
                     returnValue = undefined;
-                    if (DEBUG_LEVEL >= 2) debugLog(2, () => (`无返回值, 设置为undefined`));
+                    if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_no_return_undefined'));
                     return;
                 }
                 // 数组返回: 捕获整个数组结构引用 (含 arrayElements), 标量返回捕获值
@@ -3115,7 +3482,7 @@ class Interpreter {
                 } else {
                     returnValue = returnVarInfo.value;
                 }
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `从变量获取返回值: ${returnValue}`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_return_from_var', { value: returnValue }));
 
                 // 将返回值存储到RETURN_VALUES池中并做好标记
                 if (!RETURN_VALUES.hasOwnProperty(block.funcName)) {
@@ -3134,8 +3501,8 @@ class Interpreter {
                     return;
                 }
                 if (DEBUG_LEVEL >= 2) {
-                    debugLog(2, () => `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
-                    debugLog(2, () => `当前返回值池内容: `, RETURN_VALUES);
+                    debugLog(2, () => t('dbg_store_return', { funcName: block.funcName, returnValueStr, returnValue }));
+                    debugLog(2, () => t('dbg_return_pool'), RETURN_VALUES);
                 }
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
@@ -3145,17 +3512,17 @@ class Interpreter {
                 LOCAL_VARS.length = block.frameVarStart;
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长 (内存 + 帧缓存失效)
                 delete SLOT_INDEX[String(block.frameId)];
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数调用清理后的局部变量表`, LOCAL_VARS);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_local_vars_after_cleanup'), LOCAL_VARS);
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
                 // 注意: 用调用行 (block.callFrom) 而非当前 return 行作为结果变量作用域起点,
                 // 否则递归时 return 行晚于调用点, 结果变量会被误判为"未声明"而创建隐式重复变量, 遮蔽静态声明。
                 handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, block.callFrom);
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `清理后控制流栈:`, CONTROL_FLOW_STACK);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_control_stack_cleaned'), CONTROL_FLOW_STACK);
                 currentLinePointer = block.callFrom;
                 break; // 停止遍历, 防止处理残留函数帧
             } else {
                 CONTROL_FLOW_STACK.pop();
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_control_cleaned'), CONTROL_FLOW_STACK);
             }
         }
 
@@ -3191,10 +3558,10 @@ class Interpreter {
         // 提取括号内的表达式
         const conditionExpr = trimmedParams.substring(1, trimmedParams.length - 1);
 
-        debugLog(2, () => `计算条件表达式: ${conditionExpr} (行 ${currentLinePointer + 1})`);
+        debugLog(2, () => t('dbg_calc_cond', { expr: conditionExpr, line: currentLinePointer + 1 }));
         try {
             const condition = Interpreter.evaluateExpression(conditionExpr);
-            debugLog(2, () => `条件表达式结果: ${condition} (类型: ${typeof condition})`);
+            debugLog(2, () => t('dbg_cond_result', { result: condition, type: typeof condition }));
 
             // 检查条件表达式的返回值是否为布尔类型
             if (typeof condition !== 'boolean') {
@@ -3209,7 +3576,7 @@ class Interpreter {
 
             if (!condition) {
                 // 跳过if块
-                debugLog(1, () => `if 条件为假在第 ${currentLinePointer + 1} 行`);
+                debugLog(1, () => t('dbg_if_false_line', { line: currentLinePointer + 1 }));
                 let nestedLevel = 1;
                 let i = currentLinePointer + 1;
                 while (i < programLines.length && nestedLevel > 0) {
@@ -3220,11 +3587,11 @@ class Interpreter {
                         nestedLevel--;
                         if (nestedLevel === 0) {
                             currentLinePointer = i; // 不减1是因为主循环会加1跳过 execElse 避免无法正常执行 else 块
-                            debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
+                            debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
                             if (line === 'endif') {
                                 CONTROL_FLOW_STACK.pop();
                             }
-                            debugLog(2, () => `更新后控制流: `, CONTROL_FLOW_STACK);
+                            debugLog(2, () => t('dbg_updated_control_flow'), CONTROL_FLOW_STACK);
                             break;
                         }
                     }
@@ -3237,7 +3604,7 @@ class Interpreter {
                 throw error;
             }
             reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
-            debugLog(1, () => `错误详情: ${error}`);
+            debugLog(1, () => t('dbg_error_detail', { error }));
         }
     }
 
@@ -3283,7 +3650,7 @@ class Interpreter {
             const brokenexists = CONTROL_FLOW_BROKEN_BLOCK_STACK.length > 0 && CONTROL_FLOW_BROKEN_BLOCK_STACK.some(item =>
                 item.type === 'while' && item.start === currentLinePointer
             );
-            DEBUG_LEVEL >= 2 && debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+            DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
             const condition = Interpreter.evaluateExpression(conditionExpr) && !brokenexists;
 
@@ -3293,7 +3660,7 @@ class Interpreter {
                 return;
             }
 
-            DEBUG_LEVEL >= 2 && debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
+            DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
             // 先将while循环信息压栈, 防止首次循环条件不满足。
             // exists 判断: 栈顶 O(1) 快路径 (while 帧在循环体执行时即栈顶), 不命中再回退线性扫描,
             // 且本次结果供条件真假两个分支共用, 去掉原 else 分支中重复的第二次扫描。
@@ -3314,7 +3681,7 @@ class Interpreter {
             }
 
             if (!condition) {
-                DEBUG_LEVEL >= 2 && debugLog(2, () => `while循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`)
+                DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_while_skip', { line: currentLinePointer + 1, broken: brokenexists }))
 
                 // 跳过while块
                 let nestedLevel = 1;
@@ -3330,7 +3697,7 @@ class Interpreter {
                             CONTROL_FLOW_STACK.pop();
                             if (brokenexists) {
                                 CONTROL_FLOW_BROKEN_BLOCK_STACK.pop();
-                                DEBUG_LEVEL >= 2 && debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                                DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
                             }
                             break;
                         }
@@ -3345,12 +3712,12 @@ class Interpreter {
             }
             reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
         }
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_control_flow_after_loop'), CONTROL_FLOW_STACK);
     }
 
     // 执行endwhl语句
     static executeEndWhile(): void {
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
         // 栈顶快路径: endwhl 执行时本循环的 while 帧必然在栈顶 (内层块均已弹栈), O(1) 回跳,
         // 免去向后逐行扫描 (programLines[i].trim() 每行分配字符串)。
         const topBlock = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -3379,7 +3746,7 @@ class Interpreter {
     // 执行for语句
     static executeFor(params: string): void {
         params = params.replace(/^\(|\)$/g, '');
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `for循环参数: ${params}`);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_for_params', { params }));
         // 匹配格式: local 变量名:类型 = 初始值; 条件; 更新表达式
         let match = params.match(/^local\s+([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)\s*;\s*(.+)\s*;\s*(.+)$/);
 
@@ -3402,15 +3769,15 @@ class Interpreter {
             for (let i = currentLinePointer + 1; i < programLines.length; i++) {
                 if (programLines[i].trim().split(/\s+/)[0] === 'for') {
                     nestedLevel++;
-                    debugLog(2, () => `检测到内嵌for循环, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => t('dbg_nested_for', { level: nestedLevel }));
                 } else if (programLines[i].trim() === 'endfor') {
                     if (nestedLevel === 1) {
-                        debugLog(2, () => `检测到匹配的endfor语句, 嵌套级别: ${nestedLevel}`);
+                        debugLog(2, () => t('dbg_matching_endfor', { level: nestedLevel }));
                         endForLine = i;
                         break;
                     }
                     nestedLevel--;
-                    debugLog(2, () => `检测到endfor语句, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => t('dbg_endfor_detected', { level: nestedLevel }));
                 }
             }
             // 初始化循环变量
@@ -3435,7 +3802,7 @@ class Interpreter {
 
             if (conflictForStart === currentLinePointer) {
                 // 当前 for 自身重入 (如 jump 跳回): 复用循环变量, 跳过初始化
-                debugLog(2, () => `循环变量已存在 (for重入), 跳过初始化`);
+                debugLog(2, () => t('dbg_loop_var_exists'));
             } else {
                 // 创建循环变量 (若与全局变量同名则自动遮蔽, 局部查找优先)
                 ScopeManager.addVariable(varName, initialValue, type, currentLinePointer, endForLine, false);
@@ -3448,7 +3815,7 @@ class Interpreter {
                 item.updateExpr === updateExpr &&
                 item.varName === varName
             );
-            debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+            debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
             // 评估条件
             const result = Interpreter.evaluateExpression(condition) && !brokenexists;
@@ -3459,7 +3826,7 @@ class Interpreter {
                 return;
             }
 
-            debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
+            debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
             // 先将for循环信息压栈, 防止首次循环条件不满足
             // 检查CONTROL_FLOW_STACK中是否已存在相同的for循环信息
             const exists = CONTROL_FLOW_STACK.some(item =>
@@ -3479,7 +3846,7 @@ class Interpreter {
             }
 
             if (!result) {
-                debugLog(2, () => `for循环条件不满足, 跳过循环, 当前行 ${currentLinePointer + 1}, break 标记为 ${brokenexists}`);
+                debugLog(2, () => t('dbg_for_skip', { line: currentLinePointer + 1, broken: brokenexists }));
                 // 跳过for块
                 let nestedLevel = 1;
                 let i = currentLinePointer + 1;
@@ -3494,7 +3861,7 @@ class Interpreter {
                             CONTROL_FLOW_STACK.pop();
                             if (brokenexists) {
                                 CONTROL_FLOW_BROKEN_BLOCK_STACK.pop();
-                                debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                                debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
                             }
                             const varInfo = ScopeManager.getVariableInfo(varName, currentLinePointer);
                             if (varInfo) {
@@ -3532,12 +3899,12 @@ class Interpreter {
             // console.error(`错误: for循环初始化失败`);
             throw { type: ExceptionType.LOOP_INIT_ERROR, message: t('for_init_failed'), lineNumber: currentLinePointer } as Exception;
         }
-        debugLog(2, () => `当前循环结束后控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => t('dbg_control_flow_after_loop'), CONTROL_FLOW_STACK);
     }
 
     // 执行endfor语句
     static executeEndFor(): void {
-        debugLog(2, () => `当前控制流: `, CONTROL_FLOW_STACK);
+        debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
         // 执行更新表达式
         if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'for') {
             const forInfo = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
@@ -3597,8 +3964,8 @@ class Interpreter {
                         reportError(ExceptionType.SYNTAX_ERROR, t('break_context_unsupported'));
                         return;
                 }
-                debugLog(2, () => `跳转目标: ${targetEndTag}`);
-                debugLog(2, () => `当前循环结束后控制跳过块栈: `, CONTROL_FLOW_BROKEN_BLOCK_STACK);
+                debugLog(2, () => t('dbg_jump_target', { targetEndTag }));
+                debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
                 // 4. 跳到对应的结束标记
                 let i = currentLinePointer + 1;
@@ -3624,7 +3991,7 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
+                debugLog(2, () => t('dbg_control_cleaned'), CONTROL_FLOW_STACK);
             }
         }
     }
@@ -3655,7 +4022,7 @@ class Interpreter {
                         reportError(ExceptionType.SYNTAX_ERROR, t('continue_context_unsupported'));
                         return;
                 }
-                debugLog(2, () => `跳转目标: ${targetEndTag}`);
+                debugLog(2, () => t('dbg_jump_target', { targetEndTag }));
 
                 // 4. 跳到对应的结束标记
                 let i = currentLinePointer + 1;
@@ -3681,7 +4048,7 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('matching_end_tag_not_found', {tag: targetEndTag}));
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
+                debugLog(2, () => t('dbg_control_cleaned'), CONTROL_FLOW_STACK);
             }
         }
 
@@ -3763,7 +4130,7 @@ class Interpreter {
                 ScopeManager.addVariable(errorName, exception.message, DataType.STRING, currentLinePointer, endtryLine, false, false);
                 rebuildSlotIndex(); // 槽位索引同步 (catch 异常变量已绑定)
             }
-            debugLog(1, () => `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
+            debugLog(1, () => t('dbg_catch_exception', { message: exception.message, line: exception.lineNumber + 1 }));
 
             // 记录catch块位置 (供endtry清理)
             EXCEPTION_STACK.push({
@@ -3846,7 +4213,7 @@ class Interpreter {
 
     // 执行assert语句
     static executeAssert(params: string): void {
-        debugLog(1, () => `执行assert语句: ${params}`);
+        debugLog(1, () => t('dbg_exec_assert', { params }));
         // 解析参数, 只支持一种格式: 
         // assert (condition)
         // "assertion failure message"
@@ -3882,7 +4249,7 @@ class Interpreter {
                     lineNumber: currentLinePointer
                 } as Exception;
             } else {
-                debugLog(1, () => `断言条件为真: ${conditionExpr}`);
+                debugLog(1, () => t('dbg_assert_true', { expr: conditionExpr }));
                 // 跳过断言体
                 currentLinePointer += 2;
             }
@@ -3901,10 +4268,10 @@ class Interpreter {
     // 执行switch语句
     static executeSwitch(params: string): void {
         params = params.replace(/^\(|\)$/g, '');
-        debugLog(1, () => `执行switch语句: ${params}`);
+        debugLog(1, () => t('dbg_exec_switch', { params }));
         try {
             const condition = Interpreter.evaluateExpression(params);
-            debugLog(1, () => `switch语句的条件表达式值: ${condition}`);
+            debugLog(1, () => t('dbg_switch_cond_value', { value: condition }));
 
             // 检查类型是否为int或string
             let typeError = false;
@@ -3956,7 +4323,7 @@ class Interpreter {
 
     // 执行case语句
     static executeCase(params: string): void {
-        debugLog(1, () => `处理 case 语句`);
+        debugLog(1, () => t('dbg_handle_case'));
         // 检查是否在switch块内
         if (CONTROL_FLOW_STACK.length === 0 || CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type !== 'switch') {
             reportError(ExceptionType.SYNTAX_ERROR, t('case_outside_switch'));
@@ -3970,22 +4337,22 @@ class Interpreter {
             // 跳过case块直到break或endswc
             let nestedLevel = 1;
             let i = currentLinePointer + 1;
-            debugLog(2, () => `跳过已匹配的switch语句: ${params}, 嵌套级别: ${nestedLevel}`);
+            debugLog(2, () => t('dbg_skip_matched_switch', { params, level: nestedLevel }));
             while (i < programLines.length && nestedLevel > 0) {
                 const line = programLines[i].trim();
                 if (line.toLowerCase().startsWith('switch ')) {
                     nestedLevel++;
-                    debugLog(2, () => `嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => t('dbg_nested_switch', { line, level: nestedLevel }));
                 } else if (line === 'endswc') {
                     nestedLevel--;
-                    debugLog(2, () => `退出嵌套switch语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => t('dbg_exit_nested_switch', { line, level: nestedLevel }));
                     if (nestedLevel === 0) {
                         currentLinePointer = i - 1; // 减1是因为主循环会加1并执行 endSwitch 清理流程栈
-                        debugLog(2, () => `嵌套层级为0, 当前行指向: ${currentLinePointer}`);
+                        debugLog(2, () => t('dbg_nested_level_zero', { line: currentLinePointer }));
                         break;
                     }
                 } else if (line === 'break') {
-                    debugLog(2, () => `处理break语句: ${line}, 嵌套级别: ${nestedLevel}`);
+                    debugLog(2, () => t('dbg_handle_break', { line, level: nestedLevel }));
                     if (nestedLevel === 1) { // 只有在当前switch层级才处理break
                         currentLinePointer = i - 1; // 减1是因为主循环会加1并执行 break 跳出当前 switch 块
                         break;
@@ -3999,7 +4366,7 @@ class Interpreter {
         // 如果在未匹配的块中
         try {
             const caseValue = Interpreter.evaluateExpression(params);
-            debugLog(2, () => `case语句的条件表达式值: ${caseValue}`);
+            debugLog(2, () => t('dbg_case_value', { value: caseValue }));
 
             // 检查类型是否与switch条件类型匹配
             if (switchInfo.type === 'switch' && typeof caseValue !== typeof switchInfo.condition) {
@@ -4105,7 +4472,7 @@ class Interpreter {
 
     // 执行跳转指令 (严格格式: jump (condition) :tagname, 仅支持标签跳转) 
     static executeJump(params: string): void {
-        debugLog(1, () => `参数: ${params}`);
+        debugLog(1, () => t('dbg_jump_params', { params }));
         // 1. 格式校验
         const match = params.match(/^\(([^)]+)\)\s*:\s*([a-zA-Z_]\w*)$/);
         if (!match) {
@@ -4136,7 +4503,7 @@ class Interpreter {
 
         // 3. 条件不满足时直接返回
         if (!condition) {
-            debugLog(2, () => `不满足jump条件`);
+            debugLog(2, () => t('dbg_jump_cond_false'));
             return;
         }
 
@@ -4151,15 +4518,15 @@ class Interpreter {
 
     // 执行操作指令
     static executeOperation(command: string): void {
-        DEBUG_LEVEL >= 1 && debugLog(1, () => `执行操作指令: ${command}`);
+        DEBUG_LEVEL >= 1 && debugLog(1, () => t('dbg_exec_op_instr', { content: command }));
 
         // 使用表达式解析器来处理赋值操作
         try {
             const result = ExpressionEvaluator.evaluate(command.trim(), currentLinePointer);
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获得解析结果`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_parse_result'));
             // 检查是否是数组元素赋值
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
-                if (DEBUG_LEVEL >= 1) debugLog(1, () => `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_detect_array_assign', { arrayName: result.target.arrayName, index: result.target.index }));
                 const { target, value, binding } = result;
                 // 处理 global. 前缀 (与整体赋值分支一致)
                 let targetName: string = target.arrayName;
@@ -4182,7 +4549,7 @@ class Interpreter {
                 if (!arrayVar) {
                     throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
-                if (DEBUG_LEVEL >= 1) debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_array_name', { name: arrayVar.name }));
 
                 if (arrayVar.type !== DataType.ARRAY) {
                     throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLinePointer } as Exception;
@@ -4218,12 +4585,12 @@ class Interpreter {
                 }
 
                 // 更新数组元素
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_update_array_elem', { oldValue: arrayVar.arrayElements![target.index].value, newValue: validation.convertedValue }));
                 arrayVar.arrayElements![target.index].value = validation.convertedValue;
                 // ScopeManager.setVariable(target.arrayName, arrayVar, currentLinePointer);
                 return;
             } else if (result && typeof result === 'object' && result.type === 'assignment') {
-                if (DEBUG_LEVEL >= 1) debugLog(1, () => `处理普通变量赋值 (type: assignment) : ${command}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_handle_assign', { command }));
                 // 处理普通变量赋值
                 const { target, value, binding } = result;
                 let newTarget: string = target;
@@ -4266,7 +4633,7 @@ class Interpreter {
                             if (rhsVar.isReadonlyArray) {
                                 lhsVar.isReadonlyArray = true;
                             }
-                            if (DEBUG_LEVEL >= 1) debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_arr_ref_assign', { newTarget, rhsName: rhsVar.name }));
                             return;
                         }
                         Interpreter.checkLoopVarWritable(newTarget);
@@ -4324,7 +4691,7 @@ class Interpreter {
                         if (rhsVar.isReadonlyArray) {
                             lhsVar.isReadonlyArray = true;
                         }
-                        debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                        debugLog(1, () => t('dbg_arr_ref_assign', { newTarget, rhsName: rhsVar.name }));
                     } else {
                         Interpreter.checkLoopVarWritable(newTarget);
                         ScopeManager.setVariable(newTarget, value, currentLinePointer, isGlobal);
@@ -4338,7 +4705,7 @@ class Interpreter {
                     } as Exception;
                 }
             } else if (command.includes('=')) {
-                debugLog(1, () => `处理普通变量赋值 (type: =) : ${command}`);
+                debugLog(1, () => t('dbg_handle_assign_eq', { command }));
                 // 手动切分: 避免 split('=') + map(trim) 的数组分配
                 const eqIdx = command.indexOf('=');
                 let newLhs = command.substring(0, eqIdx).trim();
@@ -4403,7 +4770,7 @@ class Interpreter {
             if (e && typeof e === 'object' && (e as Exception).type !== undefined) {
                 throw e;
             }
-            debugLog(1, () => `计算表达式时出错 '${expr}' 在第 ${currentLinePointer + 1} 行: ${e}`);
+            debugLog(1, () => t('dbg_expr_eval_err', { expr, line: currentLinePointer + 1, error: e }));
             // 重新抛出错误, 以便调用者可以处理
             throw {
                 type: ExceptionType.UNKNOWN_ERROR,
@@ -4415,7 +4782,7 @@ class Interpreter {
 
     // 执行清除指令
     static executePurge(params: string): void {
-        debugLog(1, () => `执行清除指令: ${params}`);
+        debugLog(1, () => t('dbg_exec_purge', { params }));
         // 判断是否包含except
         if (params.includes('except')) {
             const match = params.match(/^(.*?)\s+except\s+(.*)$/);
@@ -4423,14 +4790,14 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('except_format_error'));
                 return;
             }
-            debugLog(1, () => `匹配到except关键字`);
+            debugLog(1, () => t('dbg_except_matched'));
             const beforeExcept = match[1].trim().split(/\s+/);
             const afterExcept = match[2].trim().split(/\s+/);
             if (beforeExcept.length !== 1 || beforeExcept[0] !== 'all') {
                 reportError(ExceptionType.SYNTAX_ERROR, t('except_requires_all'));
                 return;
             } else if (beforeExcept.length === 1 && beforeExcept[0] === 'all') {
-                debugLog(1, () => `要排除的变量: ${afterExcept}`);
+                debugLog(1, () => t('dbg_except_vars', { vars: afterExcept }));
                 if (afterExcept.length === 0) {
                     throw { type: ExceptionType.SYNTAX_ERROR, message: t('except_requires_var'), lineNumber: currentLinePointer } as Exception;
                 }
@@ -4450,14 +4817,14 @@ class Interpreter {
                 ScopeManager.cleanupLocalVariable(true);
                 LOCAL_VARS = remainedVars;
                 rebuildSlotIndex(); // 槽位索引同步 (排除变量已恢复)
-                debugLog(1, () => `已将排除的变量恢复, 当前局部变量有: ${LOCAL_VARS.map(varInfo => varInfo.name)}`);
+                debugLog(1, () => t('dbg_except_restored', { vars: LOCAL_VARS.map(varInfo => varInfo.name) }));
                 return;
             }
         }
         // 判断是否全部清除
         else if (params === 'all') {
             ScopeManager.cleanupLocalVariable(true);
-            debugLog(1, () => `已清除所有局部变量, 若要清除全局变量请指定清除`);
+            debugLog(1, () => t('dbg_purge_all_done'));
             return;
         }
         // 清除全局变量
@@ -4467,9 +4834,9 @@ class Interpreter {
                 ScopeManager.cleanupGlobalVariable(globalVarName);
             }
             else {
-                debugLog(1, () => `全局变量 ${globalVarName} 不存在`);
+                debugLog(1, () => t('dbg_global_var_not_exists', { name: globalVarName }));
             }
-            debugLog(1, () => `已清除全局变量 ${globalVarName}`);
+            debugLog(1, () => t('dbg_global_var_cleared', { name: globalVarName }));
             return;
         }
         else {
@@ -4480,14 +4847,14 @@ class Interpreter {
                 const funcInfo = FUNCTIONS[currentFuncName];
                 const { startLine: funcStartLine, endLine: funcEndLine } = funcInfo;
                 for (let i = 0; i < cleanedVars.length; i++) {
-                    debugLog(2, () => `要被清除的第 ${i + 1} 个变量 ${cleanedVars[i]}`)
+                    debugLog(2, () => t('dbg_purge_var_num', { index: i + 1, name: cleanedVars[i] }))
                     let varInfo = ScopeManager.getVariableInfo(cleanedVars[i], currentLinePointer);
                     if (varInfo && varInfo.startLine >= funcStartLine && varInfo.endLine <= funcEndLine) {
                         ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
-                        debugLog(2, () => `已清除变量 ${varInfo.name}, 作用域: ${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1}`);
+                        debugLog(2, () => t('dbg_purged_var', { name: varInfo.name, start: varInfo.startLine + 1, end: varInfo.endLine === -1 ? t('dbg_last_line') : varInfo.endLine + 1 }));
                     }
                 }
-                debugLog(1, () => `变量清除完成`);
+                debugLog(1, () => t('dbg_purge_done'));
             }
             else {
                 reportError(ExceptionType.SYNTAX_ERROR, t('purge_local_outside_func'));
@@ -4511,13 +4878,13 @@ class Interpreter {
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长
                 delete SLOT_INDEX[String(block.frameId)];
                 CONTROL_FLOW_STACK.pop();
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_func_end_local_vars', { name: funcInfo.name }), LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
                     reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', {name: funcInfo.name, type: funcInfo.returnType}));
                     currentLinePointer = block.callFrom;
                     return;
                 } else {
-                    if (DEBUG_LEVEL >= 1) debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`)
+                    if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_func_void_return', { name: funcInfo.name }))
                     currentLinePointer = block.callFrom;
                     return;
                 }
@@ -4947,13 +5314,13 @@ class ExpressionEvaluator {
             } as Exception;
         }
         if (varInfo.type === DataType.ARRAY) {
-            DEBUG_LEVEL >= 2 && debugLog(2, () => `返回${v.isGlobal ? '全局' : ''}数组: ${varInfo.name} 在第${currentLine + 1}行`);
+            DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_array', { scope: v.isGlobal ? t('dbg_scope_global') : '', name: varInfo.name, line: currentLine + 1 }));
             return varInfo;
         }
         if (varInfo.value === undefined) {
             throw { type: ExceptionType.TYPE_ERROR, message: t('var_value_undefined', { name: v.name }), lineNumber: currentLine } as Exception;
         }
-        DEBUG_LEVEL >= 2 && debugLog(2, () => `直接返回${v.isGlobal ? '全局' : ''}变量值: ${v.name} = ${varInfo.value} 在第${currentLine + 1}行`);
+        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_var_value', { scope: v.isGlobal ? t('dbg_scope_global') : '', name: v.name, value: varInfo.value, line: currentLine + 1 }));
         return varInfo.value;
     }
 
@@ -5366,7 +5733,7 @@ class ExpressionEvaluator {
 
     // 解析表达式 (处理赋值运算符) 
     private static buildExpressionTree(): ExprNode {
-        debugLog(2, () => `解析表达式中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_expr', { tokens: this.tokens }));
         // 检查是否是数组元素赋值
         if (this.currentTokenIndex + 2 < this.tokens.length &&
             /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(this.tokens[this.currentTokenIndex]) &&
@@ -5399,7 +5766,7 @@ class ExpressionEvaluator {
             }
 
             // 不是数组赋值, 恢复索引并继续正常解析
-            debugLog(2, () => `不是数组赋值, 恢复索引并继续正常解析: ${this.tokens}`);
+            debugLog(2, () => t('dbg_parse_not_array_assign', { tokens: this.tokens }));
             this.currentTokenIndex = savedIndex;
         }
 
@@ -5441,7 +5808,7 @@ class ExpressionEvaluator {
 
     // 构建逻辑或运算节点 (||) 
     private static buildLogicalOr(): ExprNode {
-        debugLog(2, () => `解析逻辑或运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_logic_or', { tokens: this.tokens }));
         let left = this.buildLogicalAnd();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '||') {
@@ -5455,7 +5822,7 @@ class ExpressionEvaluator {
 
     // 构建逻辑与运算节点 (&&) 
     private static buildLogicalAnd(): ExprNode {
-        debugLog(2, () => `解析逻辑与运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_logic_and', { tokens: this.tokens }));
         let left = this.buildEquality();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '&&') {
@@ -5469,7 +5836,7 @@ class ExpressionEvaluator {
 
     // 构建相等性运算节点 (==, !=) 
     private static buildEquality(): ExprNode {
-        debugLog(2, () => `解析相等性运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_equality', { tokens: this.tokens }));
         let left = this.buildRelational();
 
         while (this.currentTokenIndex < this.tokens.length &&
@@ -5485,7 +5852,7 @@ class ExpressionEvaluator {
 
     // 构建关系运算节点 (<, >, <=, >=) 
     private static buildRelational(): ExprNode {
-        debugLog(2, () => `解析关系运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_relational', { tokens: this.tokens }));
         let left = this.buildAdditive();
 
         while (this.currentTokenIndex < this.tokens.length &&
@@ -5502,7 +5869,7 @@ class ExpressionEvaluator {
 
     // 构建加法和减法运算节点
     private static buildAdditive(): ExprNode {
-        debugLog(2, () => `解析加法和减法运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_additive', { tokens: this.tokens }));
         let left = this.buildMultiplicative();
 
         while (this.currentTokenIndex < this.tokens.length &&
@@ -5518,7 +5885,7 @@ class ExpressionEvaluator {
 
     // 构建乘法、除法和取模运算节点
     private static buildMultiplicative(): ExprNode {
-        debugLog(2, () => `解析乘法、除法和取模运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_multiplicative', { tokens: this.tokens }));
         let left = this.buildPower();
 
         while (this.currentTokenIndex < this.tokens.length &&
@@ -5535,7 +5902,7 @@ class ExpressionEvaluator {
 
     // 构建幂运算节点
     private static buildPower(): ExprNode {
-        debugLog(2, () => `解析幂运算中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_power', { tokens: this.tokens }));
         let left = this.buildUnary();
 
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '**') {
@@ -5550,7 +5917,7 @@ class ExpressionEvaluator {
 
     // 构建一元运算符节点
     private static buildUnary(): ExprNode {
-        debugLog(2, () => `解析一元运算符中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_unary', { tokens: this.tokens }));
         if (this.currentTokenIndex < this.tokens.length &&
             (this.tokens[this.currentTokenIndex] === '-' || this.tokens[this.currentTokenIndex] === '+' ||
                 this.tokens[this.currentTokenIndex] === '!')) {
@@ -5565,7 +5932,7 @@ class ExpressionEvaluator {
 
     // 构建基本元素节点 (数字、字符串、变量、括号表达式) 
     private static buildPrimary(): ExprNode {
-        debugLog(2, () => `解析基本元素中: ${this.tokens}`);
+        debugLog(2, () => t('dbg_parse_primary', { tokens: this.tokens }));
         if (this.currentTokenIndex >= this.tokens.length) {
             throw { type: ExceptionType.SYNTAX_ERROR, message: t('expr_unexpected_end', {pos: this.currentTokenIndex}), lineNumber: this.currentLine } as Exception;
         }
@@ -5625,24 +5992,24 @@ class ExpressionEvaluator {
         // [a-zA-Z0-9_.]* : 后续字符可以是字母、数字、下划线或点号, * 表示该组合可出现 0 次或多次
         // $ : 匹配字符串的结束位置
         if (/^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(token)) {
-            debugLog(2, () => `检查 ${token} 是否为变量或函数调用`)
+            debugLog(2, () => t('dbg_check_token', { token }))
             this.currentTokenIndex++;
             // 全局变量标志
             let isGlobal: boolean = false;
             // 检查是否是函数调用
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '(') {
-                debugLog(2, () => `检测到函数调用: ${token}`);
+                debugLog(2, () => t('dbg_detect_func_call', { token }));
                 return this.buildFunctionCall(token);
             }
 
             if (token.startsWith('global.')) {
-                debugLog(2, () => `检测到全局访问前缀`);
+                debugLog(2, () => t('dbg_detect_global_prefix'));
                 isGlobal = true;
             }
 
             // 检查是否是数组元素访问
             if (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '[') {
-                debugLog(2, () => `检测到数组元素访问: ${token}`);
+                debugLog(2, () => t('dbg_detect_array_access', { token }));
                 return this.buildArrayAccess(token, isGlobal);
             }
 
@@ -5739,7 +6106,7 @@ class ExpressionEvaluator {
 
     // 构建函数调用节点 (参数求值推迟到 evalTree, 与原有从左到右按序求值一致)
     private static buildFunctionCall(funcName: string): ExprNode {
-        debugLog(2, () => `解析函数调用: ${funcName}`);
+        debugLog(2, () => t('dbg_parse_func_call', { funcName }));
         // 跳过左括号
         this.currentTokenIndex++;
 
@@ -5747,7 +6114,7 @@ class ExpressionEvaluator {
 
         // 解析参数 (建树)
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] !== ')') {
-            debugLog(2, () => `解析参数`);
+            debugLog(2, () => t('dbg_parse_args'));
             args.push(this.buildExpressionTree());
 
             // 检查是否有逗号
@@ -5809,15 +6176,15 @@ class ExpressionEvaluator {
                 return Math.random();
             case 'len':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'len'}), lineNumber: this.currentLine } as Exception;
-                debugLog(2, () => `执行 len 传入的 arg: ${args[0]}`);
+                debugLog(2, () => t('dbg_len_arg', { arg: args[0] }));
                 if (typeof args[0] === 'string') {
-                    debugLog(2, () => `参数为 string 类型`);
+                    debugLog(2, () => t('dbg_arg_string_type'));
                     return args[0].length;
                 }
                 // 检查是否是数组变量
                 // 注意: 这里需要特殊处理, 因为数组变量在传递时可能已经被解构
                 // 我们需要检查参数是否是数组变量对象
-                debugLog(2, () => `参数为数组类型 ${args[0]}`);
+                debugLog(2, () => t('dbg_arg_array_type', { arg: args[0] }));
                 if (args[0] && typeof args[0] === 'object' && 'type' in args[0] && args[0].type === DataType.ARRAY) {
                     return args[0].arrayLength || 0;
                 }
@@ -5904,7 +6271,7 @@ class ExpressionEvaluator {
                     arrayElements: copySrcArr.arrayElements!.map(e => ({ value: e.value, type: e.type })),
                     isReadonlyArray: false
                 };
-                debugLog(1, () => `copy 深拷贝数组: ${copySrcArr.name} (长度 ${copiedArr.arrayLength})`);
+                debugLog(1, () => t('dbg_copy_array', { name: copySrcArr.name, length: copiedArr.arrayLength }));
                 return copiedArr;
             default:
                 throw {
@@ -5998,7 +6365,7 @@ class ExpressionEvaluator {
                     } as Exception;
                 }
                 if (varInfo.type === DataType.ARRAY) {
-                DEBUG_LEVEL >= 2 && debugLog(2, () => `返回${isGlobal ? '全局' : ''}数组: ${varInfo.name} 在第${this.currentLine + 1}行`);
+                DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_array', { scope: isGlobal ? t('dbg_scope_global') : '', name: varInfo.name, line: this.currentLine + 1 }));
                     return varInfo;
                 }
                 if (varInfo.value === undefined) {
@@ -6008,7 +6375,7 @@ class ExpressionEvaluator {
                         lineNumber: this.currentLine
                     } as Exception;
                 }
-                DEBUG_LEVEL >= 2 && debugLog(2, () => `直接返回${isGlobal ? '全局' : ''}变量值: ${name} = ${varInfo.value} 在第${this.currentLine + 1}行`);
+                DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_var_value', { scope: isGlobal ? t('dbg_scope_global') : '', name, value: varInfo.value, line: this.currentLine + 1 }));
                 return varInfo.value;
             }
             case 'binary': {
@@ -6051,7 +6418,7 @@ class ExpressionEvaluator {
             case 'call': {
                 // 参数从左到右按序求值, 与原有边解析边求值的参数求值顺序一致
                 const args = (node.args as ExprNode[]).map(a => this.evalTree(a));
-                debugLog(2, () => `执行函数调用: name: ${node.funcName} args:${args}`)
+                debugLog(2, () => t('dbg_exec_func_call', { funcName: node.funcName, args }))
                 return this.executeFunction(node.funcName as string, args);
             }
             case 'arrayAccess': {
@@ -6142,7 +6509,7 @@ class ExpressionEvaluator {
 
     // 计算二元运算
     private static evaluateOperation(operator: string, left: any, right: any): any {
-        DEBUG_LEVEL >= 1 && debugLog(1, () => `计算操作: ${operator}, 左操作数: ${JSON.stringify(left)} (左类型: ${typeof left}), 右操作数: ${JSON.stringify(right)} (右类型: ${typeof right})`);
+        DEBUG_LEVEL >= 1 && debugLog(1, () => t('dbg_calc_operation', { operator, left: JSON.stringify(left), leftType: typeof left, right: JSON.stringify(right), rightType: typeof right }));
 
         // 提取操作数的值和类型
         const leftValue = left;
@@ -6419,7 +6786,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                     };
                     LOCAL_VARS.push(newVar);
                     indexSlotVar(newVar); // 增量登记 (仅新增变量, 避免全量重建)
-                    debugLog(2, () => `数组返回值绑定到新变量 ${resultVar}`);
+                    debugLog(2, () => t('dbg_array_ret_new_var', { name: resultVar }));
                 } else {
                     const existing = ScopeManager.getVariableInfo(resultVar, oldLinePointer);
                     if (existing && existing.type === DataType.ARRAY) {
@@ -6427,7 +6794,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         existing.arrayElementType = arrStruct.arrayElementType;
                         existing.arrayElements = arrStruct.arrayElements;
                         existing.isReadonlyArray = arrStruct.isReadonlyArray;
-                        debugLog(2, () => `数组返回值绑定到已有数组变量 ${resultVar}`);
+                        debugLog(2, () => t('dbg_array_ret_existing_var', { name: resultVar }));
                     } else {
                         reportError(ExceptionType.TYPE_ERROR, t('result_var_not_array', {name: resultVar}));
                     }
@@ -6441,7 +6808,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
         // 确保结果变量在当前作用域中已声明
         // 如果变量不存在, 则添加到局部变量作用域中
         if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
-            debugLog(2, () => `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
+            debugLog(2, () => t('dbg_result_var_undeclared', { name: resultVar }));
             // 用类型默认值初始化, 避免 addVariable 类型校验失败
             let initValue: any;
             switch (funcInfo.returnType) {
@@ -6470,7 +6837,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
             if (returnVarName && funcReturnValues.hasOwnProperty(returnVarName)) {
                 const returnValue = funcReturnValues[returnVarName];
 
-                debugLog(2, () => `获取到函数返回值: ${funcName}[${returnVarName}] = ${returnValue}`);
+                debugLog(2, () => t('dbg_get_func_return', { funcName, returnVarName, returnValue }));
 
                 // 将返回值赋值给结果变量
                 ScopeManager.setVariable(resultVar, returnValue, oldLinePointer);
@@ -6500,7 +6867,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                         defaultValue = null;
                 }
 
-                debugLog(2, () => `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
+                debugLog(2, () => t('dbg_func_no_ret_default', { name: resultVar, value: defaultValue }));
                 ScopeManager.setVariable(resultVar, defaultValue, oldLinePointer);
             }
         } else {
@@ -6526,14 +6893,14 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                     defaultValue = null;
             }
 
-            debugLog(2, () => `函数无返回值, 设置默认值: ${resultVar} = ${defaultValue}`);
+            debugLog(2, () => t('dbg_func_no_ret_default', { name: resultVar, value: defaultValue }));
             ScopeManager.setVariable(resultVar, defaultValue, oldLinePointer);
         }
     } else if (resultVar !== undefined) {
         // 函数没有返回类型但有结果变量, 设置为void
         // 确保结果变量在当前作用域中已声明
         if (!ScopeManager.hasVariable(resultVar, oldLinePointer)) {
-            debugLog(2, () => `结果变量 ${resultVar} 未声明, 添加到局部作用域`);
+            debugLog(2, () => t('dbg_result_var_undeclared', { name: resultVar }));
             // 添加变量到局部作用域, 类型为UNDEFINED, 初始值为undefined
             // 变量作用域从当前行开始, 到程序结束
             const rvIdx = LOCAL_VARS.length;
@@ -6817,7 +7184,7 @@ class NSVMCompiler {
             NSVMExecutor.funcBlocks = funcBlocks;
             return true;
         } catch (e) {
-            debugLog(1, () => `NSVM 编译失败, 回退行解释器: ${(e as Error).stack || e}`);
+            debugLog(1, () => t('dbg_nsvm_compile_failed', { error: (e as Error).stack || e }));
             return false;
         }
     }
@@ -7449,8 +7816,8 @@ class NSVMExecutor {
                     switch (op) {
                         case NSVMOp.HALT:
                             currentLinePointer = programLines.length; // 复刻主循环退出时行指针 ("程序执行完毕" 行号一致)
-                            if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
-                            else debugLog(1, () => '程序执行完毕');
+                            if (EXCEPTION_STACK.length > 0) debugLog(1, () => t('dbg_program_stopped_error'));
+                            else debugLog(1, () => t('dbg_program_finished'));
                             return;
                         case NSVMOp.STMT:
                             Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
@@ -7459,7 +7826,7 @@ class NSVMExecutor {
                         case NSVMOp.NEWARRAY: {
                             // 数组声明指令: 预解析元数据直读, 执行器复刻 executeArrayDeclaration 完整语义
                             const declMeta = consts[a] as NSVMArrayDeclMeta;
-                            DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${declMeta.content}`);
+                            DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_execute_instr', { content: declMeta.content }));
                             Interpreter.executeArrayDeclarationCompiled(declMeta);
                             frame.pc++;
                             break;
@@ -7481,7 +7848,7 @@ class NSVMExecutor {
                             } else if (!v) {
                                 // if 假分支调试输出 (复刻 executeIf debugLog(1))
                                 if (LINE_INFO[currentLinePointer] && LINE_INFO[currentLinePointer].stmt.type === StmtType.IF) {
-                                    debugLog(1, () => `if 条件为假在第 ${currentLinePointer + 1} 行`);
+                                    debugLog(1, () => t('dbg_if_false_line', { line: currentLinePointer + 1 }));
                                 }
                                 // while 条件为假: 弹 while 帧 (复刻 executeWhile 假分支先压后弹的净效果;
                                 // 每次迭代 JZ 都会执行, 存在时弹残留帧)
@@ -7534,7 +7901,7 @@ class NSVMExecutor {
                                 if (CONTROL_FLOW_STACK[i].type === 'function') { funcFrameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId; break; }
                             }
                             // 直接调 executeReturn/executeFunctionEndTag (跳过 executeCommand switch 分发), 保留"执行指令"调试输出逐字节一致
-                            if (DEBUG_LEVEL >= 2) debugLog(2, () => `执行指令 ${LINE_INFO[a].content}`);
+                            if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_execute_instr', { content: LINE_INFO[a].content }));
                             if (op === NSVMOp.RETV) Interpreter.executeReturn(LINE_INFO[a].stmt.params);
                             else Interpreter.executeFunctionEndTag();
                             let frameStillThere = false;
@@ -7599,9 +7966,9 @@ class NSVMExecutor {
                         }
                         case NSVMOp.SWSTART: {
                             // 复刻 executeSwitch 调试输出 (debugLog 1)
-                            debugLog(1, () => `执行switch语句: ${consts[a]}`);
+                            debugLog(1, () => t('dbg_exec_switch', { params: consts[a] }));
                             const cond = Interpreter.evaluateExpression(consts[a]);
-                            debugLog(1, () => `switch语句的条件表达式值: ${cond}`);
+                            debugLog(1, () => t('dbg_switch_cond_value', { value: cond }));
                             // 复刻 executeSwitch 类型检查: number 必须整数; 非 number/string 报错
                             let typeError = false;
                             if (typeof cond === 'number') {
@@ -7620,7 +7987,7 @@ class NSVMExecutor {
                         }
                         case NSVMOp.SWCASE: {
                             // 复刻 executeCase 调试输出 (debugLog 1, 在检查/跳转之前)
-                            debugLog(1, () => `处理 case 语句`);
+                            debugLog(1, () => t('dbg_handle_case'));
                             const sw = NSVMExecutor.switchStack[NSVMExecutor.switchStack.length - 1];
                             if (!sw) { frame.pc++; break; }
                             const head = consts[a] as { e: string; s: number };
@@ -7674,7 +8041,7 @@ class NSVMExecutor {
                                 ScopeManager.addVariable(errorName, exception.message, DataType.STRING, currentLinePointer, c, false, false);
                                 rebuildSlotIndex();
                                 EXCEPTION_STACK.push({ type: ExceptionType.CATCH_BLOCK, message: errorName, lineNumber: currentLinePointer });
-                                debugLog(1, () => `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
+                                debugLog(1, () => t('dbg_catch_exception', { message: exception.message, line: exception.lineNumber + 1 }));
                                 frame.pc++; // 进入 catch 块体
                                 break;
                             }
@@ -7697,8 +8064,8 @@ class NSVMExecutor {
                         case NSVMOp.ASSERTCHK: {
                             // 复刻 executeAssert: 条件真值性判断 (非布尔不报错) + 调试输出逐字节一致
                             const info = consts[a] as { content: string; params: string; cond: string; msg: string | null };
-                            DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${info.content}`);
-                            debugLog(1, () => `执行assert语句: ${info.params}`);
+                            DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_execute_instr', { content: info.content }));
+                            debugLog(1, () => t('dbg_exec_assert', { params: info.params }));
                             let condition: any;
                             try {
                                 condition = Interpreter.evaluateExpression(info.cond);
@@ -7718,7 +8085,7 @@ class NSVMExecutor {
                                 }
                                 throw { type: ExceptionType.ASSERTION_ERROR, message: info.msg, lineNumber: currentLinePointer + 1 } as Exception;
                             }
-                            debugLog(1, () => `断言条件为真: ${info.cond}`);
+                            debugLog(1, () => t('dbg_assert_true', { expr: info.cond }));
                             frame.pc = b; // 跳过消息行 + endasrt
                             break;
                         }
@@ -7743,7 +8110,7 @@ class NSVMExecutor {
                         if (funcInfo && !ScopeManager.isVoidFunction(funcInfo)) {
                             reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', { name: funcInfo.name, type: funcInfo.returnType }));
                         } else {
-                            debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`);
+                            debugLog(1, () => t('dbg_func_void_return', { name: funcInfo.name }));
                         }
                     }
                     frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
@@ -7752,8 +8119,8 @@ class NSVMExecutor {
                 }
                 // 全局块尾 (无 HALT 情形): 正常结束
                 currentLinePointer = programLines.length; // 复刻主循环退出时行指针
-                if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
-                else debugLog(1, () => '程序执行完毕');
+                if (EXCEPTION_STACK.length > 0) debugLog(1, () => t('dbg_program_stopped_error'));
+                else debugLog(1, () => t('dbg_program_finished'));
                 return;
             } catch (error) {
                 // input 挂起信号: 交还控制权
@@ -7837,8 +8204,8 @@ class NSVMExecutor {
                         console.error(t('internal_error_hint'));
                     }
                     currentLinePointer = programLines.length;
-                    if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
-                    else debugLog(1, () => '程序执行完毕');
+                    if (EXCEPTION_STACK.length > 0) debugLog(1, () => t('dbg_program_stopped_error'));
+                    else debugLog(1, () => t('dbg_program_finished'));
                     return;
                 }
                 // handled: 继续执行
@@ -7858,9 +8225,9 @@ class NSVMExecutor {
         const oldPc = frame.pc;
         // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 每调用 ~20 个 debugLog 闭包)
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `执行指令 ${meta.content}`);
-        if (DEBUG_LEVEL >= 1) debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数信息:`, funcInfo);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_execute_instr', { content: meta.content }));
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_start_func_call', { params: meta.callParams }));
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_func_info'), funcInfo);
         // 阶段1: 解析实参 (复刻 executeCall 解析段; 失败即 reportError + 调用方继续, 无绑定污染)
         const args: any[] = [];
         let parseFailed = false;
@@ -7885,18 +8252,18 @@ class NSVMExecutor {
         const frameId = ++CALL_FRAME_ID;
         const callVarStart = LOCAL_VARS.length;
         if (DEBUG_LEVEL >= 2) {
-            debugLog(2, () => `函数 ${fnK} 开始传递参数`);
-            debugLog(2, () => `函数信息:`, funcInfo);
-            debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
-            debugLog(2, () => `开始参数传递循环`);
-            debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+            debugLog(2, () => t('dbg_func_start_passing', { funcName: fnK }));
+            debugLog(2, () => t('dbg_func_info'), funcInfo);
+            debugLog(2, () => t('dbg_param_count', { count: funcInfo.params.length }), args);
+            debugLog(2, () => t('dbg_param_loop_start'));
+            debugLog(2, () => t('dbg_func_call_args', { funcName: fnK }), args, () => t('dbg_curr_line', { line: currentLinePointer + 1 }));
         }
         // 阶段2: 绑定参数到 callee 帧参数槽位 (寄存器直写, 复刻 executeCall 绑定循环)
         for (let i = 0; i < argc; i++) {
-            if (DEBUG_LEVEL >= 3) debugLog(3, () => `循环索引: ${i}`);
+            if (DEBUG_LEVEL >= 3) debugLog(3, () => t('dbg_loop_index', { i }));
             const param = funcInfo.params[i];
             const paramName = param.name;
-            if (DEBUG_LEVEL >= 2) debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_set_param', { paramName, paramType: param.type }));
             const mode = modesK[i];
             if (param.type === DataType.ARRAY) {
                 if (mode === 4) {
@@ -7939,7 +8306,7 @@ class NSVMExecutor {
                     };
                     LOCAL_VARS.push(literalVar);
                     (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
-                    if (DEBUG_LEVEL >= 2) debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_array_param_literal', { paramName, length: literalElements.length }));
                     continue;
                 }
                 // 数组引用 / mut / copy — 复刻 executeCall 数组分支 (parseArrayArgument 先提取变量名)
@@ -7974,59 +8341,59 @@ class NSVMExecutor {
                 };
                 LOCAL_VARS.push(paramVar);
                 (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
-                if (DEBUG_LEVEL >= 2) debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_array_param_bound', { paramName, mode: arrArgMode, length: arrVar.arrayLength, readonly: paramVar.isReadonlyArray }));
                 continue;
             }
             const argValue = args[i] !== undefined ? args[i] : null;
             ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
-            if (DEBUG_LEVEL >= 2) debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_param_bound_slot', { paramName, slot: i }));
         }
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `参数传递循环结束`);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_param_loop_end'));
         // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数 (bodyStartLine 编译期预解析)
         const functionBodyStartLine = meta.bodyStartLine;
         if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
             ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
         }
-        if (DEBUG_LEVEL >= 3) debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数 ${fnK} 参数传递完成`);
+        if (DEBUG_LEVEL >= 3) debugLog(3, () => t('dbg_current_local_var_details'), LOCAL_VARS);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_func_param_done', { funcName: fnK }));
 
         // 额外的调试信息, 检查参数是否真的被添加 (复刻 executeCall debug 3; 循环门控 DEBUG_LEVEL>=3 免热路径开销)
         if (DEBUG_LEVEL >= 3) {
-            debugLog(3, () => `检查参数是否正确添加:`);
+            debugLog(3, () => t('dbg_check_params_added'));
             for (let i = 0; i < argc; i++) {
                 const paramName = funcInfo.params[i].name;
                 let found = false;
                 for (let j = 0; j < LOCAL_VARS.length; j++) {
                     if (LOCAL_VARS[j].name === paramName) {
-                        debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
+                        debugLog(3, () => t('dbg_param_index', { paramName, index: j }));
                         found = true;
                         break;
                     }
                 }
                 if (!found) {
-                    debugLog(3, () => `参数 ${paramName} 未找到`);
+                    debugLog(3, () => t('dbg_param_not_found', { paramName }));
                 }
             }
 
             // 进一步调试: 检查每个参数在 LOCAL_VARS 中的详细信息 (复刻 executeCall debug 3)
-            debugLog(3, () => `详细检查参数:`);
+            debugLog(3, () => t('dbg_check_params_detail'));
             for (let i = 0; i < argc; i++) {
                 const paramName = funcInfo.params[i].name;
                 const paramType = funcInfo.params[i].type;
                 let paramFound = false;
                 for (let j = 0; j < LOCAL_VARS.length; j++) {
                     if (LOCAL_VARS[j].name === paramName) {
-                        debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
+                        debugLog(3, () => t('dbg_param_detail', { paramName, index: j, value: LOCAL_VARS[j].value, type: LOCAL_VARS[j].type, scopeStart: LOCAL_VARS[j].startLine + 1, scopeEnd: LOCAL_VARS[j].endLine === -1 ? t('dbg_last_line') : LOCAL_VARS[j].endLine + 1 }));
                         // 验证类型是否匹配
                         if (LOCAL_VARS[j].type !== paramType) {
-                            debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
+                            debugLog(3, () => t('dbg_warn_param_type', { paramName, expected: paramType, actual: LOCAL_VARS[j].type }));
                         }
                         paramFound = true;
                         break;
                     }
                 }
                 if (!paramFound) {
-                    debugLog(3, () => `参数 ${paramName} 未找到`);
+                    debugLog(3, () => t('dbg_param_not_found', { paramName }));
                 }
             }
         }
@@ -8034,11 +8401,11 @@ class NSVMExecutor {
         // 设置 currentLinePointer 为函数体开始行 (复刻 executeCall: 主循环会自动加一执行函数体内部的代码)
         currentLinePointer = funcInfo.startLine;
         if (DEBUG_LEVEL >= 2) {
-            debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
+            debugLog(2, () => t('dbg_func_body_start', { line: functionBodyStartLine + 1 }));
             // 添加作用域调试信息
-            debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
-            debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-            debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+            debugLog(2, () => t('dbg_func_scope_details', { funcName: fnK }));
+            debugLog(2, () => t('dbg_return_var_scope', { name: funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined, scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
+            debugLog(2, () => t('dbg_param_scope', { scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
         }
         // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
         CONTROL_FLOW_STACK.push({
@@ -8051,7 +8418,7 @@ class NSVMExecutor {
             frameId: frameId,
             frameVarStart: callVarStart
         });
-        if (DEBUG_LEVEL >= 2) debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
         // 切换到 callee 的 VM 块
         const fb = NSVMExecutor.funcBlocks.get(fnK);
         if (fb) {
