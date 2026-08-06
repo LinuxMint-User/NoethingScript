@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.4.4";
+const NSIVersion: string = "2.5.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -1246,6 +1246,14 @@ class Interpreter {
         Interpreter.scanTagsAndFunctions();
         // 构建局部变量静态符号表 (槽位映射)
         Interpreter.buildSlotSymbolTable();
+
+        // 重置 NSVM (寄存器虚拟机) 状态: 新程序必须重新编译, 旧程序执行现场全部作废
+        NSVMExecutor.active = false;
+        NSVMExecutor.globalBlock = null;
+        NSVMExecutor.funcBlocks = new Map();
+        NSVMExecutor.frames = [];
+        NSVMExecutor.vmTryStack = [];
+        NSVMExecutor.switchStack = [];
     }
 
     // 扫描标签和函数定义
@@ -1577,8 +1585,8 @@ class Interpreter {
     }
 
 
-    // 辅助方法: 将字符串类型转换为DataType枚举
-    private static getDataTypeFromString(typeStr: string): DataType {
+    // 辅助方法: 将字符串类型转换为DataType枚举 (阶段3 NSVM 复用)
+    static getDataTypeFromString(typeStr: string): DataType {
         switch (typeStr.toLowerCase()) {
             case 'number':
                 return DataType.NUMBER;
@@ -1619,7 +1627,8 @@ class Interpreter {
     }
 
     // 辅助方法: 解析值并进行类型检查
-    private static parseValue(valueStr: string, expectedType: DataType): any {
+    // 解析字面量/变量引用为指定类型的值 (阶段3 NSVM 的 FORINIT 复用)
+    static parseValue(valueStr: string, expectedType: DataType): any {
         // 处理字符串 (必须带双引号) 
         if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
             const strValue = valueStr.substring(1, valueStr.length - 1);
@@ -1758,9 +1767,20 @@ class Interpreter {
                     currentLinePointer = 1;
                 }
             }
+
+            // 首次执行: 尝试 NSVM (寄存器虚拟机) 加速; 编译失败整体回退行解释器 (双模式回退)
+            if (NSVMExecutor.prepare()) {
+                NSVMExecutor.run();
+                return;
+            }
         } else {
             // 恢复执行 (NSI.resumeInput 从挂起处继续): 保留行指针/控制流栈/局部变量等执行现场
             INPUT_SUSPENDED = false;
+            // 若挂起发生在 NSVM 内 (input() 于 VM 指令执行中), 继续 VM 执行; 否则行解释器
+            if (NSVMExecutor.active && NSVMExecutor.frames.length > 0) {
+                NSVMExecutor.run();
+                return;
+            }
         }
 
         while (currentLinePointer < programLines.length) {
@@ -5427,8 +5447,10 @@ class ExpressionEvaluator {
                 return m ? (m[binding.slot] ?? null) : null;
             }
         }
-        ExpressionEvaluator.slotFrameKey = '';
-        ExpressionEvaluator.slotFrameDepth = -1;
+        if (binding.frameKey.startsWith('f:')) {
+            ExpressionEvaluator.slotFrameKey = '';
+            ExpressionEvaluator.slotFrameDepth = -1;
+        }
         return null;
     }
 
@@ -6012,6 +6034,1120 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
             if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
         }
         ScopeManager.setVariable(resultVar, undefined, oldLinePointer);
+    }
+}
+
+// ===== 阶段3: 块级寄存器虚拟机 (NSVM) =====
+// 控制流结构 (if/while/for/switch/try/jump/break/continue/assert) 编译期为跳转指令 (消除运行时逐行扫描),
+// 普通语句 (赋值/声明/print/call/purge) 委托现有 executeCommand (语义完全一致), 表达式存常量池字符串由
+// ExpressionEvaluator 运行时求值 (与行解释器共用缓存/槽位/类型检查)。函数块与全局块均编译为独立指令块,
+// call/return 切换 VM 帧; 异常用编译期 handlerTable 查表跳转 (替代 findCatchLine 逐行扫描)。
+
+// 块级操作码 (每条指令 = [op, a, b, c] 4 个 int32)
+enum NSVMOp {
+    HALT = 0,        // 全局块结束
+    STMT = 1,        // 委托: a=源行号, 执行 executeCommand(LINE_INFO[a].stmt, content)
+    JMP = 2,         // a=目标指令索引
+    JZ = 3,          // a=条件表达式常量索引, b=目标 (假跳)
+    JNZ = 4,         // a=条件表达式常量索引, b=目标 (真跳)
+    CALL = 5,        // a=源行号 (executeCall + VM 帧切换)
+    RETV = 6,        // a=源行号 (executeReturn + VM 帧恢复)
+    RET = 7,         // a=源行号 (:end, executeFunctionEndTag + VM 帧恢复)
+    FORINIT = 8,     // a=init 元数据常量索引 (声明循环变量)
+    FORUPD = 9,      // a=更新表达式常量索引, b=循环变量名字符串常量索引
+    SWSTART = 10,    // a=条件表达式常量索引, b=类型错误跳转目标
+    SWCASE = 11,     // a=case 值表达式常量索引, b=匹配目标, c=已匹配跳过目标
+    SWDEF = 12,      // a=匹配目标(default 体), b=已匹配跳过目标
+    SWEND = 13,      // 弹 switch 帧
+    TRY = 14,        // a=handler 索引
+    CATCH = 15,      // a=异常变量名字符串常量索引, c=endtry 源行号
+    ENDTRY = 16,     // 清理 try/catch 帧
+    ASSERTFAIL = 17, // a=消息字符串常量索引 (抛 ASSERTION_ERROR)
+    FORCLEAN = 18,   // a=init 元数据常量索引 (循环自然结束时清理循环变量, 复刻 executeFor 条件不满足分支)
+    ASSERTCHK = 19,  // a=assert 信息常量索引 {content,params,cond}, b=跳过目标(endasrt 后);
+                     // 复刻 executeAssert: 条件真值性判断 (非布尔不报错) + 完全一致的调试输出
+}
+
+// 异常处理器 (编译期构建, 对应一个 try-catch 结构)
+interface NSVMHandler {
+    tryInstr: number;      // TRY 指令索引
+    catchInstr: number;    // CATCH 指令索引
+    endtryInstr: number;   // ENDTRY 指令索引
+    endtryLine: number;    // endtry 源行号 (catch 异常变量作用域)
+    errorName: string;     // catch 异常变量名
+}
+
+// 编译产物: 指令块
+interface NSVMBlock {
+    instrs: Int32Array;
+    consts: any[];
+    lines: number[];       // 每条指令的源行号
+    handlers: NSVMHandler[];
+    lineToInstr: number[]; // 源行号 → 指令索引 (-1 = 无指令)
+}
+
+// VM 帧 (函数调用帧栈)
+interface NSVMFrame {
+    block: NSVMBlock;
+    pc: number;
+    retAddr: number;
+    caller: NSVMFrame | null;
+    callFrom: number;      // 调用源行号
+}
+
+// FORINIT 元数据
+interface ForInitMeta {
+    varName: string;
+    type: DataType;
+    initExpr: string;
+    updateExpr: string;
+    endforLine: number;
+}
+
+// 编译期结构栈元素
+interface NSVMStruct {
+    type: 'if' | 'while' | 'for' | 'switch' | 'try';
+    // if
+    jzIdx?: number;
+    condK?: number;
+    hasElse?: boolean;
+    endJmpIdx?: number;
+    // while / for
+    topInstr?: number;
+    breaks?: number[];
+    continues?: number[];
+    // for
+    initK?: number;
+    updK?: number;
+    updVarK?: number;
+    condInstr?: number;
+    // switch
+    swStartIdx?: number;
+    heads?: { kind: 'case' | 'default'; caseK: number; headInstr: number; bodyStart: number; line: number }[];
+    lastHead?: number;
+    bodyStart?: number;
+    endswcLine?: number;
+    // try
+    handlerIdx?: number;
+    catchInstrIdx?: number;
+}
+
+class NSVMCompiler {
+    private static code: number[] = [];
+    private static consts: any[] = [];
+    private static lines: number[] = [];
+    private static curLine: number = 0;
+
+    private static constIndex(v: any): number {
+        const idx = this.consts.length;
+        this.consts.push(v);
+        return idx;
+    }
+
+    // 发射指令, 返回指令索引 (code 中 /4 的位置)
+    private static emit(op: NSVMOp, a: number, b: number, c: number): number {
+        const idx = this.code.length / 4;
+        this.code.push(op, a, b, c);
+        this.lines.push(this.curLine);
+        return idx;
+    }
+
+    // 回填指令操作数 (null = 不改)
+    private static patch(idx: number, a: number | null, b: number | null, c: number | null): void {
+        const base = idx * 4;
+        if (a !== null) this.code[base + 1] = a;
+        if (b !== null) this.code[base + 2] = b;
+        if (c !== null) this.code[base + 3] = c;
+    }
+
+    private static curInstr(): number {
+        return this.code.length / 4;
+    }
+
+    // 提取括号内容 (与 executeIf 的 substring 语义一致)
+    private static extractParen(p: string): string | null {
+        const t = p.trim();
+        if (!t.startsWith('(') || !t.endsWith(')')) return null;
+        return t.substring(1, t.length - 1).trim();
+    }
+
+    // 编译整个程序: 全局块 + 每个函数块; 任一编译失败返回 false (整体回退行解释器)
+    static compileProgram(): boolean {
+        try {
+            // 函数区间 (start..end 含定义行与 :end)
+            const funcRanges: { start: number; end: number; name: string }[] = [];
+            for (const name in FUNCTIONS) {
+                const f = FUNCTIONS[name];
+                funcRanges.push({ start: f.startLine, end: f.endLine, name });
+            }
+            const inFunc = new Array<boolean>(programLines.length).fill(false);
+            for (const r of funcRanges) {
+                for (let i = r.start; i <= r.end && i < programLines.length; i++) inFunc[i] = true;
+            }
+
+            // 全局块
+            const globalBlock = this.compileBlock(0, programLines.length - 1, inFunc, null);
+            if (!globalBlock) return false;
+            NSVMExecutor.globalBlock = globalBlock;
+
+            // 函数块
+            const funcBlocks = new Map<string, NSVMBlock>();
+            for (const r of funcRanges) {
+                const fb = this.compileBlock(r.start + 1, r.end, inFunc, r.name);
+                if (!fb) return false;
+                funcBlocks.set(r.name, fb);
+            }
+            NSVMExecutor.funcBlocks = funcBlocks;
+            return true;
+        } catch (e) {
+            debugLog(1, () => `NSVM 编译失败, 回退行解释器: ${(e as Error).stack || e}`);
+            return false;
+        }
+    }
+
+    // 编译一个块 (startLine..endLine 含); funcName=null 表示全局块
+    private static compileBlock(startLine: number, endLine: number, inFunc: boolean[], funcName: string | null): NSVMBlock | null {
+        this.code = [];
+        this.consts = [];
+        this.lines = [];
+        // 跨块防污染: 每块独立回填集合 (前一块残留的回填项不得影响本块)
+        this.jumpFixes = [];
+        this.assertFixes = [];
+        this.breakByLine = new Map();
+        const handlers: NSVMHandler[] = [];
+        const stack: NSVMStruct[] = [];
+        let inMultiComment = false;
+        let skipLine = -1; // 断言消息行已被 ASSERTFAIL 消费, 编译循环中跳过
+
+        for (let line = startLine; line <= endLine; line++) {
+            this.curLine = line;
+            const info = LINE_INFO[line];
+            const content = info.content;
+
+            // 断言消息行已被 ASSERTFAIL 消费: 跳过, 不产生指令
+            if (line === skipLine) continue;
+
+            // 多行注释切换与区间跳过
+            if (content === '///') { inMultiComment = !inMultiComment; continue; }
+            if (inMultiComment) continue;
+            if (info.isEmpty || info.isComment) continue;
+            // debug 首行 (run 主循环会跳过): 不产生指令
+            if (line === 0 && content.startsWith('debug ')) continue;
+
+            // 标签行: 映射到下一指令索引
+            if (content !== ':end' && /^:([a-zA-Z_]\w*)$/.test(content)) {
+                // 标签已全局登记 TAGS, 跳转目标通过 lineToInstr 解析 (块内)
+                continue;
+            }
+            // 函数定义行 / :end
+            if (content.indexOf(':') === 0) {
+                if (content === ':end') {
+                    if (funcName !== null) {
+                        // 函数块尾 → 无值返回
+                        this.emit(NSVMOp.RET, line, 0, 0);
+                    }
+                    // 全局块中的孤立 :end 不产生指令
+                    continue;
+                }
+                // :func(...) 定义行: 全局块跳过 (函数区间行已在 inFunc); 函数块内嵌套定义不合法 (扫描期报错)
+                continue;
+            }
+
+            // 全局块跳过函数区间内的行
+            if (funcName === null && inFunc[line]) continue;
+
+            const stmt = info.stmt;
+            switch (stmt.type) {
+                case StmtType.OP:
+                case StmtType.GLOBAL:
+                case StmtType.LOCAL:
+                case StmtType.PRINT:
+                case StmtType.PURGE:
+                case StmtType.CONST_PREFIX_ERROR:
+                    this.emit(NSVMOp.STMT, line, 0, 0);
+                    break;
+                case StmtType.CALL:
+                    this.emit(NSVMOp.CALL, line, 0, 0);
+                    break;
+                case StmtType.RETURN:
+                    this.emit(NSVMOp.RETV, line, 0, 0);
+                    break;
+                case StmtType.IF: {
+                    const cond = this.extractParen(stmt.params);
+                    if (cond === null) return null;
+                    const condK = this.constIndex(cond);
+                    const jzIdx = this.emit(NSVMOp.JZ, condK, -1, 0);
+                    stack.push({ type: 'if', jzIdx, condK, hasElse: false, endJmpIdx: -1 });
+                    break;
+                }
+                case StmtType.ELSE: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'if') return null;
+                    // 先发射 then 尾的 JMP, 再回填 JZ 假跳目标为 else 体首条指令 (JMP 之后),
+                    // 顺序错误会导致 JZ 假跳指向 JMP 本身 (差一指令)
+                    top.endJmpIdx = this.emit(NSVMOp.JMP, -1, 0, 0);
+                    this.patch(top.jzIdx!, null, this.curInstr(), null); // 假 → else 开始
+                    top.hasElse = true;
+                    break;
+                }
+                case StmtType.ENDIF: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'if') return null;
+                    if (top.hasElse) {
+                        this.patch(top.endJmpIdx as number, this.curInstr(), null, null); // then 尾 → endif 后
+                    } else {
+                        this.patch(top.jzIdx as number, null, this.curInstr(), null);      // 假 → endif 后
+                    }
+                    stack.pop();
+                    break;
+                }
+                case StmtType.WHILE: {
+                    const cond = this.extractParen(stmt.params);
+                    if (cond === null) return null;
+                    const condK = this.constIndex(cond);
+                    const topInstr = this.curInstr();
+                    const jzIdx = this.emit(NSVMOp.JZ, condK, -1, 0);
+                    stack.push({ type: 'while', jzIdx, condK, topInstr, breaks: [], continues: [] });
+                    break;
+                }
+                case StmtType.ENDWHL: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'while') return null;
+                    this.emit(NSVMOp.JMP, top.topInstr as number, 0, 0);         // body 尾回跳
+                    const end = this.curInstr();
+                    this.patch(top.jzIdx as number, null, end, null);            // 条件假 → 循环尾
+                    for (const b of top.breaks as number[]) this.patch(b, end, null, null);
+                    for (const c of top.continues as number[]) this.patch(c, top.topInstr as number, null, null);
+                    stack.pop();
+                    break;
+                }
+                case StmtType.FOR: {
+                    const params = stmt.params.replace(/^\(|\)$/g, '');
+                    const match = params.match(/^local\s+([a-zA-Z0-9_]+):([a-zA-Z0-9_]+)\s*=\s*(.+)\s*;\s*(.+)\s*;\s*(.+)$/);
+                    if (!match) return null;
+                    const varName = match[1];
+                    const type = Interpreter.getDataTypeFromString(match[2]);
+                    const initExpr = match[3].trim();
+                    const condExpr = match[4].trim();
+                    const updateExpr = match[5].trim();
+                    // 同名循环变量嵌套检查 (与 executeFor 的 conflictForStart 报错一致; 编译期拒绝)
+                    for (let i = stack.length - 1; i >= 0; i--) {
+                        const s = stack[i];
+                        if (s.type === 'for') {
+                            const inner = this.consts[s.initK!] as ForInitMeta;
+                            if (inner.varName === varName) return null;
+                        }
+                    }
+                    // 找匹配 endfor 行 (结构闭合, 供循环变量作用域)
+                    let endforLine = line;
+                    {
+                        let nested = 1;
+                        for (let i = line + 1; i < programLines.length; i++) {
+                            const l = programLines[i].trim();
+                            if (l === '') continue;
+                            if (l.split(/\s+/)[0] === 'for') nested++;
+                            else if (l === 'endfor') { nested--; if (nested === 0) { endforLine = i; break; } }
+                        }
+                    }
+                    const meta: ForInitMeta = { varName, type, initExpr, updateExpr, endforLine };
+                    const initK = this.constIndex(meta);
+                    this.emit(NSVMOp.FORINIT, initK, 0, 0);
+                    const condInstr = this.curInstr();
+                    const condK = this.constIndex(condExpr);
+                    const jzIdx = this.emit(NSVMOp.JZ, condK, -1, 0);
+                    const updK = this.constIndex(updateExpr);
+                    const updVarK = this.constIndex(varName);
+                    stack.push({ type: 'for', initK, jzIdx, condK, condInstr, updK, updVarK, breaks: [], continues: [] });
+                    break;
+                }
+                case StmtType.ENDFOR: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'for') return null;
+                    const updInstr = this.curInstr();
+                    this.emit(NSVMOp.FORUPD, top.updK as number, top.updVarK as number, 0); // 更新段
+                    this.emit(NSVMOp.JMP, top.condInstr as number, 0, 0);                  // 回跳条件
+                    // 自然结束 (条件不满足): 先清理循环变量 (复刻 executeFor 条件不满足分支的 cleanupLocalVariable);
+                    // break 直接跳循环尾 (不清理, 复刻 executeBreak), 故 FORCLEAN 位于 break 目标之前
+                    const forCleanIdx = this.emit(NSVMOp.FORCLEAN, top.initK as number, 0, 0);
+                    const end = this.curInstr();
+                    this.patch(top.jzIdx as number, null, forCleanIdx, null);             // 条件假 → FORCLEAN
+                    for (const b of top.breaks as number[]) this.patch(b, end, null, null);
+                    for (const c of top.continues as number[]) this.patch(c, updInstr, null, null);
+                    stack.pop();
+                    break;
+                }
+                case StmtType.BREAK: {
+                    let found = false;
+                    for (let i = stack.length - 1; i >= 0; i--) {
+                        const s = stack[i];
+                        if (s.type === 'while' || s.type === 'for' || s.type === 'switch') {
+                            const jmpIdx = this.emit(NSVMOp.JMP, -1, 0, 0);
+                            (s.breaks as number[]).push(jmpIdx);
+                            this.breakByLine.set(line, jmpIdx); // 供 switch 文本扫描 (复刻 executeCase 扫描语义)
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return null; // 循环/switch 外 break → 回退行解释器 (运行时 reportError)
+                    break;
+                }
+                case StmtType.CONTINUE: {
+                    let found = false;
+                    for (let i = stack.length - 1; i >= 0; i--) {
+                        const s = stack[i];
+                        if (s.type === 'while' || s.type === 'for') {
+                            (s.continues as number[]).push(this.emit(NSVMOp.JMP, -1, 0, 0));
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return null;
+                    break;
+                }
+                case StmtType.JUMP: {
+                    const m = stmt.params.match(/^\(([^)]+)\)\s*:\s*([a-zA-Z_]\w*)$/);
+                    if (!m) return null;
+                    const condExpr = m[1].trim();
+                    const tagName = m[2].trim();
+                    if (!condExpr) return null;
+                    // 标签目标行
+                    const tagLine = TAGS[tagName];
+                    if (tagLine === undefined) {
+                        // 标签不存在: 现有语义运行时 reportError(tag_undefined) 后继续; 委托行解释器保持一致
+                        this.emit(NSVMOp.STMT, line, 0, 0);
+                        break;
+                    }
+                    // 跳转目标可能为"未来指令"或"标签后指令"; 由于标签行映射需在编译完成后才能确定,
+                    // 先记录待回填 (labelLine → jump 指令), 编译完成后统一解析 lineToInstr。
+                    this.emit(NSVMOp.JNZ, this.constIndex(condExpr), -1, 0);
+                    this.jumpFixes.push({ line: line, tagLine, jmpIdx: this.curInstr() - 1 });
+                    break;
+                }
+                case StmtType.ASSERT: {
+                    const cond = this.extractParen(stmt.params);
+                    if (cond === null) return null;
+                    // 下一行是断言失败消息 (字符串字面量): 编译期提取并标记跳过 (复刻 executeAssert 条件为假时
+                    // 取下一行作消息); 非引号消息行不做编译期拒绝 — 交执行器按 executeAssert 语义
+                    // (assert_message_quoted 报错 + 继续执行消息行)
+                    const msgRaw = LINE_INFO[line + 1] ? LINE_INFO[line + 1].content : '';
+                    const msg = (msgRaw.startsWith('"') && msgRaw.endsWith('"')) ? msgRaw.substring(1, msgRaw.length - 1) : null;
+                    if (msg !== null) skipLine = line + 1;
+                    const infoK = this.constIndex({
+                        content: LINE_INFO[line].content, // 原始行 (复刻 executeCommand 的"执行指令"调试输出)
+                        params: stmt.params,               // 原始参数 (复刻 executeAssert 的"执行assert语句"调试输出)
+                        cond,                              // 条件表达式 (复刻"断言条件为真"调试输出与求值)
+                        msg                                // 失败消息 (null = 消息行缺失/未加引号)
+                    });
+                    // 条件为真 → 跳过断言体 (到 endasrt); 为假 → 抛 ASSERTION_ERROR。
+                    // 复刻 executeAssert: 真值性判断 (非布尔不报错) + 调试输出逐字节一致
+                    this.emit(NSVMOp.ASSERTCHK, infoK, -1, 0);
+                    this.assertFixes.push(this.curInstr() - 1); // 真跳目标 = endasrt 后指令
+                    break;
+                }
+                case StmtType.ENDASRT:
+                    // 无指令; 断言体 (消息行) 为独立字符串行 (OP 或注释), 由 JNZ 跳过
+                    break;
+                case StmtType.SWITCH: {
+                    const cond = stmt.params.replace(/^\(|\)$/g, '');
+                    if (cond === '') return null;
+                    const condK = this.constIndex(cond);
+                    const swStartIdx = this.emit(NSVMOp.SWSTART, condK, -1, 0); // b=类型错误目标(占位)
+                    // 找匹配 endswc 行 (文本扫描边界, 复刻 executeCase 的 switch 嵌套追踪)
+                    let endswcLine = line;
+                    {
+                        let nested = 1;
+                        for (let i = line + 1; i < programLines.length; i++) {
+                            const l = programLines[i].trim();
+                            if (l === '') continue;
+                            if (l.toLowerCase().startsWith('switch ')) nested++;
+                            else if (l === 'endswc') { nested--; if (nested === 0) { endswcLine = i; break; } }
+                        }
+                    }
+                    stack.push({ type: 'switch', swStartIdx, heads: [], lastHead: -1, bodyStart: -1, endswcLine, breaks: [] });
+                    break;
+                }
+                case StmtType.CASE: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'switch') return null;
+                    // 封存上一个 case 的 match 目标 (b = 其 body 开始)
+                    if (top.lastHead! !== -1) {
+                        const op = this.code[top.lastHead! * 4];
+                        if (op === NSVMOp.SWCASE) this.patch(top.lastHead!, null, top.bodyStart as number, null);
+                    }
+                    // case 常量: 包装 {e: 表达式串, s: skip 目标} (s 由 ENDSWC 文本扫描回填)
+                    const caseK = this.constIndex({ e: stmt.params, s: -1 });
+                    const headIdx = this.emit(NSVMOp.SWCASE, caseK, -1, -1); // b=match目标, c=noMatch目标 (ENDSWC 回填)
+                    top.bodyStart = this.curInstr();
+                    (top.heads as any[]).push({ kind: 'case', caseK, headInstr: headIdx, bodyStart: top.bodyStart, line });
+                    top.lastHead = headIdx;
+                    break;
+                }
+                case StmtType.DEFAULT: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'switch') return null;
+                    if (top.lastHead! !== -1) {
+                        const op = this.code[top.lastHead! * 4];
+                        if (op === NSVMOp.SWCASE) this.patch(top.lastHead!, null, top.bodyStart as number, null);
+                    }
+                    const headIdx = this.emit(NSVMOp.SWDEF, -1, -1, 0); // a=body目标, b=skip目标 (ENDSWC 回填)
+                    top.bodyStart = this.curInstr();
+                    (top.heads as any[]).push({ kind: 'default', caseK: -1, headInstr: headIdx, bodyStart: top.bodyStart, line });
+                    top.lastHead = headIdx;
+                    break;
+                }
+                case StmtType.ENDSWC: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'switch') return null;
+                    // 封存最后一个 body
+                    if (top.lastHead! !== -1) {
+                        const op = this.code[top.lastHead! * 4];
+                        if (op === NSVMOp.SWCASE) this.patch(top.lastHead!, null, top.bodyStart as number, null);
+                        else if (op === NSVMOp.SWDEF) this.patch(top.lastHead!, top.bodyStart as number, null, null);
+                    }
+                    const end = this.curInstr(); // SWEND 指令索引
+                    // 回填 SWSTART 类型错误目标 (SWEND 之后, 与行解释器 executeSwitch 类型错误时跳到 endswc 下一行一致;
+                    // 不能指向 SWEND 本身, 否则未压 switch 帧却执行 SWEND pop 会误弹外层 switch 帧)
+                    this.patch(top.swStartIdx as number, null, end + 1, null);
+                    // 逐 head 文本扫描 (复刻 executeCase/executeDefault 的运行时扫描语义, 编译期预计算目标):
+                    // - noMatch 目标 (case 值不匹配): 跳到首个 {case,default,break}(本层) 之后
+                    //   → 下一 head 体 / break 之后的指令 / (无目标) 自身 body
+                    // - skip 目标 (已匹配或已入 default): 跳到首个 {break,endswc}(本层) 之后
+                    //   → break 的 JMP 目标 (循环 break 为其循环尾, switch 自身 break 为 SWEND) / SWEND
+                    const heads = top.heads as any[];
+                    for (let i = 0; i < heads.length; i++) {
+                        const h = heads[i];
+                        const op = this.code[h.headInstr * 4];
+                        if (op === NSVMOp.SWCASE) {
+                            const hit = this.scanCaseDefaultBreak(h.line, top.endswcLine!);
+                            let noMatchT: number;
+                            if (hit === null) {
+                                noMatchT = h.bodyStart; // 无后续 case/default/break → 落入自身 body (executeCase 扫描到 endswc 归零不改行指针)
+                            } else if (hit.kind === 'case' || hit.kind === 'default') {
+                                const j = heads.findIndex((x: any) => x.line === hit.line);
+                                noMatchT = j !== -1 ? heads[j].bodyStart : h.bodyStart;
+                            } else {
+                                noMatchT = (this.breakByLine.get(hit.line) as number) + 1; // 跳过 break → 其后指令
+                            }
+                            this.patch(h.headInstr, null, null, noMatchT);
+                            const skipHit = this.scanBreakOrEndswc(h.line, top.endswcLine!);
+                            this.consts[h.caseK].s = skipHit === null ? end : this.breakTarget(skipHit.line, end);
+                        } else if (op === NSVMOp.SWDEF) {
+                            const skipHit = this.scanBreakOrEndswc(h.line, top.endswcLine!);
+                            const skipT = skipHit === null ? end : this.breakTarget(skipHit.line, end);
+                            this.patch(h.headInstr, null, skipT, null);
+                        }
+                    }
+                    // 回填 switch 内 break
+                    for (const b of top.breaks as number[]) this.patch(b, end, null, null);
+                    this.emit(NSVMOp.SWEND, 0, 0, 0);
+                    stack.pop();
+                    break;
+                }
+                case StmtType.TRY: {
+                    const handlerIdx = handlers.length;
+                    handlers.push({ tryInstr: -1, catchInstr: -1, endtryInstr: -1, endtryLine: -1, errorName: '' });
+                    const tryInstr = this.emit(NSVMOp.TRY, handlerIdx, 0, 0);
+                    handlers[handlerIdx].tryInstr = tryInstr;
+                    stack.push({ type: 'try', handlerIdx, catchInstrIdx: -1 });
+                    break;
+                }
+                case StmtType.CATCH: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'try') return null;
+                    const m = stmt.params.match(/^\(\s*Exception\s+([a-zA-Z0-9_]+)\s*\)$/);
+                    if (!m) return null;
+                    const h = handlers[top.handlerIdx as number];
+                    h.errorName = m[1];
+                    h.catchInstr = this.emit(NSVMOp.CATCH, this.constIndex(m[1]), 0, 0);
+                    top.catchInstrIdx = h.catchInstr;
+                    break;
+                }
+                case StmtType.ENDTRY: {
+                    const top = stack[stack.length - 1];
+                    if (!top || top.type !== 'try') return null;
+                    const h = handlers[top.handlerIdx as number];
+                    h.endtryInstr = this.emit(NSVMOp.ENDTRY, 0, 0, 0);
+                    h.endtryLine = line;
+                    // 回填 CATCH 指令: b = 正常流程跳过目标 (ENDTRY 之后), c = endtry 行号 (异常变量作用域)
+                    if (top.catchInstrIdx !== -1) this.patch(top.catchInstrIdx!, null, h.endtryInstr + 1, line);
+                    stack.pop();
+                    break;
+                }
+                case StmtType.END_TAG:
+                    // :end 已在上方处理 (funcName != null 时 emit RET)
+                    break;
+                default:
+                    return null;
+            }
+        }
+
+        // 结构未闭合 → 编译失败
+        if (stack.length > 0) return null;
+
+        // 全局块尾
+        if (funcName === null) {
+            this.emit(NSVMOp.HALT, endLine, 0, 0);
+        }
+
+        // 构建 lineToInstr: 源行 → 指令索引
+        const lineToInstr = new Array<number>(programLines.length).fill(-1);
+        for (let i = 0; i < this.lines.length; i++) {
+            const ln = this.lines[i];
+            if (lineToInstr[ln] === -1) lineToInstr[ln] = i;
+        }
+
+        // 解析 jump 目标 (标签行 → 该标签后的第一条指令)
+        for (const f of this.jumpFixes) {
+            // 标签目标必须位于当前块范围内; 全局块不得跳入函数体内标签 (跨块 jump 属边缘情形 → 编译失败整体回退行解释器)
+            if (f.tagLine < startLine || f.tagLine > endLine) return null;
+            if (funcName === null && inFunc[f.tagLine]) return null;
+            const target = this.lineToInstrForTag(f.tagLine, lineToInstr, endLine);
+            if (target === -1) return null;
+            this.patch(f.jmpIdx, null, target, null);
+        }
+        // 解析 assert 真跳目标 (endasrt 后的第一条指令)
+        for (const ai of this.assertFixes) {
+            const target = this.nextInstrAfter(ai, lineToInstr);
+            if (target === -1) return null;
+            this.patch(ai, null, target, null);
+        }
+
+        return {
+            instrs: new Int32Array(this.code),
+            consts: this.consts,
+            lines: this.lines,
+            handlers,
+            lineToInstr
+        };
+    }
+
+    private static jumpFixes: { line: number; tagLine: number; jmpIdx: number }[] = [];
+    private static assertFixes: number[] = [];
+    // 源行号 → break 指令索引 (供 switch 文本扫描复刻 executeCase 语义)
+    private static breakByLine: Map<number, number> = new Map();
+
+    // switch 扫描: 从 startLine+1 到 endLine (endswc 行) 追踪 switch 嵌套 (复刻 executeCase),
+    // 找首个本层 {case,default,break} 行; 无 (扫描到 endswc 归零) 返回 null
+    private static scanCaseDefaultBreak(startLine: number, endLine: number): { kind: 'case' | 'default' | 'break'; line: number } | null {
+        let nested = 1;
+        for (let i = startLine + 1; i <= endLine; i++) {
+            const line = programLines[i].trim();
+            if (line.toLowerCase().startsWith('switch ')) nested++;
+            else if (line === 'endswc') {
+                nested--;
+                if (nested === 0) return null;
+            } else if (nested === 1) {
+                if (line.toLowerCase().startsWith('case ') || line === 'case') return { kind: 'case', line: i };
+                if (line === 'default') return { kind: 'default', line: i };
+                if (line === 'break') return { kind: 'break', line: i };
+            }
+        }
+        return null;
+    }
+
+    // switch 扫描: 找首个本层 {break,endswc} 行 (复刻 executeCase 已匹配跳过 / executeDefault 已匹配跳过);
+    // 遇到 endswc 归零 → 返回 null (目标 = SWEND)
+    private static scanBreakOrEndswc(startLine: number, endLine: number): { kind: 'break'; line: number } | null {
+        let nested = 1;
+        for (let i = startLine + 1; i <= endLine; i++) {
+            const line = programLines[i].trim();
+            if (line.toLowerCase().startsWith('switch ')) nested++;
+            else if (line === 'endswc') {
+                nested--;
+                if (nested === 0) return null;
+            } else if (nested === 1 && line === 'break') {
+                return { kind: 'break', line: i };
+            }
+        }
+        return null;
+    }
+
+    // break 行的 JMP 目标; 未回填 (switch 自身 break, ENDSWC 尚未回填) → SWEND
+    private static breakTarget(line: number, swEnd: number): number {
+        const jmpIdx = this.breakByLine.get(line);
+        if (jmpIdx === undefined) return swEnd;
+        const t = this.code[jmpIdx * 4 + 1];
+        return t === -1 ? swEnd : t;
+    }
+
+    // 标签目标: 该标签行之后的第一条指令 (标签行无指令, 指向下一指令); 限定在当前块 endLine 内 (防止跨块误解析)
+    private static lineToInstrForTag(tagLine: number, lineToInstr: number[], endLine: number): number {
+        for (let i = tagLine; i <= endLine; i++) {
+            if (lineToInstr[i] !== -1) return lineToInstr[i];
+        }
+        return -1;
+    }
+
+    // assert 真跳目标: 从当前指令之后查找 endasrt 行后的第一条指令
+    private static nextInstrAfter(assertIdx: number, lineToInstr: number[]): number {
+        // 找到 assert 指令对应的行
+        const assertLine = NSVMCompiler.lines[assertIdx];
+        let nested = 1;
+        for (let i = assertLine + 1; i < programLines.length; i++) {
+            const l = LINE_INFO[i];
+            if (l.isEmpty || l.isComment || l.content === '///') continue;
+            if (l.stmt.type === StmtType.ASSERT) nested++;
+            else if (l.stmt.type === StmtType.ENDASRT) {
+                nested--;
+                if (nested === 0) {
+                    // endasrt 行后的第一条指令
+                    for (let j = i + 1; j < programLines.length; j++) {
+                        if (lineToInstr[j] !== -1) return lineToInstr[j];
+                    }
+                    return NSVMCompiler.code.length / 4; // 无后续 → 块尾 (HALT)
+                }
+            }
+        }
+        return -1;
+    }
+}
+
+// 执行器
+class NSVMExecutor {
+    static active = false;
+    static globalBlock: NSVMBlock | null = null;
+    static funcBlocks: Map<string, NSVMBlock> = new Map();
+    static frames: NSVMFrame[] = [];
+    // VM 内部 try 帧栈 (异常时从顶向下找 handler)
+    static vmTryStack: { block: NSVMBlock; handlerIdx: number }[] = [];
+    // switch 帧栈 (VM 内部, 复刻 executeSwitch/executeCase 的状态);
+    // block/pc 记录压栈处, 供异常处理按"TRY 指令之后压入的帧"清理 (主循环 CONTROL_FLOW_STACK.length = tryIdx+1 的对应物)
+    static switchStack: { block: NSVMBlock; pc: number; condition: number | string; hasMatched: boolean; inCaseBlock: false | 'case' | 'default' }[] = [];
+
+    // 编译并激活; 编译失败返回 false (调用方回退行解释器)
+    static prepare(): boolean {
+        if (NSVMExecutor.active) return true;
+        if (NSVMCompiler.compileProgram()) {
+            NSVMExecutor.active = true;
+            NSVMExecutor.frames = [];
+            NSVMExecutor.vmTryStack = [];
+            NSVMExecutor.switchStack = [];
+            return true;
+        }
+        return false;
+    }
+
+    static run(): void {
+        if (NSVMExecutor.frames.length === 0) {
+            if (!NSVMExecutor.globalBlock) return;
+            NSVMExecutor.frames = [{
+                block: NSVMExecutor.globalBlock,
+                pc: 0,
+                retAddr: -1,
+                caller: null,
+                callFrom: -1
+            }];
+            NSVMExecutor.vmTryStack = [];
+            NSVMExecutor.switchStack = [];
+        }
+        let frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+
+        while (true) {
+            try {
+                while (true) {
+                    const instrs = frame.block.instrs;
+                    if (frame.pc * 4 >= instrs.length) break; // 块尾
+                    const base = frame.pc * 4;
+                    const op = instrs[base];
+                    const a = instrs[base + 1];
+                    const b = instrs[base + 2];
+                    const c = instrs[base + 3];
+                    currentLinePointer = frame.block.lines[frame.pc];
+                    const consts = frame.block.consts;
+
+                    switch (op) {
+                        case NSVMOp.HALT:
+                            currentLinePointer = programLines.length; // 复刻主循环退出时行指针 ("程序执行完毕" 行号一致)
+                            if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
+                            else debugLog(1, () => '程序执行完毕');
+                            return;
+                        case NSVMOp.STMT:
+                            Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
+                            frame.pc++;
+                            break;
+                        case NSVMOp.JMP:
+                            frame.pc = a;
+                            break;
+                        case NSVMOp.JZ: {
+                            const v = Interpreter.evaluateExpression(consts[a]);
+                            if (typeof v !== 'boolean') {
+                                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', { actualType: typeof v }));
+                                frame.pc++;
+                            } else if (!v) {
+                                // if 假分支调试输出 (复刻 executeIf debugLog(1))
+                                if (LINE_INFO[currentLinePointer] && LINE_INFO[currentLinePointer].stmt.type === StmtType.IF) {
+                                    debugLog(1, () => `if 条件为假在第 ${currentLinePointer + 1} 行`);
+                                }
+                                // while 条件为假: 弹 while 帧 (复刻 executeWhile 假分支先压后弹的净效果;
+                                // 每次迭代 JZ 都会执行, 存在时弹残留帧)
+                                if (LINE_INFO[currentLinePointer] && LINE_INFO[currentLinePointer].stmt.type === StmtType.WHILE) {
+                                    for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                                        if (CONTROL_FLOW_STACK[i].type === 'while' && (CONTROL_FLOW_STACK[i] as { start?: number }).start === currentLinePointer) {
+                                            CONTROL_FLOW_STACK.splice(i, 1);
+                                            break;
+                                        }
+                                    }
+                                }
+                                frame.pc = b;
+                            } else {
+                                // while 条件为真: 压 while 帧 (复刻 executeWhile exists 检查; 递归/嵌套时栈顶同源帧复用)
+                                if (LINE_INFO[currentLinePointer] && LINE_INFO[currentLinePointer].stmt.type === StmtType.WHILE) {
+                                    let exists = false;
+                                    const topBlock = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+                                    if (topBlock && topBlock.type === 'while' && topBlock.start === currentLinePointer) exists = true;
+                                    else exists = CONTROL_FLOW_STACK.some(item => item.type === 'while' && item.start === currentLinePointer);
+                                    if (!exists) CONTROL_FLOW_STACK.push({ type: 'while', start: currentLinePointer });
+                                }
+                                frame.pc++;
+                            }
+                            break;
+                        }
+                        case NSVMOp.JNZ: {
+                            const v = Interpreter.evaluateExpression(consts[a]);
+                            if (typeof v !== 'boolean') {
+                                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', { actualType: typeof v }));
+                                frame.pc++;
+                            } else if (v) frame.pc = b;
+                            else frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.CALL: {
+                            const oldPc = frame.pc;
+                            Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
+                            // executeCall 已压 function 帧到 CONTROL_FLOW_STACK; 切换到 callee 的 VM 块
+                            const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+                            if (topFrame && topFrame.type === 'function') {
+                                const fb = NSVMExecutor.funcBlocks.get(topFrame.funcName);
+                                if (fb) {
+                                    NSVMExecutor.frames.push({
+                                        block: fb, pc: 0, retAddr: oldPc + 1,
+                                        caller: frame, callFrom: a
+                                    });
+                                    frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+                                    break;
+                                }
+                            }
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.RETV:
+                        case NSVMOp.RET: {
+                            const curFrame = NSVMExecutor.frames.pop() as NSVMFrame;
+                            // 记录当前最深的函数帧 frameId: executeReturn/executeFunctionEndTag 成功路径会弹帧,
+                            // 失败路径 (报错后继续执行函数体, 如 return 非声明返回变量) 不弹帧 —
+                            // 用 frameId 是否仍在栈中区分, 复刻主循环"报错后继续执行"语义
+                            let funcFrameId = -1;
+                            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                                if (CONTROL_FLOW_STACK[i].type === 'function') { funcFrameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId; break; }
+                            }
+                            Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
+                            let frameStillThere = false;
+                            if (funcFrameId !== -1) {
+                                for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                                    if (CONTROL_FLOW_STACK[i].type === 'function' && (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId === funcFrameId) { frameStillThere = true; break; }
+                                }
+                            }
+                            if (frameStillThere) {
+                                // 返回失败: 恢复当前帧, 继续执行函数体 (报错后行为与行解释器一致)
+                                NSVMExecutor.frames.push(curFrame);
+                                frame = curFrame;
+                                frame.pc++;
+                            } else {
+                                if (NSVMExecutor.frames.length === 0) return; // 不应发生
+                                frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+                                frame.pc = curFrame.retAddr;
+                            }
+                            break;
+                        }
+                        case NSVMOp.FORINIT: {
+                            const meta = consts[a] as ForInitMeta;
+                            // 复刻 executeFor 初始化: 变量已存在 (jump 重入) 则复用, 否则声明
+                            if (!ScopeManager.hasVariable(meta.varName, currentLinePointer)) {
+                                const initValue = Interpreter.parseValue(meta.initExpr, meta.type);
+                                ScopeManager.addVariable(meta.varName, initValue, meta.type, currentLinePointer, meta.endforLine, false);
+                                rebuildSlotIndex();
+                            }
+                            // 压 for 帧 (复刻 executeFor): 循环变量只读检查 (checkLoopVarWritable) 与 local 声明检查
+                            // (executeLocal) 均依赖 CONTROL_FLOW_STACK 中的 for 帧; jump 重入不经过本指令, 帧已残留不重复压
+                            CONTROL_FLOW_STACK.push({ type: 'for', start: currentLinePointer, updateExpr: meta.updateExpr, varName: meta.varName });
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.FORUPD: {
+                            // 更新循环变量 (设置只读豁免标志)
+                            FOR_UPDATE_VAR = consts[b];
+                            try {
+                                Interpreter.executeOperation(consts[a]);
+                            } finally {
+                                FOR_UPDATE_VAR = null;
+                            }
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.FORCLEAN: {
+                            // 循环自然结束 (条件不满足): 清理循环变量, 复刻 executeFor 条件不满足分支的 cleanupLocalVariable;
+                            // break 跳出时跳过本指令, 循环变量残留 (与 executeBreak 语义一致)
+                            const meta = consts[a] as ForInitMeta;
+                            const varInfo = ScopeManager.getVariableInfo(meta.varName, currentLinePointer);
+                            if (varInfo && !varInfo.isGlobal) {
+                                ScopeManager.cleanupLocalVariable(false, false, varInfo.name, varInfo.startLine, varInfo.endLine, varInfo.frameId);
+                                rebuildSlotIndex();
+                            }
+                            // 弹出对应 for 帧 (复刻 executeFor !result 分支 CONTROL_FLOW_STACK.pop())
+                            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                                const b = CONTROL_FLOW_STACK[i];
+                                if (b.type === 'for' && b.varName === meta.varName) { CONTROL_FLOW_STACK.splice(i, 1); break; }
+                            }
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.SWSTART: {
+                            // 复刻 executeSwitch 调试输出 (debugLog 1)
+                            debugLog(1, () => `执行switch语句: ${consts[a]}`);
+                            const cond = Interpreter.evaluateExpression(consts[a]);
+                            debugLog(1, () => `switch语句的条件表达式值: ${cond}`);
+                            // 复刻 executeSwitch 类型检查: number 必须整数; 非 number/string 报错
+                            let typeError = false;
+                            if (typeof cond === 'number') {
+                                if (!Number.isInteger(cond)) { reportError(ExceptionType.TYPE_ERROR, t('switch_cond_int_only')); typeError = true; }
+                            } else if (typeof cond !== 'string') {
+                                reportError(ExceptionType.TYPE_ERROR, t('switch_cond_type'));
+                                typeError = true;
+                            }
+                            if (typeError) {
+                                frame.pc = b; // 跳到 switch 尾
+                                break;
+                            }
+                            NSVMExecutor.switchStack.push({ block: frame.block, pc: frame.pc, condition: cond, hasMatched: false, inCaseBlock: false });
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.SWCASE: {
+                            // 复刻 executeCase 调试输出 (debugLog 1, 在检查/跳转之前)
+                            debugLog(1, () => `处理 case 语句`);
+                            const sw = NSVMExecutor.switchStack[NSVMExecutor.switchStack.length - 1];
+                            if (!sw) { frame.pc++; break; }
+                            const head = consts[a] as { e: string; s: number };
+                            // 已匹配过 case 或已在 default 块: 跳到 skip 目标 (复刻 executeCase 已匹配分支的文本跳过)
+                            if (sw.hasMatched || sw.inCaseBlock === 'default') {
+                                frame.pc = head.s;
+                                break;
+                            }
+                            const caseVal = Interpreter.evaluateExpression(head.e);
+                            if (typeof caseVal !== typeof sw.condition) {
+                                reportError(ExceptionType.TYPE_ERROR, t('case_type_mismatch'));
+                                frame.pc++;
+                                break;
+                            }
+                            if (caseVal === sw.condition) {
+                                sw.hasMatched = true;
+                                sw.inCaseBlock = 'case';
+                                frame.pc = b; // 进入 case 体
+                            } else {
+                                frame.pc = c; // 不匹配: 跳到 noMatch 目标 (下一 head 体 / break 后指令 / 自身 body)
+                            }
+                            break;
+                        }
+                        case NSVMOp.SWDEF: {
+                            const sw = NSVMExecutor.switchStack[NSVMExecutor.switchStack.length - 1];
+                            if (!sw) { frame.pc++; break; }
+                            if (sw.hasMatched) {
+                                frame.pc = b; // 已匹配: 跳到 skip 目标 (复刻 executeDefault 已匹配分支)
+                            } else {
+                                sw.inCaseBlock = 'default';
+                                frame.pc = a; // 进入 default 体
+                            }
+                            break;
+                        }
+                        case NSVMOp.SWEND:
+                            NSVMExecutor.switchStack.pop();
+                            frame.pc++;
+                            break;
+                        case NSVMOp.TRY: {
+                            Interpreter.executeTry(); // 压 EXCEPTION_STACK TRY_BLOCK + CONTROL_FLOW_STACK try 帧
+                            NSVMExecutor.vmTryStack.push({ block: frame.block, handlerIdx: a });
+                            frame.pc++;
+                            break;
+                        }
+                        case NSVMOp.CATCH: {
+                            // 异常进入: 绑定异常变量, 进入 catch 块体 (复刻 executeCatch 情况一)
+                            if (PENDING_EXCEPTION !== null) {
+                                const exception = PENDING_EXCEPTION;
+                                PENDING_EXCEPTION = null;
+                                const errorName = consts[a];
+                                ScopeManager.addVariable(errorName, exception.message, DataType.STRING, currentLinePointer, c, false, false);
+                                rebuildSlotIndex();
+                                EXCEPTION_STACK.push({ type: ExceptionType.CATCH_BLOCK, message: errorName, lineNumber: currentLinePointer });
+                                debugLog(1, () => `捕获异常: ${exception.message} (行 ${exception.lineNumber + 1})`);
+                                frame.pc++; // 进入 catch 块体
+                                break;
+                            }
+                            // 正常流程 (try 无异常): 复刻 executeCatch 情况二 — 清除 try 标记与 try 帧, 跳到 ENDTRY 之后跳过 catch 块体
+                            if (EXCEPTION_STACK.length > 0 && EXCEPTION_STACK[EXCEPTION_STACK.length - 1].type === ExceptionType.TRY_BLOCK) {
+                                EXCEPTION_STACK.pop();
+                            }
+                            if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'try') {
+                                CONTROL_FLOW_STACK.pop();
+                            }
+                            NSVMExecutor.vmTryStack.pop(); // 对应 TRY 压入的条目
+                            frame.pc = b; // 编译器回填: ENDTRY 之后 (跳过 catch 块体)
+                            break;
+                        }
+                        case NSVMOp.ENDTRY:
+                            Interpreter.executeEndTry(); // 清理 try 块内局部变量 + 异常栈 + try 帧
+                            NSVMExecutor.vmTryStack.pop();
+                            frame.pc++;
+                            break;
+                        case NSVMOp.ASSERTCHK: {
+                            // 复刻 executeAssert: 条件真值性判断 (非布尔不报错) + 调试输出逐字节一致
+                            const info = consts[a] as { content: string; params: string; cond: string; msg: string | null };
+                            DEBUG_LEVEL >= 2 && debugLog(2, () => `执行指令 ${info.content}`);
+                            debugLog(1, () => `执行assert语句: ${info.params}`);
+                            let condition: any;
+                            try {
+                                condition = Interpreter.evaluateExpression(info.cond);
+                            } catch (error) {
+                                if (isInputSuspend(error)) throw error;
+                                if ((error as Exception).type === ExceptionType.ASSERTION_ERROR) throw error;
+                                reportError(ExceptionType.SYNTAX_ERROR, t('assert_condition_invalid', { expr: info.cond }));
+                                frame.pc++;
+                                break;
+                            }
+                            if (!condition) {
+                                // 条件为假: 复刻 executeAssert 取下一行作消息抛 ASSERTION_ERROR (行号 = 消息行)
+                                if (info.msg === null) {
+                                    reportError(ExceptionType.SYNTAX_ERROR, t('assert_message_quoted'));
+                                    frame.pc++;
+                                    break;
+                                }
+                                throw { type: ExceptionType.ASSERTION_ERROR, message: info.msg, lineNumber: currentLinePointer + 1 } as Exception;
+                            }
+                            debugLog(1, () => `断言条件为真: ${info.cond}`);
+                            frame.pc = b; // 跳过消息行 + endasrt
+                            break;
+                        }
+                        case NSVMOp.ASSERTFAIL:
+                            throw { type: ExceptionType.ASSERTION_ERROR, message: consts[a], lineNumber: currentLinePointer } as Exception;
+                        default:
+                            throw { type: ExceptionType.UNKNOWN_ERROR, message: t('internal_error', { line: currentLinePointer + 1, message: `未知 NSVM 指令 ${op}` }), lineNumber: currentLinePointer } as Exception;
+                    }
+                }
+
+                // 块尾: 函数块无 RET 直接结束 → 走 executeFunctionEndTag 语义 (void 函数或报错);
+                // 报错后仍返回调用方继续执行 (executeFunctionEndTag 报错后 currentLinePointer = callFrom, 主循环继续), 不得终止整个 VM
+                if (NSVMExecutor.frames.length > 1) {
+                    const curFrame = NSVMExecutor.frames.pop() as NSVMFrame;
+                    const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+                    if (topFrame && topFrame.type === 'function') {
+                        const funcInfo = FUNCTIONS[topFrame.funcName];
+                        const block = topFrame as any;
+                        LOCAL_VARS.length = block.frameVarStart;
+                        delete SLOT_INDEX[String(block.frameId)];
+                        CONTROL_FLOW_STACK.pop();
+                        if (funcInfo && !ScopeManager.isVoidFunction(funcInfo)) {
+                            reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', { name: funcInfo.name, type: funcInfo.returnType }));
+                        } else {
+                            debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`);
+                        }
+                    }
+                    frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+                    frame.pc = curFrame.retAddr;
+                    continue;
+                }
+                // 全局块尾 (无 HALT 情形): 正常结束
+                currentLinePointer = programLines.length; // 复刻主循环退出时行指针
+                if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
+                else debugLog(1, () => '程序执行完毕');
+                return;
+            } catch (error) {
+                // input 挂起信号: 交还控制权
+                if (isInputSuspend(error)) {
+                    INPUT_SUSPENDED = true;
+                    return;
+                }
+                const exception = error as Exception;
+                if (exception.lineNumber === undefined) exception.lineNumber = currentLinePointer;
+
+                // 从当前帧向调用方链查找最近 handler
+                let handled = false;
+                while (NSVMExecutor.frames.length > 0) {
+                    const f = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+                    let hitIdx = -1;
+                    for (let i = NSVMExecutor.vmTryStack.length - 1; i >= 0; i--) {
+                        if (NSVMExecutor.vmTryStack[i].block === f.block) { hitIdx = i; break; }
+                    }
+                    if (hitIdx !== -1) {
+                        const handler = f.block.handlers[NSVMExecutor.vmTryStack[hitIdx].handlerIdx];
+                        // 保留命中帧 (供 ENDTRY pop), 仅弹掉其上的内层条目
+                        NSVMExecutor.vmTryStack.length = hitIdx + 1;
+                        // 清理本块内 TRY 指令之后压入的 switch 帧 (主循环 CONTROL_FLOW_STACK.length = tryIdx+1 的对应物:
+                        // try 内的 switch 帧被弹, try 外先于 try 压入的 switch 帧保留)
+                        for (let j = NSVMExecutor.switchStack.length - 1; j >= 0; j--) {
+                            if (NSVMExecutor.switchStack[j].block === f.block && NSVMExecutor.switchStack[j].pc > handler.tryInstr) {
+                                NSVMExecutor.switchStack.length = j;
+                                break;
+                            }
+                        }
+                        // 清理 CONTROL_FLOW_STACK 到 try 帧 + EXCEPTION_STACK (与主循环一致)
+                        let tryIdx = -1;
+                        for (let j = CONTROL_FLOW_STACK.length - 1; j >= 0; j--) {
+                            if (CONTROL_FLOW_STACK[j].type === 'try') { tryIdx = j; break; }
+                        }
+                        if (tryIdx !== -1) {
+                            const tryFrame = CONTROL_FLOW_STACK[tryIdx] as any;
+                            CONTROL_FLOW_STACK.length = tryIdx + 1;
+                            let excIdx = -1;
+                            for (let j = EXCEPTION_STACK.length - 1; j >= 0; j--) {
+                                if (EXCEPTION_STACK[j].type === ExceptionType.TRY_BLOCK && EXCEPTION_STACK[j].lineNumber === tryFrame.start) { excIdx = j; break; }
+                            }
+                            if (excIdx !== -1) EXCEPTION_STACK.length = excIdx;
+                        }
+                        PENDING_EXCEPTION = exception;
+                        f.pc = handler.catchInstr;
+                        currentLinePointer = f.block.lines[f.pc];
+                        frame = f;
+                        handled = true;
+                        break;
+                    }
+                    // 本帧无 handler → 冒泡到调用方
+                    if (f.caller) {
+                        NSVMExecutor.frames.pop();
+                        // 清理被弹帧的残留 try/switch 帧 (防污染后续匹配; 本帧无 handler 时其 vmTryStack 通常为空,
+                        // switch 帧可能残留 — 如 switch 块内调用未捕获异常的函数)
+                        for (let j = NSVMExecutor.vmTryStack.length - 1; j >= 0; j--) {
+                            if (NSVMExecutor.vmTryStack[j].block === f.block) NSVMExecutor.vmTryStack.splice(j, 1);
+                        }
+                        for (let j = NSVMExecutor.switchStack.length - 1; j >= 0; j--) {
+                            if (NSVMExecutor.switchStack[j].block === f.block) NSVMExecutor.switchStack.splice(j, 1);
+                        }
+                        for (let j = CONTROL_FLOW_STACK.length - 1; j >= 0; j--) {
+                            if (CONTROL_FLOW_STACK[j].type === 'function') {
+                                CONTROL_FLOW_STACK.length = j;
+                                break;
+                            }
+                        }
+                    } else {
+                        break; // 全局帧无 handler
+                    }
+                }
+
+                if (!handled) {
+                    // 未捕获: 与主循环一致 — reportError 后终止执行, 并复刻主循环退出时的收尾调试输出
+                    if (Object.values(ExceptionType).includes(exception.type)) {
+                        reportError(exception.type, exception.message);
+                    } else {
+                        const nativeMsg = error instanceof Error ? error.message : String(error);
+                        console.error(t('internal_error', { line: currentLinePointer + 1, message: nativeMsg }));
+                        console.error(t('internal_error_hint'));
+                    }
+                    currentLinePointer = programLines.length;
+                    if (EXCEPTION_STACK.length > 0) debugLog(1, () => '程序因错误而停止');
+                    else debugLog(1, () => '程序执行完毕');
+                    return;
+                }
+                // handled: 继续执行
+            }
+        }
     }
 }
 

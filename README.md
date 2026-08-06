@@ -164,6 +164,7 @@ NoethingScript/
 
 ## 版本历史
 
+- **2.5.0**：寄存器型 NSVM 指令集（阶段3 全覆盖）——控制流（if/while/for/switch/jump/break/continue）指令化并逐字节复刻行号与调试输出、函数调用帧切换（CALL/RETV/RET，返回失败路径复刻"报错后继续执行函数体"）、try-catch 异常处理器表 + 跨函数冒泡、ASSERT/PURGE 等语句指令化；编译失败整体回退行解释器；全部 23 个测试逐字节回归一致，2048 端到端基准 -17.5%
 - **2.4.4**：性能优化——局部变量槽位化 O(1) 访问、函数调用特化（参数/返回值帧槽位、帧清理 O(1) 截断）、表达式求值数字快速路径、数组访问帧缓存；新增 `benchmarks/` 基准测试（合成基准 + 2048 端到端 + 确定性校验），基准自动打印运行环境，README 补历史性能记录追溯
 - **2.4.0**：内置 `input()` 运行时输入——命令行同步读取 stdin（含中文），浏览器默认 prompt 弹窗、可 `NSI.setInput()` 自定义绑定（如页面输入框）；新增浏览器交互执行 `NSI.runInteractive`/`NSI.resumeInput`（input() 挂起/恢复，脚本可自持主循环，双环境通用）
 - **2.3.1**：浏览器接口——全局 `window.NSI`（`run`/`setLanguage`/`getLanguage`/底层类），浏览器可直接加载 `dist` 产物运行脚本
