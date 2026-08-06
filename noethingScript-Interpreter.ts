@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.6.0";
+const NSIVersion: string = "2.6.2";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -852,7 +852,8 @@ class ScopeManager {
     // slot 参数 (函数参数/返回值绑定专用): 提供时跳过"同名同作用域"线性查重 (静态建表已保证参数间唯一),
     // 并直接把变量登记到帧槽位 SLOT_INDEX[frameId][slot], 免后续 indexSlotVar 的 Map 查找。
     static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number, slot?: number): boolean {
-        debugLog(1, () => `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
+        // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 函数参数绑定/变量声明每次调用)
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => `尝试添加${isConst ? '常量' : '变量'}: ${name}, 值: ${value}, 类型: ${type}, 作用域: ${startLine + 1}-${endLine === -1 ? "末行" : endLine + 1}, 是否全局: ${isGlobal}`);
         // 验证类型
         const validation = ScopeManager.validateType(value, type);
         if (!validation.isValid) {
@@ -889,7 +890,7 @@ class ScopeManager {
                 return false;
             }
             GLOBAL_VARS[name] = variable;
-            debugLog(1, () => `全局变量 ${name} 添加成功`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => `全局变量 ${name} 添加成功`);
         } else {
             if (slot === undefined) {
                 // 检查是否存在名称、作用域和调用帧完全相同的局部变量 (不同调用帧允许同名, 以支持递归)
@@ -908,7 +909,7 @@ class ScopeManager {
                 const m = SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {});
                 m[slot] = variable;
             }
-            debugLog(1, () => `局部变量 ${name} 添加成功`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => `局部变量 ${name} 添加成功`);
         }
         // 注意: 不再在此处同步槽位索引 — 由各调用方在"声明批次"结束后统一调用 rebuildSlotIndex(),
         // 避免函数参数绑定等连续多次 addVariable 时重复全量重建 (热路径开销)。
@@ -924,8 +925,11 @@ class ScopeManager {
     // 获取变量值 (考虑行号作用域) 
     static getVariable(vname: string, currentLine: number, isArray: boolean = false, isGlobal: boolean = false): any {
         let name: string = vname;
-        debugLog(2, () => `查找${isGlobal ? '全局' : ''}${isArray ? '数组' : '变量'}: ${name} (行 ${currentLine + 1})`);
-        debugLog(2, () => `${isGlobal ? '' : `当前局部变量 (含数组) 数量: ${LOCAL_VARS.length}, `}当前全局变量数量: ${Object.keys(GLOBAL_VARS).length}`);
+        // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 表达式求值/parseValue 每次变量读取都走这里)
+        if (DEBUG_LEVEL >= 2) {
+            debugLog(2, () => `查找${isGlobal ? '全局' : ''}${isArray ? '数组' : '变量'}: ${name} (行 ${currentLine + 1})`);
+            debugLog(2, () => `${isGlobal ? '' : `当前局部变量 (含数组) 数量: ${LOCAL_VARS.length}, `}当前全局变量数量: ${Object.keys(GLOBAL_VARS).length}`);
+        }
         if (isGlobal) {
             if (name.startsWith('global.')) {
                 name = name.slice('global.'.length);
@@ -939,33 +943,34 @@ class ScopeManager {
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
-                debugLog(3, () => `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
+                if (DEBUG_LEVEL >= 3) debugLog(3, () => `检查 ${varInfo.name}${isArray ? ' (数组) ' : ''}: 作用域${varInfo.startLine + 1}-${varInfo.endLine === -1 ? "末行" : varInfo.endLine + 1} 当前行${currentLine + 1} 在范围内: ${inScope}`);
 
                 if (varInfo.name === name && inScope) {
-                    debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
+                    if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 行号=${currentLine + 1}`);
                     return isArray ? varInfo : varInfo.value;
                 }
             }
 
-            debugLog(2, () => `局部变量详情:`, LOCAL_VARS);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => `局部变量详情:`, LOCAL_VARS);
         }
 
-        debugLog(2, () => `全局变量详情:`, GLOBAL_VARS);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `全局变量详情:`, GLOBAL_VARS);
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (全局): ${isArray ? `长度=${GLOBAL_VARS[name].arrayLength}` : `值=${GLOBAL_VARS[name].value}`}, 类型=${GLOBAL_VARS[name].type}, 行号=${currentLine + 1}`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取${isArray ? '数组' : '变量'} ${name} (全局): ${isArray ? `长度=${GLOBAL_VARS[name].arrayLength}` : `值=${GLOBAL_VARS[name].value}`}, 类型=${GLOBAL_VARS[name].type}, 行号=${currentLine + 1}`);
             return isArray ? GLOBAL_VARS[name] : GLOBAL_VARS[name].value;
 
         }
 
-        debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
         return undefined;
     }
 
     // 获取变量信息 (考虑行号作用域) 
     static getVariableInfo(vname: string, currentLine: number, isGlobal: boolean = false): Variable | null {
         let name: string = vname;
-        debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量信息: ${name} (行 ${currentLine + 1})`);
+        // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: executeReturn 返回值查找回退路径)
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `查找${isGlobal ? '全局' : ''}变量信息: ${name} (行 ${currentLine + 1})`);
 
         if (isGlobal) {
             if (name.startsWith('global.')) {
@@ -982,7 +987,7 @@ class ScopeManager {
                     // 对于函数参数, 作用域从startLine到endLine
                     // 特殊处理: 如果endLine为-1, 表示这是一个函数返回值变量, 作用域从startLine到函数结束
                     if (currentLine >= varInfo.startLine && (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
-                        debugLog(1, () => `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
+                        if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取变量信息 ${name} (局部): 值=${varInfo.value}, 类型=${varInfo.type}, 作用域=${varInfo.startLine + 1}-${varInfo.endLine === -1 ? '末行' : varInfo.endLine + 1}, 行号=${currentLine + 1}`);
                         return varInfo;
                     }
                 }
@@ -991,11 +996,11 @@ class ScopeManager {
 
         // 2. 再检查全局变量
         if (GLOBAL_VARS.hasOwnProperty(name)) {
-            debugLog(1, () => `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获取变量信息 ${name} (全局): 值=${GLOBAL_VARS[name].value}, 类型=${GLOBAL_VARS[name].type}, 作用域=${GLOBAL_VARS[name].startLine + 1}-${GLOBAL_VARS[name].endLine === -1 ? '末行' : GLOBAL_VARS[name].endLine + 1}, 行号=${currentLine + 1}`);
             return GLOBAL_VARS[name];
         }
 
-        debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => `警告: 变量 ${name} 未定义 (行 ${currentLine + 1})`);
         return null;
     }
 
@@ -3101,7 +3106,7 @@ class Interpreter {
                         return;
                     }
                     returnValue = undefined;
-                    debugLog(2, () => (`无返回值, 设置为undefined`));
+                    if (DEBUG_LEVEL >= 2) debugLog(2, () => (`无返回值, 设置为undefined`));
                     return;
                 }
                 // 数组返回: 捕获整个数组结构引用 (含 arrayElements), 标量返回捕获值
@@ -3110,7 +3115,7 @@ class Interpreter {
                 } else {
                     returnValue = returnVarInfo.value;
                 }
-                debugLog(2, () => `从变量获取返回值: ${returnValue}`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `从变量获取返回值: ${returnValue}`);
 
                 // 将返回值存储到RETURN_VALUES池中并做好标记
                 if (!RETURN_VALUES.hasOwnProperty(block.funcName)) {
@@ -3128,8 +3133,10 @@ class Interpreter {
                     reportError(ExceptionType.UNKNOWN_ERROR, t('return_value_name_mismatch'));
                     return;
                 }
-                debugLog(2, () => `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
-                debugLog(2, () => `当前返回值池内容: `, RETURN_VALUES);
+                if (DEBUG_LEVEL >= 2) {
+                    debugLog(2, () => `存储返回值到RETURN_VALUES[${block.funcName}][${returnValueStr}]: ${returnValue}`);
+                    debugLog(2, () => `当前返回值池内容: `, RETURN_VALUES);
+                }
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
                 CONTROL_FLOW_STACK.pop();
@@ -3138,17 +3145,17 @@ class Interpreter {
                 LOCAL_VARS.length = block.frameVarStart;
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长 (内存 + 帧缓存失效)
                 delete SLOT_INDEX[String(block.frameId)];
-                debugLog(2, () => `函数调用清理后的局部变量表`, LOCAL_VARS);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数调用清理后的局部变量表`, LOCAL_VARS);
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
                 // 注意: 用调用行 (block.callFrom) 而非当前 return 行作为结果变量作用域起点,
                 // 否则递归时 return 行晚于调用点, 结果变量会被误判为"未声明"而创建隐式重复变量, 遮蔽静态声明。
                 handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, block.callFrom);
-                debugLog(2, () => `清理后控制流栈:`, CONTROL_FLOW_STACK);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `清理后控制流栈:`, CONTROL_FLOW_STACK);
                 currentLinePointer = block.callFrom;
                 break; // 停止遍历, 防止处理残留函数帧
             } else {
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `清理后的控制流: `, CONTROL_FLOW_STACK);
             }
         }
 
@@ -4149,10 +4156,10 @@ class Interpreter {
         // 使用表达式解析器来处理赋值操作
         try {
             const result = ExpressionEvaluator.evaluate(command.trim(), currentLinePointer);
-            debugLog(1, () => `获得解析结果`);
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => `获得解析结果`);
             // 检查是否是数组元素赋值
             if (result && typeof result === 'object' && result.type === 'array_assignment') {
-                debugLog(1, () => `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => `侦测到数组赋值 目标:${result.target.arrayName} 索引:${result.target.index}`);
                 const { target, value, binding } = result;
                 // 处理 global. 前缀 (与整体赋值分支一致)
                 let targetName: string = target.arrayName;
@@ -4175,7 +4182,7 @@ class Interpreter {
                 if (!arrayVar) {
                     throw { type: ExceptionType.REFERENCE_ERROR, message: t('array_undefined', {name: targetName}), lineNumber: currentLinePointer } as Exception;
                 }
-                debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => `获得的数组名称: ${arrayVar.name}`);
 
                 if (arrayVar.type !== DataType.ARRAY) {
                     throw { type: ExceptionType.TYPE_ERROR, message: t('not_array_type', {name: targetName}), lineNumber: currentLinePointer } as Exception;
@@ -4211,12 +4218,12 @@ class Interpreter {
                 }
 
                 // 更新数组元素
-                debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `更新数组元素: ${arrayVar.arrayElements![target.index].value} 为 ${validation.convertedValue}`);
                 arrayVar.arrayElements![target.index].value = validation.convertedValue;
                 // ScopeManager.setVariable(target.arrayName, arrayVar, currentLinePointer);
                 return;
             } else if (result && typeof result === 'object' && result.type === 'assignment') {
-                debugLog(1, () => `处理普通变量赋值 (type: assignment) : ${command}`);
+                if (DEBUG_LEVEL >= 1) debugLog(1, () => `处理普通变量赋值 (type: assignment) : ${command}`);
                 // 处理普通变量赋值
                 const { target, value, binding } = result;
                 let newTarget: string = target;
@@ -4259,7 +4266,7 @@ class Interpreter {
                             if (rhsVar.isReadonlyArray) {
                                 lhsVar.isReadonlyArray = true;
                             }
-                            debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
+                            if (DEBUG_LEVEL >= 1) debugLog(1, () => `数组整体赋值(引用): ${newTarget} -> ${rhsVar.name}`);
                             return;
                         }
                         Interpreter.checkLoopVarWritable(newTarget);
@@ -4504,13 +4511,13 @@ class Interpreter {
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长
                 delete SLOT_INDEX[String(block.frameId)];
                 CONTROL_FLOW_STACK.pop();
-                debugLog(2, () => `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数 ${funcInfo.name} 结束标记后的局部变量表:`, LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
                     reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', {name: funcInfo.name, type: funcInfo.returnType}));
                     currentLinePointer = block.callFrom;
                     return;
                 } else {
-                    debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`)
+                    if (DEBUG_LEVEL >= 1) debugLog(1, () => `函数 ${funcInfo.name} 是无返回值函数, 返回调用位置`)
                     currentLinePointer = block.callFrom;
                     return;
                 }
@@ -6586,6 +6593,7 @@ interface NSVMCallMeta {
     content: string;       // 原始源码行 (复刻 executeCommand 的"执行指令"调试输出)
     argExprs: string[];    // 逐实参表达式字符串 (已拆分, 忽略数组字面量/字符串内逗号)
     resultVar: string | undefined; // 返回变量名 (-> result)
+    bodyStartLine: number; // 函数体首条可执行行 (编译期预解析, 跳过空行/标签行; 运行期免重复扫描)
 }
 
 // NEWARRAY 数组声明元数据 (编译期预解析 executeArrayDeclaration 的静态部分: 格式正则/标识符/元素拆分,
@@ -6938,7 +6946,17 @@ class NSVMCompiler {
                     }
                     const fnK = this.constIndex(funcName);
                     const modesK = this.constIndex(Int32Array.from(modes));
-                    const metaK = this.constIndex({ funcName, callParams: p, content: LINE_INFO[line].content, argExprs: argValues, resultVar } as NSVMCallMeta);
+                    // 函数体首条可执行行编译期预解析 (跳过空行/标签行), 运行期免每次调用重复扫描 programLines
+                    let bodyStartLine = funcInfo.startLine + 1;
+                    while (bodyStartLine < funcInfo.endLine) {
+                        const checkLine = programLines[bodyStartLine].trim();
+                        if (checkLine === '' || checkLine.indexOf(':') === 0) {
+                            bodyStartLine++;
+                            continue;
+                        }
+                        break;
+                    }
+                    const metaK = this.constIndex({ funcName, callParams: p, content: LINE_INFO[line].content, argExprs: argValues, resultVar, bodyStartLine } as NSVMCallMeta);
                     this.emit(NSVMOp.CALLFUNC, fnK, modesK, metaK);
                     break;
                 }
@@ -7515,7 +7533,10 @@ class NSVMExecutor {
                             for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
                                 if (CONTROL_FLOW_STACK[i].type === 'function') { funcFrameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId; break; }
                             }
-                            Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
+                            // 直接调 executeReturn/executeFunctionEndTag (跳过 executeCommand switch 分发), 保留"执行指令"调试输出逐字节一致
+                            if (DEBUG_LEVEL >= 2) debugLog(2, () => `执行指令 ${LINE_INFO[a].content}`);
+                            if (op === NSVMOp.RETV) Interpreter.executeReturn(LINE_INFO[a].stmt.params);
+                            else Interpreter.executeFunctionEndTag();
                             let frameStillThere = false;
                             if (funcFrameId !== -1) {
                                 for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
@@ -7836,9 +7857,10 @@ class NSVMExecutor {
         const funcInfo = FUNCTIONS[fnK];
         const oldPc = frame.pc;
         // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
-        debugLog(2, () => `执行指令 ${meta.content}`);
-        debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
-        debugLog(2, () => `函数信息:`, funcInfo);
+        // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 每调用 ~20 个 debugLog 闭包)
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `执行指令 ${meta.content}`);
+        if (DEBUG_LEVEL >= 1) debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数信息:`, funcInfo);
         // 阶段1: 解析实参 (复刻 executeCall 解析段; 失败即 reportError + 调用方继续, 无绑定污染)
         const args: any[] = [];
         let parseFailed = false;
@@ -7862,17 +7884,19 @@ class NSVMExecutor {
         const oldLinePointer = currentLinePointer;
         const frameId = ++CALL_FRAME_ID;
         const callVarStart = LOCAL_VARS.length;
-        debugLog(2, () => `函数 ${fnK} 开始传递参数`);
-        debugLog(2, () => `函数信息:`, funcInfo);
-        debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
-        debugLog(2, () => `开始参数传递循环`);
-        debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        if (DEBUG_LEVEL >= 2) {
+            debugLog(2, () => `函数 ${fnK} 开始传递参数`);
+            debugLog(2, () => `函数信息:`, funcInfo);
+            debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
+            debugLog(2, () => `开始参数传递循环`);
+            debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+        }
         // 阶段2: 绑定参数到 callee 帧参数槽位 (寄存器直写, 复刻 executeCall 绑定循环)
         for (let i = 0; i < argc; i++) {
-            debugLog(3, () => `循环索引: ${i}`);
+            if (DEBUG_LEVEL >= 3) debugLog(3, () => `循环索引: ${i}`);
             const param = funcInfo.params[i];
             const paramName = param.name;
-            debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
             const mode = modesK[i];
             if (param.type === DataType.ARRAY) {
                 if (mode === 4) {
@@ -7915,7 +7939,7 @@ class NSVMExecutor {
                     };
                     LOCAL_VARS.push(literalVar);
                     (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
-                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                    if (DEBUG_LEVEL >= 2) debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
                     continue;
                 }
                 // 数组引用 / mut / copy — 复刻 executeCall 数组分支 (parseArrayArgument 先提取变量名)
@@ -7950,29 +7974,21 @@ class NSVMExecutor {
                 };
                 LOCAL_VARS.push(paramVar);
                 (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
-                debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                if (DEBUG_LEVEL >= 2) debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
                 continue;
             }
             const argValue = args[i] !== undefined ? args[i] : null;
             ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
-            debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
+            if (DEBUG_LEVEL >= 2) debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
         }
-        debugLog(2, () => `参数传递循环结束`);
-        // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数
-        let functionBodyStartLine = funcInfo.startLine + 1;
-        while (functionBodyStartLine < funcInfo.endLine) {
-            const checkLine = programLines[functionBodyStartLine].trim();
-            if (checkLine === '' || checkLine.indexOf(':') === 0) {
-                functionBodyStartLine++;
-                continue;
-            }
-            break;
-        }
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `参数传递循环结束`);
+        // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数 (bodyStartLine 编译期预解析)
+        const functionBodyStartLine = meta.bodyStartLine;
         if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
             ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
         }
-        debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
-        debugLog(2, () => `函数 ${fnK} 参数传递完成`);
+        if (DEBUG_LEVEL >= 3) debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `函数 ${fnK} 参数传递完成`);
 
         // 额外的调试信息, 检查参数是否真的被添加 (复刻 executeCall debug 3; 循环门控 DEBUG_LEVEL>=3 免热路径开销)
         if (DEBUG_LEVEL >= 3) {
@@ -8017,11 +8033,13 @@ class NSVMExecutor {
 
         // 设置 currentLinePointer 为函数体开始行 (复刻 executeCall: 主循环会自动加一执行函数体内部的代码)
         currentLinePointer = funcInfo.startLine;
-        debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
-        // 添加作用域调试信息
-        debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
-        debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
-        debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        if (DEBUG_LEVEL >= 2) {
+            debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
+            // 添加作用域调试信息
+            debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
+            debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+            debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+        }
         // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
         CONTROL_FLOW_STACK.push({
             type: 'function',
@@ -8033,7 +8051,7 @@ class NSVMExecutor {
             frameId: frameId,
             frameVarStart: callVarStart
         });
-        debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
+        if (DEBUG_LEVEL >= 2) debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
         // 切换到 callee 的 VM 块
         const fb = NSVMExecutor.funcBlocks.get(fnK);
         if (fb) {
