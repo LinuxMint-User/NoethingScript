@@ -6050,7 +6050,7 @@ enum NSVMOp {
     JMP = 2,         // a=目标指令索引
     JZ = 3,          // a=条件表达式常量索引, b=目标 (假跳)
     JNZ = 4,         // a=条件表达式常量索引, b=目标 (真跳)
-    CALL = 5,        // a=源行号 (executeCall + VM 帧切换)
+    CALL = 5,        // 已废弃 (CALLFUNC=20 取代; 保留编号防重排, 无指令再发射此操作码)
     RETV = 6,        // a=源行号 (executeReturn + VM 帧恢复)
     RET = 7,         // a=源行号 (:end, executeFunctionEndTag + VM 帧恢复)
     FORINIT = 8,     // a=init 元数据常量索引 (声明循环变量)
@@ -6066,6 +6066,19 @@ enum NSVMOp {
     FORCLEAN = 18,   // a=init 元数据常量索引 (循环自然结束时清理循环变量, 复刻 executeFor 条件不满足分支)
     ASSERTCHK = 19,  // a=assert 信息常量索引 {content,params,cond}, b=跳过目标(endasrt 后);
                      // 复刻 executeAssert: 条件真值性判断 (非布尔不报错) + 完全一致的调试输出
+    CALLFUNC = 20,   // a=函数名字符串常量索引, b=modesK 实参模式表常量索引 (Int32Array, 长度即实参个数),
+                     // c=调用元数据常量索引 {funcName, callParams, content, argExprs, resultVar}
+                     // 实参模式: 0=值(标量/表达式), 1=arrayref, 2=arraymut, 3=arraycopy, 4=literal (数组字面量)
+                     // 实参个数 argc 一律从 consts[b] 模式表长度读取, 绝不从操作数 c 字段携带 (设计稿注意点1)
+}
+
+// CALLFUNC 调用元数据 (编译期预解析, 运行期直读, 免 executeCall 的字符串正则/拆分/模式判定)
+interface NSVMCallMeta {
+    funcName: string;      // 函数名
+    callParams: string;    // 完整调用串 "funcName(args) -> result" (调试输出逐字节一致)
+    content: string;       // 原始源码行 (复刻 executeCommand 的"执行指令"调试输出)
+    argExprs: string[];    // 逐实参表达式字符串 (已拆分, 忽略数组字面量/字符串内逗号)
+    resultVar: string | undefined; // 返回变量名 (-> result)
 }
 
 // 异常处理器 (编译期构建, 对应一个 try-catch 结构)
@@ -6171,6 +6184,37 @@ class NSVMCompiler {
         return t.substring(1, t.length - 1).trim();
     }
 
+    // 拆分调用实参 (复刻 executeCall 内 splitCallArguments 语义: 忽略数组字面量 [...] 内部与字符串内部的逗号)
+    private static splitCallArgs(s: string): string[] {
+        const parts: string[] = [];
+        let depth = 0;
+        let cur = '';
+        let inString = false;
+        let delimiter = '';
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (!inString && (c === '"' || c === "'")) { inString = true; delimiter = c; cur += c; }
+            else if (inString && c === delimiter) { inString = false; cur += c; }
+            else if (!inString && c === '[') { depth++; cur += c; }
+            else if (!inString && c === ']') { depth--; cur += c; }
+            else if (!inString && c === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+            else cur += c;
+        }
+        if (cur.trim()) parts.push(cur.trim());
+        return parts;
+    }
+
+    // 数组实参模式判定 (复刻 executeCall 内 parseArrayArgument 语义, 编译期前移)
+    // 返回 CALLFUNC 模式码: 1=ref(数组引用), 2=mut, 3=copy(深拷贝), 4=literal(数组字面量); 无法判定 → null
+    private static parseArrayArgMode(argStr: string): number | null {
+        const trimmed = argStr.trim();
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) return 4; // literal
+        if (/^copy\s*\(\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)$/.test(trimmed)) return 3;
+        if (/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/.test(trimmed)) return 2;
+        if (/^([a-zA-Z_][a-zA-Z0-9_.]*)$/.test(trimmed)) return 1; // ref
+        return null;
+    }
+
     // 编译整个程序: 全局块 + 每个函数块; 任一编译失败返回 false (整体回退行解释器)
     static compileProgram(): boolean {
         try {
@@ -6266,9 +6310,47 @@ class NSVMCompiler {
                 case StmtType.CONST_PREFIX_ERROR:
                     this.emit(NSVMOp.STMT, line, 0, 0);
                     break;
-                case StmtType.CALL:
-                    this.emit(NSVMOp.CALL, line, 0, 0);
+                case StmtType.CALL: {
+                    // CALLFUNC 指令化: 函数名/实参拆分/模式判定/个数与返回值规则校验全部前移到编译期,
+                    // 任一不满足 → 返回 null 整体回退行解释器 (运行期报错/警告行为逐字节保持)
+                    const p = stmt.params;
+                    let funcName: string, argsStr: string, resultVar: string | undefined;
+                    if (p.indexOf('->') !== -1) {
+                        const m = p.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
+                        if (!m) return null; // call_format → 回退
+                        funcName = m[1]; argsStr = m[2]; resultVar = m[3];
+                    } else {
+                        const m = p.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
+                        if (!m) return null; // call_format → 回退
+                        funcName = m[1]; argsStr = m[2]; resultVar = undefined;
+                    }
+                    const funcInfo = FUNCTIONS[funcName];
+                    if (!funcInfo) return null; // func_undefined (运行期抛错, 可被 try-catch 捕获) → 回退
+                    if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) return null; // func_result_var_missing → 回退
+                    if (resultVar !== undefined && funcInfo.returnType === DataType.UNDEFINED) return null; // func_result_var_unexpected → 回退
+                    // 实参拆分 + 个数校验 (不足报错 func_arg_count_insufficient / 多余警告 func_extra_args_ignored, 均为运行期行为 → 不匹配即回退)
+                    const argValues = this.splitCallArgs(argsStr);
+                    if (argValues.length !== funcInfo.params.length) return null;
+                    // 逐实参模式判定 (含形参 mut/只读与实参模式一致性检查; 运行期报错 func_array_arg_format / func_mut_param_requires_mut / func_readonly_param_no_mut → 回退)
+                    const modes: number[] = [];
+                    for (let i = 0; i < funcInfo.params.length; i++) {
+                        const param = funcInfo.params[i];
+                        if (param.type === DataType.ARRAY) {
+                            const mode = this.parseArrayArgMode(argValues[i]);
+                            if (mode === null) return null;
+                            if (param.isMutable && mode !== 2 && mode !== 3) return null;
+                            if (!param.isMutable && mode === 2) return null;
+                            modes.push(mode);
+                        } else {
+                            modes.push(0);
+                        }
+                    }
+                    const fnK = this.constIndex(funcName);
+                    const modesK = this.constIndex(Int32Array.from(modes));
+                    const metaK = this.constIndex({ funcName, callParams: p, content: LINE_INFO[line].content, argExprs: argValues, resultVar } as NSVMCallMeta);
+                    this.emit(NSVMOp.CALLFUNC, fnK, modesK, metaK);
                     break;
+                }
                 case StmtType.RETURN:
                     this.emit(NSVMOp.RETV, line, 0, 0);
                     break;
@@ -6811,21 +6893,222 @@ class NSVMExecutor {
                             else frame.pc++;
                             break;
                         }
-                        case NSVMOp.CALL: {
+                        case NSVMOp.CALLFUNC: {
+                            // 严格按设计稿注意点1: 实参个数 argc 一律从 modesK 模式表长度读取, 绝不从操作数 c 携带
+                            const modesK = consts[b] as Int32Array;
+                            const argc = modesK.length;
+                            const fnK = consts[a] as string;
+                            const meta = consts[c] as NSVMCallMeta;
+                            const funcInfo = FUNCTIONS[fnK];
                             const oldPc = frame.pc;
-                            Interpreter.executeCommand(LINE_INFO[a].stmt, LINE_INFO[a].content);
-                            // executeCall 已压 function 帧到 CONTROL_FLOW_STACK; 切换到 callee 的 VM 块
-                            const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
-                            if (topFrame && topFrame.type === 'function') {
-                                const fb = NSVMExecutor.funcBlocks.get(topFrame.funcName);
-                                if (fb) {
-                                    NSVMExecutor.frames.push({
-                                        block: fb, pc: 0, retAddr: oldPc + 1,
-                                        caller: frame, callFrom: a
-                                    });
-                                    frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
-                                    break;
+                            // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
+                            debugLog(2, () => `执行指令 ${meta.content}`);
+                            debugLog(1, () => `开始执行函数调用: ${meta.callParams}`);
+                            debugLog(2, () => `函数信息:`, funcInfo);
+                            // 阶段1: 解析实参 (复刻 executeCall 解析段; 失败即 reportError + 调用方继续, 无绑定污染)
+                            const args: any[] = [];
+                            let parseFailed = false;
+                            for (let i = 0; i < argc; i++) {
+                                if (modesK[i] === 0) {
+                                    try {
+                                        args.push(Interpreter.parseValue(meta.argExprs[i], funcInfo.params[i].type));
+                                    } catch (error) {
+                                        // 实参表达式中的 input() 挂起信号穿透
+                                        if (isInputSuspend(error)) throw error;
+                                        reportError(ExceptionType.TYPE_ERROR, t('func_arg_type_error', {name: fnK, argIndex: i + 1}));
+                                        parseFailed = true;
+                                        break;
+                                    }
+                                } else {
+                                    args.push(null); // 数组实参: 绑定阶段按模式处理
                                 }
+                            }
+                            if (parseFailed) { frame.pc++; break; }
+                            // 保存调用所在行号 / 分配帧ID / 记录本帧首个局部变量位置 (复刻 executeCall)
+                            const oldLinePointer = currentLinePointer;
+                            const frameId = ++CALL_FRAME_ID;
+                            const callVarStart = LOCAL_VARS.length;
+                            debugLog(2, () => `函数 ${fnK} 开始传递参数`);
+                            debugLog(2, () => `函数信息:`, funcInfo);
+                            debugLog(2, () => `参数数量: ${funcInfo.params.length}, 实际参数:`, args);
+                            debugLog(2, () => `开始参数传递循环`);
+                            debugLog(2, () => `函数调用: ${fnK}, 参数:`, args, `当前行: ${currentLinePointer + 1}`);
+                            // 阶段2: 绑定参数到 callee 帧参数槽位 (寄存器直写, 复刻 executeCall 绑定循环)
+                            for (let i = 0; i < argc; i++) {
+                                debugLog(3, () => `循环索引: ${i}`);
+                                const param = funcInfo.params[i];
+                                const paramName = param.name;
+                                debugLog(2, () => `设置参数: ${paramName} (类型: ${param.type})`);
+                                const mode = modesK[i];
+                                if (param.type === DataType.ARRAY) {
+                                    if (mode === 4) {
+                                        // 数组字面量: 创建临时数组 (只读视图) — 复刻 executeCall literal 分支
+                                        const elementsStr = meta.argExprs[i].slice(1, -1);
+                                        const elementStrs = Interpreter.splitArrayElements(elementsStr);
+                                        let literalElements: ArrayElement[] = [];
+                                        try {
+                                            literalElements = elementStrs.map(es => {
+                                                const ess = es.trim();
+                                                if ((ess.startsWith('"') && ess.endsWith('"')) || (ess.startsWith("'") && ess.endsWith("'"))) {
+                                                    return { value: ess.slice(1, -1), type: DataType.STRING };
+                                                }
+                                                if (ess === 'true') return { value: true, type: DataType.BOOL };
+                                                if (ess === 'false') return { value: false, type: DataType.BOOL };
+                                                const num = Number(ess);
+                                                if (ess !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
+                                                throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: ess}) } as Exception;
+                                            });
+                                        } catch (e) {
+                                            reportError(ExceptionType.TYPE_ERROR, t('array_literal_arg_parse_failed', {error: (e as Error).message}));
+                                            LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                                            rebuildSlotIndex();
+                                            frame.pc++;
+                                            break;
+                                        }
+                                        const literalVar: Variable = {
+                                            name: paramName,
+                                            value: "请使用arrayElements属性访问数组元素",
+                                            type: DataType.ARRAY,
+                                            isGlobal: false,
+                                            isConst: false,
+                                            startLine: funcInfo.startLine + 1,
+                                            endLine: funcInfo.endLine,
+                                            frameId: frameId,
+                                            arrayLength: literalElements.length,
+                                            arrayElementType: literalElements.length > 0 ? literalElements[0].type : DataType.NUMBER,
+                                            arrayElements: literalElements,
+                                            isReadonlyArray: true
+                                        };
+                                        LOCAL_VARS.push(literalVar);
+                                        (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = literalVar;
+                                        debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: literal, 长度: ${literalElements.length}, 只读: true)`);
+                                        continue;
+                                    }
+                                    // 数组引用 / mut / copy — 复刻 executeCall 数组分支 (parseArrayArgument 先提取变量名)
+                                    const arrArgMode = mode === 1 ? 'ref' : mode === 2 ? 'mut' : 'copy';
+                                    const argStr = meta.argExprs[i].trim();
+                                    let arrArgName = argStr;
+                                    if (mode === 2) arrArgName = argStr.match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/)![1];
+                                    else if (mode === 3) arrArgName = argStr.match(/^copy\s*\(\s*([a-zA-Z_][a-zA-Z0-9_.]*)\s*\)$/)![1];
+                                    const arrVar = ScopeManager.getVariable(arrArgName, currentLinePointer, true, arrArgName.startsWith('global.'));
+                                    if (!arrVar || arrVar.type !== DataType.ARRAY) {
+                                        reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArgName}));
+                                        LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                                        rebuildSlotIndex();
+                                        frame.pc++;
+                                        break;
+                                    }
+                                    const paramVar: Variable = {
+                                        name: paramName,
+                                        value: "请使用arrayElements属性访问数组元素",
+                                        type: DataType.ARRAY,
+                                        isGlobal: false,
+                                        isConst: false,
+                                        startLine: funcInfo.startLine + 1,
+                                        endLine: funcInfo.endLine,
+                                        frameId: frameId,
+                                        arrayLength: arrVar.arrayLength,
+                                        arrayElementType: arrVar.arrayElementType,
+                                        arrayElements: arrArgMode === 'copy'
+                                            ? arrVar.arrayElements!.map((e: ArrayElement) => ({ value: e.value, type: e.type }))
+                                            : arrVar.arrayElements,
+                                        isReadonlyArray: arrArgMode === 'copy' ? false : !param.isMutable
+                                    };
+                                    LOCAL_VARS.push(paramVar);
+                                    (SLOT_INDEX[String(frameId)] || (SLOT_INDEX[String(frameId)] = {}))[i] = paramVar;
+                                    debugLog(2, () => `数组参数 ${paramName} 绑定完成 (模式: ${arrArgMode}, 长度: ${arrVar.arrayLength}, 只读: ${paramVar.isReadonlyArray})`);
+                                    continue;
+                                }
+                                const argValue = args[i] !== undefined ? args[i] : null;
+                                ScopeManager.addVariable(paramName, argValue, param.type, funcInfo.startLine + 1, funcInfo.endLine, false, false, frameId, i);
+                                debugLog(2, () => `参数 ${paramName} 绑定到帧槽位 ${i}`);
+                            }
+                            debugLog(2, () => `参数传递循环结束`);
+                            // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数
+                            let functionBodyStartLine = funcInfo.startLine + 1;
+                            while (functionBodyStartLine < funcInfo.endLine) {
+                                const checkLine = programLines[functionBodyStartLine].trim();
+                                if (checkLine === '' || checkLine.indexOf(':') === 0) {
+                                    functionBodyStartLine++;
+                                    continue;
+                                }
+                                break;
+                            }
+                            if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
+                                ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
+                            }
+                            debugLog(3, () => '当前局部变量详情:', LOCAL_VARS);
+                            debugLog(2, () => `函数 ${fnK} 参数传递完成`);
+
+                            // 额外的调试信息, 检查参数是否真的被添加 (复刻 executeCall debug 3; 循环门控 DEBUG_LEVEL>=3 免热路径开销)
+                            if (DEBUG_LEVEL >= 3) {
+                                debugLog(3, () => `检查参数是否正确添加:`);
+                                for (let i = 0; i < argc; i++) {
+                                    const paramName = funcInfo.params[i].name;
+                                    let found = false;
+                                    for (let j = 0; j < LOCAL_VARS.length; j++) {
+                                        if (LOCAL_VARS[j].name === paramName) {
+                                            debugLog(3, () => `参数 ${paramName} 的索引: ${j}`);
+                                            found = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!found) {
+                                        debugLog(3, () => `参数 ${paramName} 未找到`);
+                                    }
+                                }
+
+                                // 进一步调试: 检查每个参数在 LOCAL_VARS 中的详细信息 (复刻 executeCall debug 3)
+                                debugLog(3, () => `详细检查参数:`);
+                                for (let i = 0; i < argc; i++) {
+                                    const paramName = funcInfo.params[i].name;
+                                    const paramType = funcInfo.params[i].type;
+                                    let paramFound = false;
+                                    for (let j = 0; j < LOCAL_VARS.length; j++) {
+                                        if (LOCAL_VARS[j].name === paramName) {
+                                            debugLog(3, () => `参数 ${paramName} 详情: 索引=${j}, 值=${LOCAL_VARS[j].value}, 类型=${LOCAL_VARS[j].type}, 作用域=${LOCAL_VARS[j].startLine + 1}-${LOCAL_VARS[j].endLine === -1 ? "末行" : LOCAL_VARS[j].endLine + 1}`);
+                                            // 验证类型是否匹配
+                                            if (LOCAL_VARS[j].type !== paramType) {
+                                                debugLog(3, () => `警告: 参数 ${paramName} 类型不匹配, 期望=${paramType}, 实际=${LOCAL_VARS[j].type}`);
+                                            }
+                                            paramFound = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!paramFound) {
+                                        debugLog(3, () => `参数 ${paramName} 未找到`);
+                                    }
+                                }
+                            }
+
+                            // 设置 currentLinePointer 为函数体开始行 (复刻 executeCall: 主循环会自动加一执行函数体内部的代码)
+                            currentLinePointer = funcInfo.startLine;
+                            debugLog(2, () => `函数体开始行: ${functionBodyStartLine + 1}`);
+                            // 添加作用域调试信息
+                            debugLog(2, () => `函数 ${fnK} 变量作用域详情:`);
+                            debugLog(2, () => `  返回值变量: ${funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined}, 作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+                            debugLog(2, () => `  参数作用域: ${functionBodyStartLine + 1}-${funcInfo.endLine === -1 ? "末行" : funcInfo.endLine + 1}`);
+                            // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
+                            CONTROL_FLOW_STACK.push({
+                                type: 'function',
+                                funcName: fnK,
+                                startLine: funcInfo.startLine,
+                                endLine: funcInfo.endLine,
+                                callFrom: oldLinePointer,
+                                returnVarName: meta.resultVar,
+                                frameId: frameId,
+                                frameVarStart: callVarStart
+                            });
+                            debugLog(2, () => `当前流程控制栈:`, CONTROL_FLOW_STACK);
+                            // 切换到 callee 的 VM 块
+                            const fb = NSVMExecutor.funcBlocks.get(fnK);
+                            if (fb) {
+                                NSVMExecutor.frames.push({
+                                    block: fb, pc: 0, retAddr: oldPc + 1,
+                                    caller: frame, callFrom: oldLinePointer
+                                });
+                                frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
+                                break;
                             }
                             frame.pc++;
                             break;
