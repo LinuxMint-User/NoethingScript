@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.7.1";
+const NSIVersion: string = "2.7.2";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -445,6 +445,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_param_array_need_elem_type: '函数参数格式错误: 参数 {param}, 数组形参必须声明元素类型, 格式应为 "arr[]:元素类型"',
         func_return_array_need_elem_type: '函数返回值格式错误: 数组返回值必须声明元素类型, 格式应为 "-> st[]:元素类型"',
         array_elem_type_mismatch: '数组类型不匹配: 期望 {expected} 数组, 实际是 {actual} 数组',
+        arr_elem_number_compat: '数组元素类型 {actual} 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)',
         func_unclosed_at_eof: '函数定义错误: 程序结束时仍有未结束的函数',
         unsupported_data_type: '不支持的数据类型: {type}',
         func_undefined: '函数 \'{name}\' 未定义',
@@ -456,6 +457,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_mut_param_requires_mut: '形参 {name} 声明为 mut 可变引用, 实参必须使用 mut 关键字',
         func_readonly_param_no_mut: '形参 {name} 为只读引用, 实参不能使用 mut 关键字',
         func_arg_type_error: '函数 {name} 参数 {argIndex} 类型错误',
+        func_arg_type_mismatch: '函数 {name} 参数 {argIndex} 需要 {expected} 类型, 实际是 {actual}',
         func_arg_count_missing: '函数 {name} 需要 {expected} 个参数, 但未提供',
         call_format: '函数调用格式应为 "call 函数名(参数1, 参数2, ...) -> 结果变量" 或 "call 函数名(参数1, 参数2, ...)"',
         // 类型/值解析
@@ -491,7 +493,9 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         array_element_type_mismatch: '数组元素类型错误: 期望 {expected} 类型, 实际 {actual}',
         const_array_whole_assignment: '常量数组 {name} 不能被整体赋值',
         readonly_array_whole_assignment: '数组 {name} 是只读引用, 不能被整体赋值',
-        func_split_overflow: '{func} 结果 {count} 段超出容器容量 {capacity}',
+        str_take_out_of_range: '字符串越界: {func} start={start} count={count} 超出长度 {length}',
+        func_needs_2_or_3_args: '{func} 需要 2 或 3 个参数',
+        func_needs_3_or_4_args: '{func} 需要 3 或 4 个参数',
         // return / print
         return_requires_var: 'return语句后必须跟一个变量',
         return_outside_function: '当前返回语句所在行不在函数内',
@@ -566,8 +570,14 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         unknown_function: '未知函数: {name} 位置 {pos}',
         op_left_operand_not_number: '运算符 {op} 要求左操作数是数字类型',
         op_right_operand_not_number: '运算符 {op} 要求右操作数是数字类型',
+        op_add_operand_mismatch: '运算符 + 两侧类型不一致: {left} 与 {right} 不能相加 (数字加法需两侧同为数字, 字符串拼接需两侧同为字符串, 需转换请用 int()/float()/str())',
+        unary_operand_not_number: '一元运算符 {op} 要求操作数是数字类型',
+        unary_operand_not_bool: '一元运算符 {op} 要求操作数是布尔类型',
+        convert_bool_not_supported: '函数 {func} 不支持布尔参数 (bool 类型不提供转换, 字符串 "true"/"false" 与布尔 true/false 是两种不同的类型)',
         logic_op_left_operand_not_bool: '逻辑运算符 {op} 要求左操作数是布尔类型',
         logic_op_right_operand_not_bool: '逻辑运算符 {op} 要求右操作数是布尔类型',
+        op_cmp_type_mismatch: '{op} 两侧类型必须相同, 无法比较 {left} 与 {right}',
+        logic_rhs_no_input: '{op} 右侧禁止使用 input() (input 有副作用, 短路求值时可能被跳过; 请改用 if 块显式判断后再输入)',
         division_by_zero: '除零错误',
         unknown_operator: '未知操作符: {op} 位置 {pos}',
         unknown_unary_operator: '未知一元操作符: {op} 位置 {pos}',
@@ -815,6 +825,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_param_array_need_elem_type: 'Function parameter format error: parameter {param}, array parameters must declare an element type, expected "arr[]:elementType"',
         func_return_array_need_elem_type: 'Function return value format error: array return values must declare an element type, expected "-> st[]:elementType"',
         array_elem_type_mismatch: 'Array type mismatch: expected {expected} array, got {actual} array',
+        arr_elem_number_compat: 'Array element type {actual} into number array (number accepts int and float; consider declaring int or float explicitly)',
         func_unclosed_at_eof: 'Function definition error: an unclosed function remains at the end of the program',
         unsupported_data_type: 'Unsupported data type: {type}',
         func_undefined: 'Function \'{name}\' is not defined',
@@ -826,6 +837,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_mut_param_requires_mut: 'Parameter {name} is declared as a mutable reference (mut); the argument must use the mut keyword',
         func_readonly_param_no_mut: 'Parameter {name} is a readonly reference; the argument cannot use the mut keyword',
         func_arg_type_error: 'Function {name} argument {argIndex} has a type error',
+        func_arg_type_mismatch: 'Function {name} argument {argIndex} requires {expected} type, got {actual}',
         func_arg_count_missing: 'Function {name} requires {expected} arguments but none were provided',
         call_format: 'Function call should be "call funcName(arg1, arg2, ...) -> resultVar" or "call funcName(arg1, arg2, ...)"',
         // Type/value resolution
@@ -861,7 +873,9 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         array_element_type_mismatch: 'Array element type error: expected {expected} type but got {actual}',
         const_array_whole_assignment: 'Constant array {name} cannot be assigned as a whole',
         readonly_array_whole_assignment: 'Array {name} is a readonly reference and cannot be assigned as a whole',
-        func_split_overflow: '{func} result has {count} segments exceeding container capacity {capacity}',
+        str_take_out_of_range: 'String out of range: {func} start={start} count={count} exceeds length {length}',
+        func_needs_2_or_3_args: '{func} expects 2 or 3 arguments',
+        func_needs_3_or_4_args: '{func} expects 3 or 4 arguments',
         // return / print
         return_requires_var: 'The return statement must be followed by a variable',
         return_outside_function: 'The current return statement is not inside a function',
@@ -936,8 +950,14 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         unknown_function: 'Unknown function: {name} at position {pos}',
         op_left_operand_not_number: 'Operator {op} requires the left operand to be a number',
         op_right_operand_not_number: 'Operator {op} requires the right operand to be a number',
+        op_add_operand_mismatch: 'Operator + operands have mismatched types: {left} and {right} cannot be added (numeric addition requires both numbers, string concatenation requires both strings; use int()/float()/str() to convert explicitly)',
+        unary_operand_not_number: 'Unary operator {op} requires the operand to be a number',
+        unary_operand_not_bool: 'Unary operator {op} requires the operand to be a boolean',
+        convert_bool_not_supported: 'Function {func} does not support boolean arguments (bool has no conversion; the strings "true"/"false" and the booleans true/false are two different types)',
         logic_op_left_operand_not_bool: 'Logical operator {op} requires the left operand to be a boolean',
         logic_op_right_operand_not_bool: 'Logical operator {op} requires the right operand to be a boolean',
+        op_cmp_type_mismatch: '{op} requires both sides to have the same type: cannot compare {left} and {right}',
+        logic_rhs_no_input: 'input() is not allowed on the right side of {op} (input has side effects and may be skipped during short-circuit evaluation; use an if block instead)',
         division_by_zero: 'Division by zero',
         unknown_operator: 'Unknown operator: {op} at position {pos}',
         unknown_unary_operator: 'Unknown unary operator: {op} at position {pos}',
@@ -1189,29 +1209,29 @@ class ScopeManager {
 
         switch (type) {
             case DataType.NUMBER:
-                // NUMBER类型应该自动判断是INT还是FLOAT
-                if (typeof value === 'number') {
-                    return { isValid: true, convertedValue: value };
-                }
-                const num = Number(value);
-                return { isValid: !isNaN(num) && isFinite(num), convertedValue: num };
-            case DataType.INT:
-                if (typeof value === 'number' && Number.isInteger(value)) {
-                    return { isValid: true, convertedValue: value };
-                }
-                if (String(value).match(/^-?\d+$/)) { // 确保是整数
-                    return { isValid: true, convertedValue: parseInt(value, 10) };
-                }
-                return { isValid: false, convertedValue: undefined };
-            case DataType.FLOAT:
+                // NUMBER 只接受有限数字值 (int/float 同源, JS 无区分); NaN/Infinity 及字符串/布尔一律拒收
                 if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
                     return { isValid: true, convertedValue: value };
                 }
-                const float = parseFloat(value as string);
-                return { isValid: !isNaN(float) && isFinite(float), convertedValue: float };
+                return { isValid: false, convertedValue: undefined };
+            case DataType.INT:
+                // 只接受整数 number; 字符串/布尔一律拒收 (需数字请用 int() 显式转换)
+                if (typeof value === 'number' && Number.isInteger(value)) {
+                    return { isValid: true, convertedValue: value };
+                }
+                return { isValid: false, convertedValue: undefined };
+            case DataType.FLOAT:
+                // 只接受 number (含整数, 标量层 int→float 无损); 字符串/布尔一律拒收
+                if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
+                    return { isValid: true, convertedValue: value };
+                }
+                return { isValid: false, convertedValue: undefined };
             case DataType.STRING:
-                // 字符串类型可以接受任何值并转换为字符串
-                return { isValid: true, convertedValue: String(value) };
+                // 字符串类型只接受 string 值; 数字/布尔赋值需用 str() 显式转换
+                if (typeof value === 'string') {
+                    return { isValid: true, convertedValue: value };
+                }
+                return { isValid: false, convertedValue: undefined };
             case DataType.BOOL:
                 // 布尔类型只接受true或false
                 if (value === true || value === false) {
@@ -2050,16 +2070,20 @@ class Interpreter {
         }
     }
 
-    // 数组元素类型兼容判断: from 元素类型能否装入 to 元素类型的数组 (与标量 validateType 语义一致:
-    // NUMBER/FLOAT 接受任意数字, INT 只接受整数, STRING/BOOL 严格相等)
+    // 数组元素类型兼容判断: from 元素类型能否装入 to 元素类型的数组 (三档语义, 见 doc.md "数组作为函数参数"):
+    // INT 只接 INT, FLOAT 只接 FLOAT, NUMBER 兼容 INT/FLOAT/NUMBER (兼容时经 warnArrayNumberCompat 提示明确类型), STRING/BOOL 严格相等
     static canArrayElementFit(from: DataType, to: DataType): boolean {
-        if (to === DataType.NUMBER || to === DataType.FLOAT) {
+        if (to === DataType.NUMBER) {
             return from === DataType.INT || from === DataType.FLOAT || from === DataType.NUMBER;
         }
-        if (to === DataType.INT) {
-            return from === DataType.INT;
-        }
         return from === to;
+    }
+
+    // number 形参兼容 int/float 实参时的显式性警告 (三档语义: 仅 number 宽松且提示明确声明类型)
+    static warnArrayNumberCompat(from: DataType, to: DataType, line: number): void {
+        if (to === DataType.NUMBER && from !== DataType.NUMBER) {
+            reportWarn(t('arr_elem_number_compat', { actual: from, expected: to }), line + 1);
+        }
     }
 
     // 辅助方法: 从值推断数据类型
@@ -2709,8 +2733,8 @@ class Interpreter {
         let argsStr: string;
         let resultVar: string | undefined;
         if (params.indexOf('->') !== -1) {
-            // 支持点分函数名 (String.split / 未来模块函数 xxx.func)
-            const matchWithResult = params.match(/^([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
+            // 点分函数名 (模块函数 xxx.func) 待模块系统实现时引入
+            const matchWithResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
             if (matchWithResult) {
                 funcName = matchWithResult[1];
                 argsStr = matchWithResult[2];
@@ -2720,7 +2744,7 @@ class Interpreter {
                 return;
             }
         } else {
-            const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)\((.*)\)$/);
+            const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
             if (matchWithoutResult) {
                 funcName = matchWithoutResult[1];
                 argsStr = matchWithoutResult[2];
@@ -2732,11 +2756,6 @@ class Interpreter {
         }
 
         if (!FUNCTIONS[funcName]) {
-            // 内置点分函数快速通道: 当前仅 String.split (定长容器填充语义, 需 mut 数组容器 + 段数返回, 表达式路径无法承载)
-            if (funcName === 'String.split') {
-                Interpreter.executeBuiltinSplit(argsStr, resultVar);
-                return;
-            }
             // 函数未定义: 抛引用错误 (可被try-catch捕获)
             throw {
                 type: ExceptionType.REFERENCE_ERROR,
@@ -2900,6 +2919,7 @@ class Interpreter {
                             rebuildSlotIndex();
                             return;
                         }
+                        Interpreter.warnArrayNumberCompat(actualElemType, param.arrayElementType, currentLinePointer);
                     }
                     const literalVar: Variable = {
                         name: paramName,
@@ -2936,6 +2956,7 @@ class Interpreter {
                     rebuildSlotIndex();
                     return;
                 }
+                Interpreter.warnArrayNumberCompat(arrVar.arrayElementType!, param.arrayElementType!, currentLinePointer);
                 const paramVar: Variable = {
                     name: paramName,
                     value: "请使用arrayElements属性访问数组元素",
@@ -3052,75 +3073,6 @@ class Interpreter {
             frameVarStart: callVarStart
         });
         debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
-    }
-
-    // ============ String.split 定长容器填充 (call 语句专属通道) ============
-    // 形态: call String.split(源串, 分隔符, mut 容器数组) -> 段数
-    // 语言无动态数组且表达式仅返回标量, 故 split 不走表达式; 容器由调用方声明定长 (容量=段数上限),
-    // split 填充容器并返回实际段数, 段数超容量抛 RangeError (可被 try-catch 捕获)。
-    // 与栈模块元数据槽模式同构 (design.md §8/§9.3 方案 A)。
-    private static executeBuiltinSplit(argsStr: string, resultVar: string | undefined): void {
-        if (resultVar === undefined) {
-            reportError(ExceptionType.TYPE_ERROR, t('func_result_var_missing', {name: 'String.split'}));
-            return;
-        }
-        // 拆分实参: 忽略字符串字面量内部的逗号
-        const parts: string[] = [];
-        let cur = '';
-        let inString = false;
-        for (let i = 0; i < argsStr.length; i++) {
-            const c = argsStr[i];
-            if (c === '"') { inString = !inString; cur += c; }
-            else if (c === ',' && !inString) { parts.push(cur.trim()); cur = ''; }
-            else cur += c;
-        }
-        if (cur.trim()) parts.push(cur.trim());
-        if (parts.length !== 3) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.split'}), lineNumber: currentLinePointer } as Exception;
-        }
-        // 源字符串与分隔符: 字面量或 string 变量
-        let source: string;
-        let delim: string;
-        try {
-            source = String(Interpreter.parseValue(parts[0], DataType.STRING));
-            delim = String(Interpreter.parseValue(parts[1], DataType.STRING));
-        } catch (e) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('func_arg_type_error', {name: 'String.split', argIndex: 1}), lineNumber: currentLinePointer } as Exception;
-        }
-        // 容器数组: 仅接受 mut 数组名 (写穿容器)
-        const arrMatch = parts[2].match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/);
-        if (!arrMatch) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('func_array_arg_format', {name: 'String.split', argIndex: 3}), lineNumber: currentLinePointer } as Exception;
-        }
-        const container = ScopeManager.getVariable(arrMatch[1], currentLinePointer, true, arrMatch[1].startsWith('global.'));
-        if (!container || container.type !== DataType.ARRAY) {
-            reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrMatch[1]}));
-            return;
-        }
-        if (container.arrayElementType !== undefined && container.arrayElementType !== DataType.STRING) {
-            reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: DataType.STRING, actual: container.arrayElementType }));
-            return;
-        }
-        if (container.isConst) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('const_array_assignment', {name: container.name}), lineNumber: currentLinePointer } as Exception;
-        }
-        if (container.isReadonlyArray) {
-            throw { type: ExceptionType.TYPE_ERROR, message: t('readonly_array_assignment', {name: container.name}), lineNumber: currentLinePointer } as Exception;
-        }
-        const segs = source.split(delim);
-        const capacity = container.arrayLength || 0;
-        if (segs.length > capacity) {
-            throw { type: ExceptionType.RANGE_ERROR, message: t('func_split_overflow', {func: 'String.split', count: segs.length, capacity}), lineNumber: currentLinePointer } as Exception;
-        }
-        container.arrayElements = segs.map(s => ({ value: s, type: DataType.STRING }));
-        container.arrayLength = segs.length;
-        // 段数写回结果变量 (未声明则自动创建 int, 与用户函数返回值路径一致)
-        if (!ScopeManager.hasVariable(resultVar, currentLinePointer)) {
-            const rvIdx = LOCAL_VARS.length;
-            ScopeManager.addVariable(resultVar, 0, DataType.INT, currentLinePointer, -1, false);
-            if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
-        }
-        ScopeManager.setVariable(resultVar, segs.length, currentLinePointer);
     }
 
     // 执行数组声明
@@ -3538,7 +3490,7 @@ class Interpreter {
         const elementType = arrayVar.arrayElementType!;
         // 快速类型兼容路径: 原生值类型与目标类型直接匹配时免 validateType 调用 (每次调用分配结果对象)
         if ((elementType === DataType.INT && typeof value === 'number' && Number.isInteger(value)) ||
-            ((elementType === DataType.FLOAT || elementType === DataType.NUMBER) && typeof value === 'number') ||
+            ((elementType === DataType.FLOAT || elementType === DataType.NUMBER) && typeof value === 'number' && !isNaN(value) && isFinite(value)) ||
             (elementType === DataType.STRING && typeof value === 'string') ||
             (elementType === DataType.BOOL && typeof value === 'boolean')) {
             arrayVar.arrayElements![target.index].value = value;
@@ -3824,12 +3776,16 @@ class Interpreter {
             );
             DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
-            const condition = Interpreter.evaluateExpression(conditionExpr) && !brokenexists;
+            const condValue = Interpreter.evaluateExpression(conditionExpr);
 
-            // 检查条件表达式的返回值是否为布尔类型
-            if (typeof condition !== 'boolean') {
-                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
-                return;
+            // 检查条件表达式的返回值是否为布尔类型 (先检查再合并 broken 状态, 防止 JS 真值化绕过类型检查)
+            let condition: boolean;
+            if (typeof condValue !== 'boolean') {
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condValue}));
+                // 类型错误按假处理: 跳过整个循环体 (避免顺序执行 + endwhl 跳回造成死循环)
+                condition = false;
+            } else {
+                condition = condValue && !brokenexists;
             }
 
             DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
@@ -3989,13 +3945,16 @@ class Interpreter {
             );
             debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
-            // 评估条件
-            const result = Interpreter.evaluateExpression(condition) && !brokenexists;
+            const condValue = Interpreter.evaluateExpression(condition);
 
-            // 检查条件表达式的返回值是否为布尔类型
-            if (typeof result !== 'boolean') {
-                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof result}));
-                return;
+            // 检查条件表达式的返回值是否为布尔类型 (先检查再合并 broken 状态, 防止 JS 真值化绕过类型检查)
+            let result: boolean;
+            if (typeof condValue !== 'boolean') {
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condValue}));
+                // 类型错误按假处理: 跳过整个循环体 (避免顺序执行 + endfor 跳回造成死循环)
+                result = false;
+            } else {
+                result = condValue && !brokenexists;
             }
 
             debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
@@ -4401,6 +4360,12 @@ class Interpreter {
 
         try {
             const condition = Interpreter.evaluateExpression(conditionExpr);
+            // 条件必须是布尔值 (拒绝 truthy 陋习: assert (5) 等静默通过/失败)
+            if (typeof condition !== 'boolean') {
+                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
+                currentLinePointer += 2; // 跳过断言体 (消息行 + endasrt), 避免消息行被主循环误执行
+                return;
+            }
             if (!condition) {
                 // 获取下一行作为消息
                 currentLinePointer++;
@@ -4673,13 +4638,19 @@ class Interpreter {
             return;
         }
 
-        // 3. 条件不满足时直接返回
+        // 3. 条件必须是布尔值 (拒绝 truthy 陋习: jump (5): tag 静默跳转)
+        if (typeof condition !== 'boolean') {
+            reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
+            return;
+        }
+
+        // 4. 条件不满足时直接返回
         if (!condition) {
             debugLog(2, () => t('dbg_jump_cond_false'));
             return;
         }
 
-        // 4. 标签跳转 (仅支持标签, 不再检查行号) 
+        // 5. 标签跳转 (仅支持标签, 不再检查行号) 
         if (TAGS[tagName] === undefined) {
             reportError(ExceptionType.REFERENCE_ERROR, t('tag_undefined', {name: tagName}));
             return;
@@ -4816,7 +4787,7 @@ class Interpreter {
                         }
                         // 快速类型兼容路径: 原生值类型与目标类型直接匹配时免 validateType 调用 (每次调用分配结果对象)
                         if ((lhsVar.type === DataType.INT && typeof value === 'number' && Number.isInteger(value)) ||
-                            ((lhsVar.type === DataType.FLOAT || lhsVar.type === DataType.NUMBER) && typeof value === 'number') ||
+                            ((lhsVar.type === DataType.FLOAT || lhsVar.type === DataType.NUMBER) && typeof value === 'number' && !isNaN(value) && isFinite(value)) ||
                             (lhsVar.type === DataType.STRING && typeof value === 'string') ||
                             (lhsVar.type === DataType.BOOL && typeof value === 'boolean')) {
                             lhsVar.value = value;
@@ -5137,10 +5108,10 @@ enum ExprOp {
 }
 
 // 二元运算符 → 操作码映射 (仅可编译子集; 其余构造整体回退树求值)
+// && / || 不参与编译: 短路求值 (左侧可定局时右侧不求值) 需条件跳转, 线性字节码无法表达, 含 &&/|| 的表达式整体回退树求值 (短路统一在 evalTree)
 const EXPR_BIN_OP_TO_VM: Record<string, ExprOp> = {
     '+': ExprOp.ADD, '-': ExprOp.SUB, '*': ExprOp.MUL, '/': ExprOp.DIV, '%': ExprOp.MOD, '**': ExprOp.POW,
-    '==': ExprOp.EQ, '!=': ExprOp.NEQ, '<': ExprOp.LT, '>': ExprOp.GT, '<=': ExprOp.LE, '>=': ExprOp.GE,
-    '&&': ExprOp.AND, '||': ExprOp.OR
+    '==': ExprOp.EQ, '!=': ExprOp.NEQ, '<': ExprOp.LT, '>': ExprOp.GT, '<=': ExprOp.LE, '>=': ExprOp.GE
 };
 const EXPR_BIN_OPS: Set<string> = new Set(Object.keys(EXPR_BIN_OP_TO_VM));
 
@@ -5986,6 +5957,10 @@ class ExpressionEvaluator {
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '||') {
             this.currentTokenIndex++;
             const right = this.buildLogicalAnd();
+            // 短路限制: input() 是 I/O 交互函数 (非"函数模样的运算符"), 与外界交互是它的目的, 有副作用, 禁止出现在短路右侧 (短路时可能不求值, 用户会被静默跳过输入询问)
+            if (this.containsInputCall(right)) {
+                throw { type: ExceptionType.SYNTAX_ERROR, message: t('logic_rhs_no_input', {op: '||'}), lineNumber: this.currentLine } as Exception;
+            }
             left = { kind: 'binary', op: '||', left: left, right: right };
         }
 
@@ -6000,10 +5975,27 @@ class ExpressionEvaluator {
         while (this.currentTokenIndex < this.tokens.length && this.tokens[this.currentTokenIndex] === '&&') {
             this.currentTokenIndex++;
             const right = this.buildEquality();
+            // 短路限制: input() 是 I/O 交互函数 (非"函数模样的运算符"), 与外界交互是它的目的, 有副作用, 禁止出现在短路右侧 (短路时可能不求值, 用户会被静默跳过输入询问)
+            if (this.containsInputCall(right)) {
+                throw { type: ExceptionType.SYNTAX_ERROR, message: t('logic_rhs_no_input', {op: '&&'}), lineNumber: this.currentLine } as Exception;
+            }
             left = { kind: 'binary', op: '&&', left: left, right: right };
         }
 
         return left;
+    }
+
+    // 检查表达式 AST 是否包含 input() 调用 (input 是唯一有副作用的函数, 禁止出现在短路右侧)
+    private static containsInputCall(node: ExprNode | null | undefined): boolean {
+        if (!node) return false;
+        if (node.kind === 'call' && node.funcName === 'input') return true;
+        if (node.kind === 'binary') {
+            return this.containsInputCall(node.left) || this.containsInputCall(node.right);
+        }
+        if (node.kind === 'unary') {
+            return this.containsInputCall(node.operand);
+        }
+        return false;
     }
 
     // 构建相等性运算节点 (==, !=) 
@@ -6308,89 +6300,154 @@ class ExpressionEvaluator {
         return { kind: 'call', funcName: funcName, args: args };
     }
 
+    // 内置函数参数显式类型校验 (借用 JS 能力但不继承其隐式强转: 参数类型必须显式)
+    private static checkNumberArg(funcName: string, args: any[], argIndex: number): void {
+        if (typeof args[argIndex] !== 'number') throw { type: ExceptionType.TYPE_ERROR, message: t('func_arg_type_mismatch', { name: funcName, argIndex: argIndex + 1, expected: 'number', actual: typeof args[argIndex] }), lineNumber: this.currentLine } as Exception;
+    }
+
+    private static checkStringArg(funcName: string, args: any[], argIndex: number): void {
+        if (typeof args[argIndex] !== 'string') throw { type: ExceptionType.TYPE_ERROR, message: t('func_arg_type_mismatch', { name: funcName, argIndex: argIndex + 1, expected: 'string', actual: typeof args[argIndex] }), lineNumber: this.currentLine } as Exception;
+    }
+
     // 执行函数调用
     private static executeFunction(funcName: string, args: any[]): any {
         // 支持一些内置函数
         switch (funcName) {
             case 'Math.sin':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.sin'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.sin', args, 0);
                 return Math.sin(args[0]);
             case 'Math.cos':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.cos'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.cos', args, 0);
                 return Math.cos(args[0]);
             case 'Math.tan':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.tan'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.tan', args, 0);
                 return Math.tan(args[0]);
             case 'Math.sqrt':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.sqrt'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.sqrt', args, 0);
                 return Math.sqrt(args[0]);
             case 'Math.abs':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.abs'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.abs', args, 0);
                 return Math.abs(args[0]);
             case 'Math.pow':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Math.pow'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.pow', args, 0);
+                this.checkNumberArg('Math.pow', args, 1);
                 return Math.pow(args[0], args[1]);
             case 'Math.floor':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.floor'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.floor', args, 0);
                 return Math.floor(args[0]);
             case 'Math.ceil':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.ceil'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.ceil', args, 0);
                 return Math.ceil(args[0]);
             case 'Math.round':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Math.round'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Math.round', args, 0);
                 return Math.round(args[0]);
             case 'Math.max':
+                for (let i = 0; i < args.length; i++) this.checkNumberArg('Math.max', args, i);
                 return Math.max(...args);
             case 'Math.min':
+                for (let i = 0; i < args.length; i++) this.checkNumberArg('Math.min', args, i);
                 return Math.min(...args);
             case 'Math.random':
                 if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'Math.random'}), lineNumber: this.currentLine } as Exception;
                 return Math.random();
-            // ============ String.* 字符串操作 (直接映射宿主 JS String, 与 Math.* 同源) ============
-            case 'String.length':
-                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.length'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).length;
-            case 'String.substring':
-                if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.substring'}), lineNumber: this.currentLine } as Exception;
-                // JS substring 语义: [start, end), 负索引按 0, end<start 自动交换
-                return String(args[0]).substring(args[1], args[2]);
-            case 'String.indexOf':
-                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.indexOf'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).indexOf(String(args[1]));
-            case 'String.includes':
-                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.includes'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).includes(String(args[1]));
+            // ============ String.* 字符串操作 (借用宿主 JS String 能力, 命名按语言自身风格, 与 Math.* 同源) ============
+            case 'String.take':
+                if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.take'}), lineNumber: this.currentLine } as Exception;
+                {
+                    this.checkStringArg('String.take', args, 0);
+                    this.checkNumberArg('String.take', args, 1);
+                    this.checkNumberArg('String.take', args, 2);
+                    const s = args[0];
+                    const start = args[1];
+                    const count = args[2];
+                    // 边界全显式 (无隐式兜底): start/count 非负、start < len、count <= len - start; 取到末尾请写 len(s) - start
+                    if (start < 0 || start >= s.length || count < 0 || count > s.length - start) {
+                        throw { type: ExceptionType.RANGE_ERROR, message: t('str_take_out_of_range', {func: 'String.take', start, count, length: s.length}), lineNumber: this.currentLine } as Exception;
+                    }
+                    return s.substring(start, start + count);
+                }
+            case 'String.findFirst':
+                if (args.length !== 2 && args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_or_3_args', {func: 'String.findFirst'}), lineNumber: this.currentLine } as Exception;
+                {
+                    this.checkStringArg('String.findFirst', args, 0);
+                    this.checkStringArg('String.findFirst', args, 1);
+                    if (args.length === 3) this.checkNumberArg('String.findFirst', args, 2);
+                    const idx = args[0].indexOf(args[1], args.length === 3 ? args[2] : 0);
+                    return idx === -1 ? false : idx;   // 语言规范: 操作成功返回结果或 true, 失败返回 false
+                }
+            case 'String.findLast':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.findLast'}), lineNumber: this.currentLine } as Exception;
+                {
+                    this.checkStringArg('String.findLast', args, 0);
+                    this.checkStringArg('String.findLast', args, 1);
+                    const idx = args[0].lastIndexOf(args[1]);
+                    return idx === -1 ? false : idx;   // 语言规范: 失败返回 false
+                }
+            case 'String.has':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.has'}), lineNumber: this.currentLine } as Exception;
+                this.checkStringArg('String.has', args, 0);
+                this.checkStringArg('String.has', args, 1);
+                return args[0].includes(args[1]);
             case 'String.replace':
-                if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.replace'}), lineNumber: this.currentLine } as Exception;
-                // JS replace 语义: 字符串参数仅替换第一处
-                return String(args[0]).replace(String(args[1]), String(args[2]));
+                if (args.length !== 3 && args.length !== 4) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_or_4_args', {func: 'String.replace'}), lineNumber: this.currentLine } as Exception;
+                if (args.length === 4 && typeof args[3] !== 'boolean') throw { type: ExceptionType.TYPE_ERROR, message: t('func_arg_type_error', {name: 'String.replace', argIndex: 4}), lineNumber: this.currentLine } as Exception;
+                this.checkStringArg('String.replace', args, 0);
+                this.checkStringArg('String.replace', args, 1);
+                this.checkStringArg('String.replace', args, 2);
+                // all 可省略: 默认只替换第一处; all=true 替换所有出现
+                return args.length === 4 && args[3] === true
+                    ? args[0].split(args[1]).join(args[2])
+                    : args[0].replace(args[1], args[2]);
             case 'String.toUpper':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.toUpper'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).toUpperCase();
+                this.checkStringArg('String.toUpper', args, 0);
+                return args[0].toUpperCase();
             case 'String.toLower':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.toLower'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).toLowerCase();
+                this.checkStringArg('String.toLower', args, 0);
+                return args[0].toLowerCase();
             case 'String.trim':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.trim'}), lineNumber: this.currentLine } as Exception;
-                return String(args[0]).trim();
+                this.checkStringArg('String.trim', args, 0);
+                return args[0].trim();
             // ============ Bit.* 位运算 (直接映射 JS 位运算符, 32 位有符号语义) ============
             case 'Bit.and':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.and'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.and', args, 0);
+                this.checkNumberArg('Bit.and', args, 1);
                 return args[0] & args[1];
             case 'Bit.or':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.or'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.or', args, 0);
+                this.checkNumberArg('Bit.or', args, 1);
                 return args[0] | args[1];
             case 'Bit.xor':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.xor'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.xor', args, 0);
+                this.checkNumberArg('Bit.xor', args, 1);
                 return args[0] ^ args[1];
             case 'Bit.not':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Bit.not'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.not', args, 0);
                 return ~args[0];
             case 'Bit.shl':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.shl'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.shl', args, 0);
+                this.checkNumberArg('Bit.shl', args, 1);
                 return args[0] << args[1];
             case 'Bit.shr':
                 if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.shr'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('Bit.shr', args, 0);
+                this.checkNumberArg('Bit.shr', args, 1);
                 return args[0] >> args[1];
             case 'len':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'len'}), lineNumber: this.currentLine } as Exception;
@@ -6417,12 +6474,15 @@ class ExpressionEvaluator {
                 throw { type: ExceptionType.TYPE_ERROR, message: t('len_only_str_or_array'), lineNumber: this.currentLine } as Exception;
             case 'str':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'str'}), lineNumber: this.currentLine } as Exception;
+                if (typeof args[0] === 'boolean') throw { type: ExceptionType.TYPE_ERROR, message: t('convert_bool_not_supported', {func: 'str'}), lineNumber: this.currentLine } as Exception;
                 return String(args[0]);
             case 'int':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'int'}), lineNumber: this.currentLine } as Exception;
+                if (typeof args[0] === 'boolean') throw { type: ExceptionType.TYPE_ERROR, message: t('convert_bool_not_supported', {func: 'int'}), lineNumber: this.currentLine } as Exception;
                 return parseInt(args[0]);
             case 'float':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'float'}), lineNumber: this.currentLine } as Exception;
+                if (typeof args[0] === 'boolean') throw { type: ExceptionType.TYPE_ERROR, message: t('convert_bool_not_supported', {func: 'float'}), lineNumber: this.currentLine } as Exception;
                 return parseFloat(args[0]);
             case 'input':
                 // 运行时输入: 无参数, 返回用户输入的一行字符串 (不含换行符)
@@ -6626,9 +6686,24 @@ class ExpressionEvaluator {
                 return varInfo.value;
             }
             case 'binary': {
+                const op = node.op as string;
+                // 短路求值: && 左侧为 false / || 左侧为 true 时右侧不求值 (主流语言语义; 省右侧重表达式求值,
+                // 如 false && 1/0 不再抛除零)。左侧先做布尔检查 (逻辑运算符要求布尔操作数), 通过后才决定是否求右。
+                if (op === '&&' || op === '||') {
+                    const left = this.evalTree(node.left as ExprNode);
+                    if (typeof left !== 'boolean') {
+                        throw { type: ExceptionType.TYPE_ERROR, message: t('logic_op_left_operand_not_bool', {op: op}), lineNumber: this.currentLine } as Exception;
+                    }
+                    if (op === '&&' && !left) return false;
+                    if (op === '||' && left) return true;
+                    const right = this.evalTree(node.right as ExprNode);
+                    if (typeof right !== 'boolean') {
+                        throw { type: ExceptionType.TYPE_ERROR, message: t('logic_op_right_operand_not_bool', {op: op}), lineNumber: this.currentLine } as Exception;
+                    }
+                    return right;
+                }
                 const left = this.evalTree(node.left as ExprNode);
                 const right = this.evalTree(node.right as ExprNode);
-                const op = node.op as string;
                 // 数字快速路径: 两操作数均为原生 number (数值变量/字面量/数值运算结果) 时直接原生运算,
                 // 跳过 evaluateOperation 的 typeof/Set/对象类型检查 (语义等价: 原路径对 number 操作数
                 // 仅 '/' 有除零检查需保留, 其余直接计算; &&/|| 需布尔操作数故不进入快速路径)
@@ -6786,8 +6861,8 @@ class ExpressionEvaluator {
             const rightValueType = rightType === 'object' && right && right.type ? right.type : rightType;
 
             if (leftValueType !== rightValueType) {
-                // 根据规范, 类型不同时返回false而不报错
-                return false;
+                // 两侧类型必须相同, 跨类型比较报错 (不静默); 数字类型间天然同 typeof (5 == 5.0 恒 true), 不受影响
+                throw { type: ExceptionType.TYPE_ERROR, message: t('op_cmp_type_mismatch', {op: operator, left: leftValueType, right: rightValueType}), lineNumber: this.currentLine } as Exception;
             }
         } else if (operator === '&&' || operator === '||') {
             // 逻辑运算符要求左右操作数都是布尔值
@@ -6804,12 +6879,15 @@ class ExpressionEvaluator {
 
         switch (operator) {
             case '+':
-                // 支持字符串连接
-                if (typeof leftValue === 'string' || typeof rightValue === 'string') {
-                    return String(leftValue) + String(rightValue);
+                // 数字加法 (number + number) 或字符串拼接 (string + string), 混合类型报错 (需显式转换)
+                if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+                    DEBUG_LEVEL >= 2 && debugLog(2, () => `${operator} operated`);
+                    return leftValue + rightValue;
                 }
-                DEBUG_LEVEL >= 2 && debugLog(2, () => `${operator} operated`);
-                return leftValue + rightValue;
+                if (typeof leftValue === 'string' && typeof rightValue === 'string') {
+                    return leftValue + rightValue;
+                }
+                throw { type: ExceptionType.TYPE_ERROR, message: t('op_add_operand_mismatch', { left: typeof leftValue, right: typeof rightValue }), lineNumber: this.currentLine } as Exception;
             case '-':
                 DEBUG_LEVEL >= 2 && debugLog(2, () => `${operator} operated`);
                 return leftValue - rightValue;
@@ -6863,10 +6941,15 @@ class ExpressionEvaluator {
     private static evaluateUnaryOperation(operator: string, operand: any): any {
         switch (operator) {
             case '+':
-                return +operand;
             case '-':
-                return -operand;
+                if (typeof operand !== 'number') {
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('unary_operand_not_number', {op: operator}), lineNumber: this.currentLine } as Exception;
+                }
+                return operator === '+' ? operand : -operand;
             case '!':
+                if (typeof operand !== 'boolean') {
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('unary_operand_not_bool', {op: operator}), lineNumber: this.currentLine } as Exception;
+                }
                 return !operand;
             default:
                 throw {
@@ -8092,7 +8175,11 @@ class NSVMExecutor {
                             const v = Interpreter.evaluateExpression(consts[a]);
                             if (typeof v !== 'boolean') {
                                 reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', { actualType: typeof v }));
-                                frame.pc++;
+                                // 类型错误按假处理: while/for 跳过整个循环体 (复刻 executeWhile/executeFor 修复后行为,
+                                // 避免顺序执行 + 循环回跳死循环); if 顺序执行 if 体 (复刻 executeIf 行为)
+                                const stmtType = LINE_INFO[currentLinePointer] ? LINE_INFO[currentLinePointer].stmt.type : null;
+                                if (stmtType === StmtType.WHILE || stmtType === StmtType.FOR) frame.pc = b;
+                                else frame.pc++;
                             } else if (!v) {
                                 // if 假分支调试输出 (复刻 executeIf debugLog(1))
                                 if (LINE_INFO[currentLinePointer] && LINE_INFO[currentLinePointer].stmt.type === StmtType.IF) {
@@ -8310,7 +8397,7 @@ class NSVMExecutor {
                             frame.pc++;
                             break;
                         case NSVMOp.ASSERTCHK: {
-                            // 复刻 executeAssert: 条件真值性判断 (非布尔不报错) + 调试输出逐字节一致
+                            // 复刻 executeAssert: 条件必须为布尔 (拒绝 truthy), 非布尔 reportError 后跳过断言体; 调试输出逐字节一致
                             const info = consts[a] as { content: string; params: string; cond: string; msg: string | null };
                             DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_execute_instr', { content: info.content }));
                             debugLog(1, () => t('dbg_exec_assert', { params: info.params }));
@@ -8322,6 +8409,11 @@ class NSVMExecutor {
                                 if ((error as Exception).type === ExceptionType.ASSERTION_ERROR) throw error;
                                 reportError(ExceptionType.SYNTAX_ERROR, t('assert_condition_invalid', { expr: info.cond }));
                                 frame.pc++;
+                                break;
+                            }
+                            if (typeof condition !== 'boolean') {
+                                reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', { actualType: typeof condition }));
+                                frame.pc = b; // 跳过断言体
                                 break;
                             }
                             if (!condition) {
@@ -8549,6 +8641,7 @@ class NSVMExecutor {
                             frame.pc++;
                             return null;
                         }
+                        Interpreter.warnArrayNumberCompat(actualElemType, param.arrayElementType, currentLinePointer);
                     }
                     const literalVar: Variable = {
                         name: paramName,
@@ -8592,6 +8685,7 @@ class NSVMExecutor {
                     frame.pc++;
                     return null;
                 }
+                Interpreter.warnArrayNumberCompat(arrVar.arrayElementType!, param.arrayElementType!, currentLinePointer);
                 const paramVar: Variable = {
                     name: paramName,
                     value: "请使用arrayElements属性访问数组元素",

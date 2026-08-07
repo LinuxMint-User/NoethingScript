@@ -291,6 +291,38 @@ endtry
 call roLocal(garr)
 print garr[0]
 
+// ========== 测试19: 数组元素类型三档语义 (2.8.0) ==========
+:needInt (arr[]:int) -> :void
+:end
+:needFloat (arr[]:float) -> :void
+:end
+:needNum (arr[]:number) -> :void
+:end
+global array farr[3]:float = [1.5, 2.5, 3.5]
+global array narr[3]:number = [1, 2.5, 3]
+call needInt(nums)
+print "tier int<-int ok"
+call needFloat(farr)
+print "tier float<-float ok"
+call needNum(nums)
+print "tier num<-int ok"
+call needNum(farr)
+print "tier num<-float ok"
+call needNum(narr)
+print "tier num<-num ok"
+// int 数组给 float 形参 → 报错 (执行继续)
+call needFloat(nums)
+print "tier after float<-int err"
+// float 数组给 int 形参 → 报错 (执行继续)
+call needInt(farr)
+print "tier after int<-float err"
+// 字面量: float 形参拒收 int 字面量 → 报错
+call needFloat([1, 2, 3])
+print "tier after float<-litint err"
+// 字面量: number 形参接收 int 字面量 + 警告
+call needNum([1, 2, 3])
+print "tier num<-litint ok"
+
 // 预期输出:
 // caught readonly: 数组 arr 是只读引用, 不能被赋值
 // 60
@@ -301,9 +333,9 @@ print garr[0]
 // 5
 // 7
 // 3
-// 错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字...
+// 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字
 // after mismatch1
-// 错误: 形参 arr 为只读引用, 实参不能使用 mut 关键字...
+// 形参 arr 为只读引用, 实参不能使用 mut 关键字
 // after mismatch2
 // 15
 // 10
@@ -322,9 +354,10 @@ print garr[0]
 // y
 // true
 // 4
-// 错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字...
+// 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字
 // after mut literal
-// 错误: return 只能返回函数 badRet 声明的返回变量 out, 不能返回 arr...
+// return 只能返回函数 badRet 声明的返回变量 out, 不能返回 arr
+// 函数 badRet 期望返回 array 类型的值, 但最终执行到函数结束标记
 // after badRet
 // 1
 // 5
@@ -342,3 +375,18 @@ print garr[0]
 // 77
 // local readonly: 数组 la 是只读引用, 不能被赋值
 // 77
+// tier int<-int ok
+// tier float<-float ok
+// 数组元素类型 int 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+// tier num<-int ok
+// 数组元素类型 float 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+// tier num<-float ok
+// tier num<-num ok
+// 数组类型不匹配: 期望 float 数组, 实际是 int 数组
+// tier after float<-int err
+// 数组类型不匹配: 期望 int 数组, 实际是 float 数组
+// tier after int<-float err
+// 数组类型不匹配: 期望 float 数组, 实际是 int 数组
+// tier after float<-litint err
+// 数组元素类型 int 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+// tier num<-litint ok

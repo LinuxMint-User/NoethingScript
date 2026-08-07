@@ -25,7 +25,7 @@
 - [x] try-catch 测试
 - [x] 表达式 null/undefined 抛错
 - [x] 未定义/未初始化变量引用
-- [x] 条件表达式类型不同返回 false
+- [x] 条件表达式类型不同报错 (2.7.2: ==/!= 两侧类型必须相同, 跨类型比较报错可捕获; 数字类型间天然豁免——int/float/number 实现层同为数字, 5 == 5.0 / 0 == 0.0 恒 true)
 - [x] 运算符全面覆盖 (>=, &&, ||, **, !, /, %, 除零异常, 混合优先级/结合性)
 - [x] 内置转换函数 int()/float()
 - [x] 递归函数 (阶乘/斐波那契/递归void函数/递归内for循环变量隔离)
@@ -43,6 +43,8 @@
 - [x] return 只能返回函数声明的返回变量 (违反报错, 先赋值给返回变量再return为正确写法)
 - [x] 声明初始化仅字面量 (字面量表达式/字符串拼接/逻辑/数组元素表达式, 字符串含运算符不误判, 变量引用含单变量一律报错)
 - [x] 复合赋值运算符不支持 (设计决定, 需 x = x + 1 形式)
-- [x] String.* 内置函数 (length/substring/indexOf/includes/replace/toUpper/toLower/trim, JS 语义含负索引/交换/仅替换首处, 参数错误可捕获)
+- [x] String.* 内置函数 (take/findFirst/findLast/has/replace/toUpper/toLower/trim, 命名按语言自身风格; take 边界全显式越界抛 RangeError, findFirst/findLast 找不到返 false, replace 可选 all 参数, 参数错误可捕获; 长度用 len(s))
 - [x] Bit.* 内置函数 (and/or/xor/not/shl/shr, 32 位有符号含溢出变负, 表达式内嵌套, 参数错误可捕获)
-- [x] String.split 定长容器填充 (call 语句 + mut 容器 + 段数返回, 空分隔符/连续分隔符 JS 语义, 超容量/缺 mut 可捕获, 表达式调用报未知函数)
+- [x] 隐式转换禁止 (2.7.2 收紧: + 混合类型报错, 一元 +/! 类型检查, string 赋值收紧, str/int/float 拒收布尔, 显式转换唯一通道)
+- [x] 条件表达式必须布尔 (2.7.2 truthy 拒绝: while/for/assert/jump 非布尔条件一律报错——此前 `while (5)` 因 JS 真值化静默通过、`assert (5)` 静默通过、`jump (5): tag` 静默跳转; 报错后 while/for 跳过循环体、assert 跳过断言体、jump 不跳转, 与 NSVM JZ/JNZ/ASSERTCHK 双路径一致)
+- [x] &&/|| 有条件短路 (2.7.2: 左侧为 false (&&) 或 true (||) 时右侧不求值——`false && 1/0` 不抛除零; 右侧允许计算型内置函数 "函数模样的运算符" (Math.*/String.*/Bit.*/len/str/int/float, 无副作用); 仅禁止 I/O 型 input() (与 print 同属 I/O 通道, 有副作用, 短路跳过会静默不问输入, 解析期报语法错误可捕获); 两侧仍强制布尔; NSVM 含 &&/|| 表达式整体回退树求值)

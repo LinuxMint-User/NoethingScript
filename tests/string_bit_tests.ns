@@ -2,24 +2,30 @@ debug 0
 
 // ========== 测试1: String.* 字符串操作 ==========
 global s:string = "Hello World"
-print String.length(s)
-print String.substring(s, 0, 5)
-print String.indexOf(s, "World")
-print String.includes(s, "lo W")
-print String.includes(s, "xyz")
+print len(s)
+print String.take(s, 0, 5)
+print String.take(s, 6, len(s) - 6)
+print String.findFirst(s, "World")
+print String.findFirst(s, "zzz")
+print String.findFirst(s, "o", 5)
+print String.findLast(s, "o")
+print String.findLast(s, "zzz")
+print String.has(s, "lo W")
+print String.has(s, "xyz")
 print String.replace(s, "World", "NS")
+print String.replace("a-b-c", "-", "+")
+print String.replace("a-b-c", "-", "+", true)
 print String.toUpper(s)
 print String.toLower(s)
 print String.trim("  padded  ")
 print String.trim("no pad")
 
-// 负索引/交换语义 (JS substring: 负索引按0, end<start自动交换)
-print String.substring("abcdef", 2, 4)
-print String.substring("abcdef", -3, 2)
-print String.substring("abcdef", 4, 1)
-
-// 未找到时 indexOf 返回 -1
-print String.indexOf(s, "zzz")
+// 标准写法: 先 has 确认存在再 findFirst 取值 (doc 返回规范)
+global pos:int = 0
+if (String.has(s, "World"))
+    pos = String.findFirst(s, "World")
+endif
+print pos
 
 // ========== 测试2: Bit.* 位运算 ==========
 global b:int = 0
@@ -43,15 +49,15 @@ b = Bit.shr(-8, 1)
 print b
 
 // ========== 测试3: 表达式内嵌套使用 ==========
-print String.length(s) + Bit.shl(1, 2)
+print len(s) + Bit.shl(1, 2)
 print Bit.and(0b1100, 0b1010)
 print Bit.or(Bit.shl(1, 4), 3)
 
 // ========== 测试4: 参数个数错误可捕获 ==========
 try
-    print String.substring(s, 0)
+    print String.take(s, 0)
 catch (Exception e1)
-    print "caught substring arg: " + e1
+    print "caught take arg: " + e1
 endtry
 
 try
@@ -61,72 +67,125 @@ catch (Exception e2)
 endtry
 
 try
-    print Bit.and(1)
+    print String.findFirst(s)
 catch (Exception e3)
-    print "caught bit arg: " + e3
+    print "caught findFirst arg: " + e3
 endtry
 
-// ========== 测试5: String.split 定长容器填充 ==========
-global array parts[5]:string = arrfill
-global n:int = 0
-call String.split("a,b,c", ",", mut parts) -> n
-print n
-print parts[0]
-print parts[2]
-print len(parts)
-
-// 变量源串 + 空分隔符 (按字符拆)
-global s2:string = "hello"
-global array chars[6]:string = arrfill
-call String.split(s2, "", mut chars) -> n2
-print n2
-print chars[0]
-print chars[4]
-
-// 连续分隔符保留空段 (JS 语义)
-global array segs[4]:string = arrfill
-call String.split("x,,y", ",", mut segs) -> n3
-print n3
-print "[" + segs[1] + "]"
-
-// 超容量抛 RangeError (可捕获)
-global array small[2]:string = arrfill
 try
-    call String.split("1,2,3", ",", mut small) -> n4
+    print Bit.and(1)
+catch (Exception e4)
+    print "caught bit arg: " + e4
+endtry
+
+// ========== 测试4b: 参数类型错误可捕获 (2.7.2 收紧: 借用 JS 能力但不继承隐式强转) ==========
+// Math.* 只收 number (此前 Math.abs("-5")=5 静默强转)
+try
+    print Math.abs("5")
+catch (Exception e9)
+    print "caught abs str: " + e9
+endtry
+try
+    print Math.pow("2", 3)
+catch (Exception e10)
+    print "caught pow str: " + e10
+endtry
+try
+    print Math.max("3", 7)
+catch (Exception e11)
+    print "caught max str: " + e11
+endtry
+
+// String.* 源串/目标串只收 string, 数字参数只收 number (此前 String.take(12345,1,2)="23" 静默强转)
+try
+    print String.take(12345, 1, 2)
+catch (Exception e12)
+    print "caught take src: " + e12
+endtry
+try
+    print String.take("abc", "1", 2)
+catch (Exception e13)
+    print "caught take start: " + e13
+endtry
+try
+    print String.has(s, 5)
+catch (Exception e14)
+    print "caught has tgt: " + e14
+endtry
+try
+    print String.findFirst(s, "o", "x")
+catch (Exception e15)
+    print "caught findFirst from: " + e15
+endtry
+try
+    print String.replace(s, "World", 42)
+catch (Exception e16)
+    print "caught replace tgt: " + e16
+endtry
+
+// Bit.* 只收 number (此前 Bit.and("1", 2) 静默强转)
+try
+    print Bit.and("1", 2)
+catch (Exception e17)
+    print "caught and str: " + e17
+endtry
+try
+    print Bit.shl(1, "2")
+catch (Exception e18)
+    print "caught shl str: " + e18
+endtry
+
+// ========== 测试5: take 边界全显式 (越界抛 RangeError 可捕获) ==========
+// start 越界 (start >= len)
+try
+    print String.take("abc", 3, 1)
+catch (Exception e5)
+    print "caught take start: " + e5
+endtry
+
+// count 超出剩余长度 (count > len - start)
+try
+    print String.take("abc", 1, 3)
 catch (Exception e6)
-    print "caught split overflow: " + e6
+    print "caught take count: " + e6
 endtry
 
-// 容器缺 mut 抛错 (可捕获)
+// 负 start / 负 count
 try
-    call String.split("a,b", ",", parts) -> n5
+    print String.take("abc", -1, 1)
 catch (Exception e7)
-    print "caught split nomut: " + e7
+    print "caught take neg: " + e7
 endtry
 
-// 表达式内调用 String.split 报未知函数 (可捕获)
-global x:int = 0
+// count=0 返回空串 (合法)
+print "[" + String.take("abc", 1, 0) + "]"
+
+// replace 第 4 参类型错误 (必须 bool) 可捕获
 try
-    x = String.split("a", ",")
+    print String.replace("a-b", "-", "+", 1)
 catch (Exception e8)
-    print "caught split expr: " + e8
+    print "caught replace alltype: " + e8
 endtry
 
 // 预期输出:
 // 11
 // Hello
+// World
 // 6
+// false
+// 7
+// 7
+// false
 // true
 // false
 // Hello NS
+// a+b-c
+// a+b+c
 // HELLO WORLD
 // hello world
 // padded
 // no pad
-// cd
-// ab
-// bcd
-// -1
+// 6
 // 48
 // 255
 // 240
@@ -138,18 +197,22 @@ endtry
 // 15
 // 8
 // 19
-// caught substring arg: String.substring 需要 3 个参数
-// caught replace arg: String.replace 需要 3 个参数
+// caught take arg: String.take 需要 3 个参数
+// caught replace arg: String.replace 需要 3 或 4 个参数
+// caught findFirst arg: String.findFirst 需要 2 或 3 个参数
 // caught bit arg: Bit.and 需要 2 个参数
-// 3
-// a
-// c
-// 3
-// 5
-// h
-// o
-// 3
+// caught abs str: 函数 Math.abs 参数 1 需要 number 类型, 实际是 string
+// caught pow str: 函数 Math.pow 参数 1 需要 number 类型, 实际是 string
+// caught max str: 函数 Math.max 参数 1 需要 number 类型, 实际是 string
+// caught take src: 函数 String.take 参数 1 需要 string 类型, 实际是 number
+// caught take start: 函数 String.take 参数 2 需要 number 类型, 实际是 string
+// caught has tgt: 函数 String.has 参数 2 需要 string 类型, 实际是 number
+// caught findFirst from: 函数 String.findFirst 参数 3 需要 number 类型, 实际是 string
+// caught replace tgt: 函数 String.replace 参数 3 需要 string 类型, 实际是 number
+// caught and str: 函数 Bit.and 参数 1 需要 number 类型, 实际是 string
+// caught shl str: 函数 Bit.shl 参数 2 需要 number 类型, 实际是 string
+// caught take start: 字符串越界: String.take start=3 count=1 超出长度 3
+// caught take count: 字符串越界: String.take start=1 count=3 超出长度 3
+// caught take neg: 字符串越界: String.take start=-1 count=1 超出长度 3
 // []
-// caught split overflow: String.split 结果 3 段超出容器容量 2
-// caught split nomut: 函数 String.split 参数 3 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)"
-// caught split expr: 未知函数: String.split 位置 8
+// caught replace alltype: 函数 String.replace 参数 4 类型错误

@@ -135,6 +135,123 @@ catch (Exception e5)
 endtry
 print "after init var checks"
 
+// ========== 测试12: 隐式转换禁止 (2.7.2 收紧) ==========
+// + 混合类型: 数字+布尔 / 字符串+数字 一律报错
+global addBoolMix:int = 0
+try
+    addBoolMix = 5 + true
+catch (Exception e6)
+    print "caught add bool mix: " + e6
+endtry
+global addStrMix:string = ""
+try
+    addStrMix = "a" + 5
+catch (Exception e7)
+    print "caught add str mix: " + e7
+endtry
+// 合法路径: 数字+数字加法, 字符串+字符串拼接
+print 5 + 3
+print "a" + "b"
+// 一元运算: + 仅数字, ! 仅布尔
+global unPosBad:number = 0.0
+try
+    unPosBad = +"5"
+catch (Exception e8)
+    print "caught unpos: " + e8
+endtry
+global unNotBad:bool = false
+try
+    unNotBad = !0
+catch (Exception e9)
+    print "caught unnot: " + e9
+endtry
+print !true
+// string 赋值收紧: 数字赋 string 报错 (赋值错误走 reportError, 输出后继续), 需 str() 显式转换
+global strBad:string = "x"
+strBad = 42
+global strOk:string = "x"
+strOk = str(42)
+print strOk
+// str/int/float 拒收布尔
+global strBoolBad:string = "x"
+try
+    strBoolBad = str(true)
+catch (Exception e11)
+    print "caught str bool: " + e11
+endtry
+// 内置函数参数显式类型校验 (借用 JS 能力但不继承隐式强转: Math.*/Bit.* 只收 number, String.* 只收 string)
+global mathAbsBad:int = 0
+try
+    mathAbsBad = Math.abs("5")
+catch (Exception e12)
+    print "caught math abs str: " + e12
+endtry
+global takeSrcBad:string = ""
+try
+    takeSrcBad = String.take(12345, 1, 2)
+catch (Exception e13)
+    print "caught take src: " + e13
+endtry
+global bitAndBad:int = 0
+try
+    bitAndBad = Bit.and("1", 2)
+catch (Exception e14)
+    print "caught bit and str: " + e14
+endtry
+print "after implicit ban"
+
+// ========== 短路豁免: 内置函数 (函数模样的运算符) 可自由出现在 && / || 右侧 ==========
+global scS:string = "hello"
+global scFlag:bool = false
+if (scFlag && len(scS) > 3)
+    print "bad"
+else
+    print "rhs len ok"
+endif
+if (scFlag || str(5) == "5")
+    print "rhs str ok"
+endif
+// 短路跳过右侧内置函数: Math.random() 不求值
+if (true || Math.random() > 0.5)
+    print "skip random ok"
+endif
+// 两侧正常求值时右侧内置函数仍执行
+if (scFlag == false && len(scS) > 3)
+    print "rhs executed"
+endif
+// input() 是唯一例外: 有副作用 (I/O), 禁止出现在短路右侧, 解析期报错可捕获
+global scIn:bool = false
+try
+    if (scIn && input() == "y")
+        print "bad"
+    endif
+catch (Exception e15)
+    print "caught rhs input: " + e15
+endtry
+
+// ========== 测试13: 条件表达式必须布尔 (2.7.2 truthy 拒绝) ==========
+// while 条件非布尔: 报错后跳过循环体 (拒绝 while (5) 静默进入)
+while (5)
+    print "bad while"
+endwhl
+print "after while"
+// for 条件非布尔: 报错后跳过循环体
+for (local fj:int = 0; 5; fj = fj + 1)
+    print "bad for"
+endfor
+print "after for"
+// assert 条件非布尔: 报错后跳过断言体
+assert (5)
+"should not show"
+endasrt
+print "after assert"
+// jump 条件非布尔: 报错后不跳转
+print "jump start"
+jump (5): tt
+print "bad jump"
+:tt
+print "jump ok"
+
 // 预期输出:
 // ge true
 // ge false ok
@@ -183,3 +300,32 @@ print "after init var checks"
 // caught bad ref: ...
 // caught bad expr: ...
 // after init var checks
+// caught add bool mix: ...
+// caught add str mix: ...
+// 8
+// ab
+// caught unpos: ...
+// caught unnot: ...
+// false
+// 不能将值 '42' 赋值给变量 'strBad', 类型为 'string' (reportError, 输出后继续)
+// 42
+// caught str bool: ...
+// caught math abs str: ...
+// caught take src: ...
+// caught bit and str: ...
+// after implicit ban
+// rhs len ok
+// rhs str ok
+// skip random ok
+// rhs executed
+// caught rhs input: ...
+// 条件表达式必须返回布尔值, 但实际返回了 number 类型 (while 跳过)
+// after while
+// 条件表达式必须返回布尔值, 但实际返回了 number 类型 (for 跳过)
+// after for
+// 条件表达式必须返回布尔值, 但实际返回了 number 类型 (assert 跳过)
+// after assert
+// jump start
+// 条件表达式必须返回布尔值, 但实际返回了 number 类型 (jump 不跳转)
+// bad jump
+// jump ok

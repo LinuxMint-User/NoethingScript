@@ -81,7 +81,7 @@ call constTest()
 // 5
 // 1
 // random ok
-// caught math arg: ...
+// caught math arg: Math.pow 需要 2 个参数
 // 255
 // 10
 // 15
@@ -90,7 +90,7 @@ call constTest()
 // 16
 // 31
 // 10
-// TypeError: Cannot assign to constant variable 'lc' at line 58
+// 不能将常量 'lc' 赋值
 // 10
-// caught local const arr: ...
+// caught local const arr: 数组 la 是常量数组, 不能被赋值
 // 1

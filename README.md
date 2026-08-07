@@ -170,7 +170,11 @@ NoethingScript/
 
 ## 版本历史
 
-当前版本 **2.7.1**。完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **2.7.2**。
+
+> **不稳定期标记**：2.7.x 为不稳定版本系列——patch 版本可携带破坏性变更（类型系统收紧、语法调整等，攒批发布）。升级时请关注 [CHANGELOG.md](CHANGELOG.md) 中每个版本的破坏性变更说明；自 2.8 起恢复"破坏性变更只在 minor 升级时发布"。
+
+完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## License
 

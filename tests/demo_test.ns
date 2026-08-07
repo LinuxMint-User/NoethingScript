@@ -45,10 +45,18 @@ call sumArray(6) -> counter
 print "Sum of primes: " + str(counter)
 
 call findInPrimes(7) -> flag
-print "Found 7 in primes: " + str(flag)
+if (flag)
+    print "Found 7 in primes: true"
+else
+    print "Found 7 in primes: false"
+endif
 
 call findInPrimes(8) -> flag
-print "Found 8 in primes: " + str(flag)
+if (flag)
+    print "Found 8 in primes: true"
+else
+    print "Found 8 in primes: false"
+endif
 
 // switch 示例
 switch (counter % 3)

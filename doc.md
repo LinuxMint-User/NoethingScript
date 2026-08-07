@@ -46,12 +46,14 @@ print y
 ### 数据类型
 | 类型       | 说明                                                                 |
 |------------|----------------------------------------------------------------------|
-| `number`   | 自动判断数字类型                                                     |
+| `number`   | 数字类型（与 `int`/`float` 同源，值须为数字）                          |
 | `int`      | 整数类型                                                             |
 | `float`    | 浮点数类型                                                           |
 | `string`   | 字符或字符串类型                                                     |
 | `bool`     | 逻辑值，只能赋值为 `true` 或 `false`                                  |
 | `array`    | 数组类型，必须显式声明长度                                           |
+
+数字类型（`number`/`int`/`float`）**只接受数字值**：字符串（含 `"3.9"` 这类数字字符串）与布尔值一律报类型错误，不做隐式转换；非有限值 `NaN`/`Infinity`（如 `Math.sqrt(-1)`）同样拒收；需要转换请用内置 `int(x)`/`float(x)`/`str(x)`（见"内置函数"）。`bool` 同理只能赋 `true`/`false`。`string` 类型同样**只接受字符串值**——数字/布尔赋值报错，需 `str(x)` 显式转换；`"true"` 字符串与 `true` 布尔是两种不同的类型，`bool` 不提供任何转换（`str(true)`/`int(true)`/`float(true)` 均报错）。
 
 ### 声明格式
 ```ns
@@ -366,7 +368,18 @@ call functionName(arg0, arg1, ...)
 | `arr[]:int` | `call f([1, 2, 3])` | 字面量：以元素字面量创建只读临时数组作为实参，函数内读取正常，写入报错 |
 | `mut arr[]:int` | `call f(mut arr)` | 可变引用：函数内修改数组元素会写穿原数组 |
 
-- 元素类型匹配规则（与标量类型校验一致）：形参声明 `int` 时实参元素必须为整数；声明 `float`/`number` 时任意数字均可；声明 `string`/`bool` 时严格相等。不匹配报"数组类型不匹配"
+- 元素类型匹配规则（三档，`int`/`float` 严格区分、`number` 兼容并警告）：
+  - 形参声明 `int` → 实参元素必须为 `int`（`float` 数组不兼容）
+  - 形参声明 `float` → 实参元素必须为 `float`（`int` 数组不兼容；严格区分浮点以避免精度混淆）
+  - 形参声明 `number` → 兼容 `int`/`float` 元素，但输出 `[WARN]` 提示"建议明确声明为 int 或 float"（与 `arrfill` 对 `number` 数组的警告一致）
+  - 声明 `string`/`bool` → 严格相等
+  - 不匹配报"数组类型不匹配"
+
+设计说明：
+
+- **为什么数组层 `int`/`float` 严格区分**：数组实参在 `mut` 模式下引用共享（写穿原数组），绑定后写入校验按**实参的元素类型**进行。若允许 `int` 数组进 `float` 形参，函数内写浮点值会被实参的 `int` 类型拒绝——出现"形参声明 `float` 却写不进浮点数"的怪异行为，报错位置还偏移在函数体内。三档让类型契约在**调用点**守住：形参声明什么类型，实参就必须是什么类型，错误早暴露、行为可预测
+- **数组层与标量层的区别**：标量变量/形参的 `float` 仍接受整数（`global x:float = 5` 合法）。原因是 JS 值模型下 `5` 与 `5.0` 是同一个值，标量层无法按书写形式严格区分；且 `int` → `float` 在 double 下无损（2⁵³ 以内整数精确表示），真正有损的 `float` → `int` 已被 `int` 的严格校验挡住。因此"严格"只落在有"写穿"风险的数组层，标量层保持宽松（见"数据类型"）
+- **`number` 为什么兼容并警告**：`number` 是"任意数字"语义，本身不承诺 `int`/`float` 之一；接收明确类型的实参时给出 `[WARN]`，提示作者显式声明，与 `arrfill` 对 `number` 数组的警告同一出发点
 - 数组字面量实参的数字元素：整数推断 `int`，小数推断 `float`（与语言 int/float 显式区分一致）
 - 匹配规则：形参 `mut` 而实参未用 `mut`（且非 `copy`）→ 报错；形参未声明 `mut` 而实参用 `mut` → 报错；`copy()` 与 `mut` 形参兼容（副本独立可写）
 - 字面量实参为只读临时数组，不能用于 `mut` 形参
@@ -419,19 +432,24 @@ print r1[0]   // 5
 2. 不能使用 `0`/`1` 替代布尔值
 3. 必须用括号括起：`if (condition)`
 4. 出现 `null` 或 `undefined` 立即报错
-5. 运算符两侧数据类型必须相同，否则返回 `false`（赋值表达式也必须相同，否则报错。条件表达式仅返回`false`，不报错）
+5. `==`/`!=` 两侧类型必须相同，跨类型比较（数字 vs 字符串 vs 布尔等）一律报类型错误，可被 try-catch 捕获；数字类型之间按数值比较不受此限制——`int`/`float`/`number` 实现层同为数字，`5 == 5.0`、`0 == 0.0` 恒为 `true`
+6. 运算符两侧数据类型必须相同：`+` 仅允许 `数字 + 数字`（加法）或 `字符串 + 字符串`（拼接），混合类型（如 `"a" + 5`、`5 + true`）一律报类型错误，需 `str()`/`int()`/`float()` 显式转换；`-` `*` `/` `%` `**` 及大小比较运算符（`<` `>` `<=` `>=`）要求两侧均为数字；`==`/`!=` 按第 5 条两侧类型必须相同
+7. 一元运算符类型限制：`+`/`-` 仅接受数字操作数，`!` 仅接受布尔操作数，其余类型报错（无隐式转换）
+8. 短路求值：`&&` 左侧为 `false`、`||` 左侧为 `true` 时，右侧表达式不求值（如 `false && 1/0` 不会触发除零异常）；两侧操作数必须为布尔，非布尔报类型错误。内置函数分两类：**计算型**（`Math.*`/`String.*`/`Bit.*`/`len`/`str`/`int`/`float` 等）定位为"函数模样的运算符"，与运算符同级、无副作用，可自由出现在短路右侧——短路跳过它们不会跳过任何有意图的操作（用户函数只能通过 `call` 语句调用，天然不会出现在表达式中）；**I/O 型**（`input()`）与外界交互是它的目的——阻塞等待输入/挂起脚本，不是"函数模样的运算符"，有副作用，故禁止出现在 `&&`/`||` 右侧（短路跳过它会"该问的输入没问"），需输入请先 `if` 判断再显式调用
 
 ### 内置函数
-可在表达式中直接调用的内置函数：
+可在表达式中直接调用的内置函数。内置函数分两类：**计算型**（`len`/`str`/`int`/`float`/`copy` 及 `Math.*`/`String.*`/`Bit.*`）——无副作用、与运算符同级，是"函数模样的运算符"，可自由出现在表达式中任何位置（含 `&&`/`||` 短路右侧）；**I/O 型**（`input()`）——与外界交互是它的目的，与 `print` 关键字同属语言的 I/O 通道（`print` 是关键字/语句、`input()` 是函数/表达式，形态不同、定位相同），不是"函数模样的运算符"、有副作用，故禁止出现在 `&&`/`||` 短路右侧（见"条件表达式 → 短路求值"）：
 
 | 函数 | 参数 | 返回 | 说明 |
 |---|---|---|---|
 | `len(x)` | 字符串或数组 | int | 字符串长度或数组长度（详见"数组长度属性"） |
-| `str(x)` | 任意 | string | 转换为字符串 |
-| `int(x)` | 任意 | int | 转换为整数（`parseInt` 语义） |
-| `float(x)` | 任意 | float | 转换为浮点数 |
+| `str(x)` | 任意非 `bool` | string | 转换为字符串（`bool` 不提供转换） |
+| `int(x)` | 任意非 `bool` | int | 转换为整数（`parseInt` 语义；`bool` 不提供转换） |
+| `float(x)` | 任意非 `bool` | float | 转换为浮点数（`bool` 不提供转换） |
 | `copy(arr)` | 数组 | array | 数组深拷贝副本，用于实参副本或整体赋值（见"数组作为函数参数"/"数组整体赋值"） |
-| `input()` | 无 | string | 运行时输入：读取一行用户输入（不含换行符）。命令行读取 stdin；浏览器默认 `prompt` 弹窗，可用 `NSI.setInput()` 绑定自定义输入源（如页面输入框）。浏览器交互模式（`NSI.runInteractive`）下无输入时挂起等待 `NSI.resumeInput(value)` 喂入（见"浏览器中使用"）。注意声明初始化不允许函数调用，需先声明后赋值 |
+| `input()` | 无 | string | I/O 通道（输入侧，与 `print` 输出侧同定位）：读取一行用户输入（不含换行符）。命令行读取 stdin；浏览器默认 `prompt` 弹窗，可用 `NSI.setInput()` 绑定自定义输入源（如页面输入框）。浏览器交互模式（`NSI.runInteractive`）下无输入时挂起等待 `NSI.resumeInput(value)` 喂入（见"浏览器中使用"）。注意声明初始化不允许函数调用，需先声明后赋值 |
+
+**参数类型严格校验（2.7.2 收紧）**：所有内置函数参数类型显式，借用宿主 JS 的能力但不继承其隐式强转的陋习——`Math.*`/`Bit.*` 参数只收 `number`，`String.*` 的源串/目标串/替换串参数只收 `string`、数字参数（`take` 的 `start`/`count`、`findFirst` 的 `from`）只收 `number`、`replace` 的 `all` 只收 `bool`。`Math.abs("5")`、`String.take(12345, 1, 2)`、`Bit.and("1", 2)` 等一律抛类型错误（`TypeError`，可被 `try-catch` 捕获），需要转换请先显式 `int(x)`/`float(x)`/`str(x)`。与赋值、运算符的类型显式规则保持一致。
 
 #### Math 数学对象
 `Math.` 前缀调用数学函数（12 个）：
@@ -447,19 +465,28 @@ print r1[0]   // 5
 | `Math.random()` | [0,1) 随机数 |
 
 #### String 字符串对象
-`String.` 前缀调用字符串操作函数（9 个），直接映射宿主 JS 的 `String` 能力（与 `Math.*` 同源，解释器内置预置对象，所有脚本可用）：
+`String.` 前缀调用字符串操作函数（8 个）。与 `Math.*` 同源（解释器内置预置对象，所有脚本可用），但**命名按语言自身风格定，不沿用 JS 名字**——借用 JS 能力，不借命名：
 
 | 函数 | 说明 |
 |---|---|
-| `String.length(s)` | 字符串长度（`int`） |
-| `String.substring(s, start, end)` | 子串，`[start, end)` 区间。JS 语义：负索引按 0 处理，`end < start` 时自动交换 |
-| `String.indexOf(s, sub)` | 返回 `sub` 首次出现位置；未找到返回 `-1` |
-| `String.includes(s, sub)` | 是否包含子串，返回 `bool` |
-| `String.split(s, delim, mut parts)` | 按 `delim` 分割，填充定长字符串数组 `parts`，返回段数（`int`）。语言无动态数组且表达式仅返回标量，故 split **必须走 `call` 语句**，不能作表达式；容器容量即段数上限，超容量抛 `RangeError`（可被 `try-catch` 捕获）。空分隔符按字符拆分；连续分隔符保留空段（JS 语义）。示例见下 |
-| `String.replace(s, from, to)` | 替换。JS 语义：字符串参数仅替换第一处 |
+| `String.take(s, start, count)` | 取子串：从 `start` 起取 `count` 个字符。边界全显式（无隐式兜底）：`start`/`count` 非负、`start < len(s)`、`count <= len(s) - start`，越界抛 `RangeError`（可被 `try-catch` 捕获）；`count = 0` 返回空串。取到末尾请显式写 `String.take(s, start, len(s) - start)` |
+| `String.findFirst(s, target, from)` | `target` 首次出现的下标（`int`）；找不到返回 `false`。`from` 可省略（默认从 0 开始找） |
+| `String.findLast(s, target)` | `target` 末次出现的下标（`int`）；找不到返回 `false` |
+| `String.has(s, target)` | 是否包含 `target`，返回 `bool` |
+| `String.replace(s, old, new, all)` | 替换。`all` 可省略：默认只替换第一处；`all = true` 替换所有出现 |
 | `String.toUpper(s)` | 转大写 |
 | `String.toLower(s)` | 转小写 |
 | `String.trim(s)` | 去除首尾空白 |
+
+字符串长度用内置 `len(s)`（与数组长度同一函数），不再单设 `String.length`。
+
+返回规范（与语言整体一致）：**操作成功返回结果或 `true`，失败返回 `false`**——`findFirst`/`findLast` 找不到返回 `false`，`has` 不包含返回 `false`。NS 变量类型显式，"下标或 `false`"的混合返回无法直接绑定单一类型变量，判断存在性的标准写法是先 `has` 后取值：
+
+```ns
+if (String.has(s, target))
+    pos = String.findFirst(s, target)   // 已确认存在, 返回 int
+endif
+```
 
 #### Bit 位运算对象
 `Bit.` 前缀调用位运算函数（6 个），直接映射 JS 位运算符，32 位有符号语义（与 `Math.*` 同源）。设计上不动 NS 运算符语法（`& | ^ << >>` 涉及词法/表达式解析/NSVM 编译三处，成本高且有违"显式可预测"），以函数形式提供：
@@ -480,20 +507,13 @@ print int("3.9")    // 3
 print float("2.5")  // 2.5
 print Math.pow(2, 8) // 256
 print Math.floor(3.7) // 3
-print String.substring("Hello World", 0, 5) // Hello
-print String.indexOf("Hello World", "World") // 6
+print len("Hello")       // 5
+print String.take("Hello World", 0, 5)     // Hello
+print String.findFirst("Hello World", "World") // 6
+print String.has("Hello", "ell")  // true
+print String.replace("a-b-a", "a", "x", true) // x-b-x
 print Bit.and(0xF0, 0x3C) // 48
 print Bit.shl(1, 8) // 256
-```
-
-`String.split` 定长容器填充示例（必须走 `call` 语句）：
-```ns
-global array parts[5]:string = arrfill
-global n:int = 0
-call String.split("a,b,c", ",", mut parts) -> n
-print n          // 3
-print parts[0]   // a
-print parts[2]   // c
 ```
 
 ## 注释
