@@ -148,13 +148,15 @@ node benchmarks/ns_perf_bench.js --base=<rev>   # 对比任意提交 (如 --base
 
 ```
 NoethingScript/
-├── noethingScript-Interpreter.ts   # 解释器源码
+├── noethingScript-Interpreter.ts   # 解释器源码 (含 NSVM 字节码编译器与执行器)
 ├── benchmarks/                     # 性能基准 (合成基准 + 2048 端到端, 支持基线对比; npm run bench)
 ├── doc.md                          # 语言规范手册
+├── bytecode-vm/                    # 字节码VM文档: design.md 设计蓝图 + guide.md 实现说明
 ├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md), 含 input 演示 (tests/input_demo.ns, tests/input_browser_demo.html)
 ├── examples/                       # 演示项目: 2048 命令行游戏 (examples/2048.ns) 与网页版 (examples/2048_web.html, 浏览器中直接打开)
 ├── vscode-extension/               # VSCode 语法高亮扩展 (NoethingScript Language Support)
 ├── dist/                           # 编译产物 (npm run build 生成)
+├── package.json                    # npm 脚本 (build/bench/bench:2048) 与依赖
 ├── tsconfig.json
 └── LICENSE
 ```
@@ -162,6 +164,8 @@ NoethingScript/
 ## 语言规范
 
 完整语法规则见 [doc.md](doc.md)。
+
+字节码VM 设计蓝图见 [bytecode-vm/design.md](bytecode-vm/design.md),实现说明见 [bytecode-vm/guide.md](bytecode-vm/guide.md)。
 
 ## 版本历史
 
