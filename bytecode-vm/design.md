@@ -139,7 +139,6 @@ ExprFrame {
 | 7 | `RET` | `a=行号` | 无值返回 `:end` | 保留 |
 | 8 | `FORINIT` | `a=init 元数据 K` | 声明循环变量 (jump 重入复用) + 压 for 帧 | **新增** (for 帧保留) |
 | 9 | `FORUPD` | `a=更新表达式 K, b=变量名 K` | 更新循环变量 (只读豁免 FOR_UPDATE_VAR) | **新增** |
-| 18 | `FORCLEAN` | `a=init 元数据 K` | 循环自然结束清理变量 + 弹帧 (break 跳出时跳过) | **新增** |
 | 10 | `SWSTART` | `a=condK, b=类型错误目标` | 求值条件 + int/string 类型检查 + 压 switch 帧 | 改名 (v0.2 `SWITCHSTART`) |
 | 11 | `SWCASE` | `a=case值K, b=匹配目标, c=跳过目标` | 按类型严格比较; 匹配跳 body, 已匹配则跳 skip | 拆分 (v0.2 `CASETEST`) |
 | 12 | `SWDEF` | `a=default体目标, b=跳过目标` | default 分支 | **新增** (v0.2 用 JMP 表达) |
@@ -148,6 +147,7 @@ ExprFrame {
 | 15 | `CATCH` | `a=异常变量名 K, c=endtry 行号` | 异常进入: 绑定异常变量; 正常: 跳过 catch 体 | 保留 |
 | 16 | `ENDTRY` | - | 清理 try/catch 帧 | 保留 |
 | 17 | `ASSERTFAIL` | `a=消息 K` | 抛 AssertionError | 保留 |
+| 18 | `FORCLEAN` | `a=init 元数据 K` | 循环自然结束清理变量 + 弹帧 (break 跳出时跳过) | **新增** |
 | 19 | `ASSERTCHK` | `a=assert 信息 K, b=跳过目标` | 复刻 executeAssert: 真值性判断 (非布尔不报错) + 调试输出; 假则 ASSERTFAIL | **新增** (v0.2 `ASSERT`+JNZ 组合不够逐字节) |
 | 20 | `CALLFUNC` | `a=fn名K, b=modesK, c=调用元数据 K` | 用户函数调用; argc **一律从 consts[b] 模式表长度读取** (绝不从操作数携带); 实参表达式串预拆分存元数据, 运行期逐实参求值/绑定 | 保留 (argBase 连续区改为元数据) |
 | 21 | `NEWARRAY` | `a=数组声明元数据 K` | 数组声明: 编译期预解析格式/元素拆分, 运行期复刻 executeArrayDeclaration (长度求值/类型检查/arrfill/登记) | 保留 (元数据替代 lenReg) |
