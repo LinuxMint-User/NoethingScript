@@ -446,6 +446,33 @@ print r1[0]   // 5
 | `Math.sin(x)` / `Math.cos(x)` / `Math.tan(x)` | 三角函数 |
 | `Math.random()` | [0,1) 随机数 |
 
+#### String 字符串对象
+`String.` 前缀调用字符串操作函数（9 个），直接映射宿主 JS 的 `String` 能力（与 `Math.*` 同源，解释器内置预置对象，所有脚本可用）：
+
+| 函数 | 说明 |
+|---|---|
+| `String.length(s)` | 字符串长度（`int`） |
+| `String.substring(s, start, end)` | 子串，`[start, end)` 区间。JS 语义：负索引按 0 处理，`end < start` 时自动交换 |
+| `String.indexOf(s, sub)` | 返回 `sub` 首次出现位置；未找到返回 `-1` |
+| `String.includes(s, sub)` | 是否包含子串，返回 `bool` |
+| `String.split(s, delim, mut parts)` | 按 `delim` 分割，填充定长字符串数组 `parts`，返回段数（`int`）。语言无动态数组且表达式仅返回标量，故 split **必须走 `call` 语句**，不能作表达式；容器容量即段数上限，超容量抛 `RangeError`（可被 `try-catch` 捕获）。空分隔符按字符拆分；连续分隔符保留空段（JS 语义）。示例见下 |
+| `String.replace(s, from, to)` | 替换。JS 语义：字符串参数仅替换第一处 |
+| `String.toUpper(s)` | 转大写 |
+| `String.toLower(s)` | 转小写 |
+| `String.trim(s)` | 去除首尾空白 |
+
+#### Bit 位运算对象
+`Bit.` 前缀调用位运算函数（6 个），直接映射 JS 位运算符，32 位有符号语义（与 `Math.*` 同源）。设计上不动 NS 运算符语法（`& | ^ << >>` 涉及词法/表达式解析/NSVM 编译三处，成本高且有违"显式可预测"），以函数形式提供：
+
+| 函数 | 说明 |
+|---|---|
+| `Bit.and(a, b)` | 按位与 |
+| `Bit.or(a, b)` | 按位或 |
+| `Bit.xor(a, b)` | 按位异或 |
+| `Bit.not(x)` | 按位取反（`~`，结果可能为负） |
+| `Bit.shl(x, n)` | 左移 `n` 位（高位溢出变负） |
+| `Bit.shr(x, n)` | 算术右移 `n` 位（高位补符号位） |
+
 #### 示例
 ```ns
 print str(42)       // "42"
@@ -453,6 +480,20 @@ print int("3.9")    // 3
 print float("2.5")  // 2.5
 print Math.pow(2, 8) // 256
 print Math.floor(3.7) // 3
+print String.substring("Hello World", 0, 5) // Hello
+print String.indexOf("Hello World", "World") // 6
+print Bit.and(0xF0, 0x3C) // 48
+print Bit.shl(1, 8) // 256
+```
+
+`String.split` 定长容器填充示例（必须走 `call` 语句）：
+```ns
+global array parts[5]:string = arrfill
+global n:int = 0
+call String.split("a,b,c", ",", mut parts) -> n
+print n          // 3
+print parts[0]   // a
+print parts[2]   // c
 ```
 
 ## 注释
@@ -461,6 +502,7 @@ print Math.floor(3.7) // 3
 ```ns
 // 这是单行注释
 ```
+`//` 注释必须**独占整行**（允许首尾空白），**不支持行内注释**——代码行尾追加 `// xxx` 会被当作未匹配的符号报语法错误。这是设计使然：语言按行解析，行尾注释会引入解析歧义，故统一整行注释。若需在代码行旁做说明，请另起一行注释。
 
 ### 多行注释
 ```ns

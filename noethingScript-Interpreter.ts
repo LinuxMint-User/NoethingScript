@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.7.0";
+const NSIVersion: string = "2.7.1";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -491,6 +491,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         array_element_type_mismatch: '数组元素类型错误: 期望 {expected} 类型, 实际 {actual}',
         const_array_whole_assignment: '常量数组 {name} 不能被整体赋值',
         readonly_array_whole_assignment: '数组 {name} 是只读引用, 不能被整体赋值',
+        func_split_overflow: '{func} 结果 {count} 段超出容器容量 {capacity}',
         // return / print
         return_requires_var: 'return语句后必须跟一个变量',
         return_outside_function: '当前返回语句所在行不在函数内',
@@ -557,6 +558,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_call_missing_right_paren: '函数调用缺少右括号: {name} 位置 {pos}',
         func_needs_1_arg: '{func} 需要 1 个参数',
         func_needs_2_args: '{func} 需要 2 个参数',
+        func_needs_3_args: '{func} 需要 3 个参数',
         func_no_arg_expected: '{func} 不需要参数',
         len_only_str_or_array: 'len 只能用于字符串或数组',
         copy_arg_must_be_array: 'copy 参数必须是数组类型',
@@ -859,6 +861,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         array_element_type_mismatch: 'Array element type error: expected {expected} type but got {actual}',
         const_array_whole_assignment: 'Constant array {name} cannot be assigned as a whole',
         readonly_array_whole_assignment: 'Array {name} is a readonly reference and cannot be assigned as a whole',
+        func_split_overflow: '{func} result has {count} segments exceeding container capacity {capacity}',
         // return / print
         return_requires_var: 'The return statement must be followed by a variable',
         return_outside_function: 'The current return statement is not inside a function',
@@ -925,6 +928,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_call_missing_right_paren: 'Missing right parenthesis in function call: {name} at position {pos}',
         func_needs_1_arg: '{func} expects 1 argument',
         func_needs_2_args: '{func} expects 2 arguments',
+        func_needs_3_args: '{func} expects 3 arguments',
         func_no_arg_expected: '{func} expects no arguments',
         len_only_str_or_array: 'len can only be used on strings or arrays',
         copy_arg_must_be_array: 'The copy argument must be an array type',
@@ -2705,7 +2709,8 @@ class Interpreter {
         let argsStr: string;
         let resultVar: string | undefined;
         if (params.indexOf('->') !== -1) {
-            const matchWithResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
+            // 支持点分函数名 (String.split / 未来模块函数 xxx.func)
+            const matchWithResult = params.match(/^([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
             if (matchWithResult) {
                 funcName = matchWithResult[1];
                 argsStr = matchWithResult[2];
@@ -2715,7 +2720,7 @@ class Interpreter {
                 return;
             }
         } else {
-            const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
+            const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)*)\((.*)\)$/);
             if (matchWithoutResult) {
                 funcName = matchWithoutResult[1];
                 argsStr = matchWithoutResult[2];
@@ -2727,6 +2732,11 @@ class Interpreter {
         }
 
         if (!FUNCTIONS[funcName]) {
+            // 内置点分函数快速通道: 当前仅 String.split (定长容器填充语义, 需 mut 数组容器 + 段数返回, 表达式路径无法承载)
+            if (funcName === 'String.split') {
+                Interpreter.executeBuiltinSplit(argsStr, resultVar);
+                return;
+            }
             // 函数未定义: 抛引用错误 (可被try-catch捕获)
             throw {
                 type: ExceptionType.REFERENCE_ERROR,
@@ -3042,6 +3052,75 @@ class Interpreter {
             frameVarStart: callVarStart
         });
         debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
+    }
+
+    // ============ String.split 定长容器填充 (call 语句专属通道) ============
+    // 形态: call String.split(源串, 分隔符, mut 容器数组) -> 段数
+    // 语言无动态数组且表达式仅返回标量, 故 split 不走表达式; 容器由调用方声明定长 (容量=段数上限),
+    // split 填充容器并返回实际段数, 段数超容量抛 RangeError (可被 try-catch 捕获)。
+    // 与栈模块元数据槽模式同构 (design.md §8/§9.3 方案 A)。
+    private static executeBuiltinSplit(argsStr: string, resultVar: string | undefined): void {
+        if (resultVar === undefined) {
+            reportError(ExceptionType.TYPE_ERROR, t('func_result_var_missing', {name: 'String.split'}));
+            return;
+        }
+        // 拆分实参: 忽略字符串字面量内部的逗号
+        const parts: string[] = [];
+        let cur = '';
+        let inString = false;
+        for (let i = 0; i < argsStr.length; i++) {
+            const c = argsStr[i];
+            if (c === '"') { inString = !inString; cur += c; }
+            else if (c === ',' && !inString) { parts.push(cur.trim()); cur = ''; }
+            else cur += c;
+        }
+        if (cur.trim()) parts.push(cur.trim());
+        if (parts.length !== 3) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.split'}), lineNumber: currentLinePointer } as Exception;
+        }
+        // 源字符串与分隔符: 字面量或 string 变量
+        let source: string;
+        let delim: string;
+        try {
+            source = String(Interpreter.parseValue(parts[0], DataType.STRING));
+            delim = String(Interpreter.parseValue(parts[1], DataType.STRING));
+        } catch (e) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('func_arg_type_error', {name: 'String.split', argIndex: 1}), lineNumber: currentLinePointer } as Exception;
+        }
+        // 容器数组: 仅接受 mut 数组名 (写穿容器)
+        const arrMatch = parts[2].match(/^mut\s+([a-zA-Z_][a-zA-Z0-9_.]*)$/);
+        if (!arrMatch) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('func_array_arg_format', {name: 'String.split', argIndex: 3}), lineNumber: currentLinePointer } as Exception;
+        }
+        const container = ScopeManager.getVariable(arrMatch[1], currentLinePointer, true, arrMatch[1].startsWith('global.'));
+        if (!container || container.type !== DataType.ARRAY) {
+            reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrMatch[1]}));
+            return;
+        }
+        if (container.arrayElementType !== undefined && container.arrayElementType !== DataType.STRING) {
+            reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: DataType.STRING, actual: container.arrayElementType }));
+            return;
+        }
+        if (container.isConst) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('const_array_assignment', {name: container.name}), lineNumber: currentLinePointer } as Exception;
+        }
+        if (container.isReadonlyArray) {
+            throw { type: ExceptionType.TYPE_ERROR, message: t('readonly_array_assignment', {name: container.name}), lineNumber: currentLinePointer } as Exception;
+        }
+        const segs = source.split(delim);
+        const capacity = container.arrayLength || 0;
+        if (segs.length > capacity) {
+            throw { type: ExceptionType.RANGE_ERROR, message: t('func_split_overflow', {func: 'String.split', count: segs.length, capacity}), lineNumber: currentLinePointer } as Exception;
+        }
+        container.arrayElements = segs.map(s => ({ value: s, type: DataType.STRING }));
+        container.arrayLength = segs.length;
+        // 段数写回结果变量 (未声明则自动创建 int, 与用户函数返回值路径一致)
+        if (!ScopeManager.hasVariable(resultVar, currentLinePointer)) {
+            const rvIdx = LOCAL_VARS.length;
+            ScopeManager.addVariable(resultVar, 0, DataType.INT, currentLinePointer, -1, false);
+            if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
+        }
+        ScopeManager.setVariable(resultVar, segs.length, currentLinePointer);
     }
 
     // 执行数组声明
@@ -6267,6 +6346,52 @@ class ExpressionEvaluator {
             case 'Math.random':
                 if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'Math.random'}), lineNumber: this.currentLine } as Exception;
                 return Math.random();
+            // ============ String.* 字符串操作 (直接映射宿主 JS String, 与 Math.* 同源) ============
+            case 'String.length':
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.length'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).length;
+            case 'String.substring':
+                if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.substring'}), lineNumber: this.currentLine } as Exception;
+                // JS substring 语义: [start, end), 负索引按 0, end<start 自动交换
+                return String(args[0]).substring(args[1], args[2]);
+            case 'String.indexOf':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.indexOf'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).indexOf(String(args[1]));
+            case 'String.includes':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'String.includes'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).includes(String(args[1]));
+            case 'String.replace':
+                if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.replace'}), lineNumber: this.currentLine } as Exception;
+                // JS replace 语义: 字符串参数仅替换第一处
+                return String(args[0]).replace(String(args[1]), String(args[2]));
+            case 'String.toUpper':
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.toUpper'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).toUpperCase();
+            case 'String.toLower':
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.toLower'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).toLowerCase();
+            case 'String.trim':
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.trim'}), lineNumber: this.currentLine } as Exception;
+                return String(args[0]).trim();
+            // ============ Bit.* 位运算 (直接映射 JS 位运算符, 32 位有符号语义) ============
+            case 'Bit.and':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.and'}), lineNumber: this.currentLine } as Exception;
+                return args[0] & args[1];
+            case 'Bit.or':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.or'}), lineNumber: this.currentLine } as Exception;
+                return args[0] | args[1];
+            case 'Bit.xor':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.xor'}), lineNumber: this.currentLine } as Exception;
+                return args[0] ^ args[1];
+            case 'Bit.not':
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'Bit.not'}), lineNumber: this.currentLine } as Exception;
+                return ~args[0];
+            case 'Bit.shl':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.shl'}), lineNumber: this.currentLine } as Exception;
+                return args[0] << args[1];
+            case 'Bit.shr':
+                if (args.length !== 2) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_2_args', {func: 'Bit.shr'}), lineNumber: this.currentLine } as Exception;
+                return args[0] >> args[1];
             case 'len':
                 if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'len'}), lineNumber: this.currentLine } as Exception;
                 debugLog(2, () => t('dbg_len_arg', { arg: args[0] }));

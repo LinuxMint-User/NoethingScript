@@ -43,3 +43,6 @@
 - [x] return 只能返回函数声明的返回变量 (违反报错, 先赋值给返回变量再return为正确写法)
 - [x] 声明初始化仅字面量 (字面量表达式/字符串拼接/逻辑/数组元素表达式, 字符串含运算符不误判, 变量引用含单变量一律报错)
 - [x] 复合赋值运算符不支持 (设计决定, 需 x = x + 1 形式)
+- [x] String.* 内置函数 (length/substring/indexOf/includes/replace/toUpper/toLower/trim, JS 语义含负索引/交换/仅替换首处, 参数错误可捕获)
+- [x] Bit.* 内置函数 (and/or/xor/not/shl/shr, 32 位有符号含溢出变负, 表达式内嵌套, 参数错误可捕获)
+- [x] String.split 定长容器填充 (call 语句 + mut 容器 + 段数返回, 空分隔符/连续分隔符 JS 语义, 超容量/缺 mut 可捕获, 表达式调用报未知函数)

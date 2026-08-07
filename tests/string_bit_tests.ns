@@ -1,0 +1,155 @@
+debug 0
+
+// ========== 测试1: String.* 字符串操作 ==========
+global s:string = "Hello World"
+print String.length(s)
+print String.substring(s, 0, 5)
+print String.indexOf(s, "World")
+print String.includes(s, "lo W")
+print String.includes(s, "xyz")
+print String.replace(s, "World", "NS")
+print String.toUpper(s)
+print String.toLower(s)
+print String.trim("  padded  ")
+print String.trim("no pad")
+
+// 负索引/交换语义 (JS substring: 负索引按0, end<start自动交换)
+print String.substring("abcdef", 2, 4)
+print String.substring("abcdef", -3, 2)
+print String.substring("abcdef", 4, 1)
+
+// 未找到时 indexOf 返回 -1
+print String.indexOf(s, "zzz")
+
+// ========== 测试2: Bit.* 位运算 ==========
+global b:int = 0
+b = Bit.and(0xF0, 0x3C)
+print b
+b = Bit.or(0xF0, 0x0F)
+print b
+b = Bit.xor(0xFF, 0x0F)
+print b
+b = Bit.not(0)
+print b
+b = Bit.shl(1, 8)
+print b
+b = Bit.shr(0xFF, 4)
+print b
+
+// 32 位有符号语义: 高位溢出变负
+b = Bit.shl(0x40000000, 1)
+print b
+b = Bit.shr(-8, 1)
+print b
+
+// ========== 测试3: 表达式内嵌套使用 ==========
+print String.length(s) + Bit.shl(1, 2)
+print Bit.and(0b1100, 0b1010)
+print Bit.or(Bit.shl(1, 4), 3)
+
+// ========== 测试4: 参数个数错误可捕获 ==========
+try
+    print String.substring(s, 0)
+catch (Exception e1)
+    print "caught substring arg: " + e1
+endtry
+
+try
+    print String.replace(s, "World")
+catch (Exception e2)
+    print "caught replace arg: " + e2
+endtry
+
+try
+    print Bit.and(1)
+catch (Exception e3)
+    print "caught bit arg: " + e3
+endtry
+
+// ========== 测试5: String.split 定长容器填充 ==========
+global array parts[5]:string = arrfill
+global n:int = 0
+call String.split("a,b,c", ",", mut parts) -> n
+print n
+print parts[0]
+print parts[2]
+print len(parts)
+
+// 变量源串 + 空分隔符 (按字符拆)
+global s2:string = "hello"
+global array chars[6]:string = arrfill
+call String.split(s2, "", mut chars) -> n2
+print n2
+print chars[0]
+print chars[4]
+
+// 连续分隔符保留空段 (JS 语义)
+global array segs[4]:string = arrfill
+call String.split("x,,y", ",", mut segs) -> n3
+print n3
+print "[" + segs[1] + "]"
+
+// 超容量抛 RangeError (可捕获)
+global array small[2]:string = arrfill
+try
+    call String.split("1,2,3", ",", mut small) -> n4
+catch (Exception e6)
+    print "caught split overflow: " + e6
+endtry
+
+// 容器缺 mut 抛错 (可捕获)
+try
+    call String.split("a,b", ",", parts) -> n5
+catch (Exception e7)
+    print "caught split nomut: " + e7
+endtry
+
+// 表达式内调用 String.split 报未知函数 (可捕获)
+global x:int = 0
+try
+    x = String.split("a", ",")
+catch (Exception e8)
+    print "caught split expr: " + e8
+endtry
+
+// 预期输出:
+// 11
+// Hello
+// 6
+// true
+// false
+// Hello NS
+// HELLO WORLD
+// hello world
+// padded
+// no pad
+// cd
+// ab
+// bcd
+// -1
+// 48
+// 255
+// 240
+// -1
+// 256
+// 15
+// -2147483648
+// -4
+// 15
+// 8
+// 19
+// caught substring arg: String.substring 需要 3 个参数
+// caught replace arg: String.replace 需要 3 个参数
+// caught bit arg: Bit.and 需要 2 个参数
+// 3
+// a
+// c
+// 3
+// 5
+// h
+// o
+// 3
+// []
+// caught split overflow: String.split 结果 3 段超出容器容量 2
+// caught split nomut: 函数 String.split 参数 3 数组实参格式错误, 应为 "数组名"、"mut 数组名" 或 "copy(数组名)"
+// caught split expr: 未知函数: String.split 位置 8
