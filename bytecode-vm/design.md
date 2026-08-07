@@ -23,7 +23,7 @@
 | 1 | 编码与传参: 勿直接用 `[op,a,b,c]` 数组 (阶段2即切 Int32Array 扁平内存) 减 GC 压力 | §2.2 指令编码改为 `Int32Array` 扁平内存 (op/a/b/c 各 4 int32), 阶段 2 起实施 |
 | 2 | 函数调用省去冗余 ARG 搬运, 实参直接求值到 argBase 区, CALLFUNC 携带元数据 | 删除 `ARG` 指令; 实参求值落 argBase 连续区; `CALLFUNC` 以 `modesK` (常量池预构建 Int32Array 模式表) 携带引用/拷贝元数据; `argc` 由模式表长度决定, 编译期已校验实参个数 |
 | 3 | 双模式回退警惕寄存器状态不同步, 宁可编译期拒绝边缘情形也不静默回退 | §7/§8: 回退为**整表达式原子选择** (整体编译 or 整体树求值), 无部分状态; 不可编译构造 (call/arrayAccess/arrayAssignment 等) 编译期判定并整体回退, 绝不混合; 边缘情形 (jump 跳入函数体等) 编译期拒绝 |
-| 4 | PURGEEXCEPT 预存寄存器号而非运行期查常量池名称 | §3 `PURGEEXCEPT k`: `consts[k]` 为编译期预构建的恢复描述数组 (name + reg + meta), 运行期直取寄存器号, 不再按名查表 |
+| 4 | PURGEEXCEPT 预存寄存器号而非运行期查常量池名称 | §3 `PURGEEXCEPT k`: `consts[k]` 为编译期预构建的恢复描述数组 (name + reg + meta), 运行期直取寄存器号, 不再按名查表 (该指令连同恢复描述表于 v0.3 修订 #1 删除, 见 §3.3) |
 | 5 | GETGLOBAL 严格"先存在性 (REFERENCE_ERROR) 后值 (undefined 抛 TYPE_ERROR)" | §4 明确并锁定检查顺序 |
 | 6 | AND/OR 非短路副作用严防死守 | §3/§4: 求值器无跳转指令, 双操作数无条件先求值再二元判断, 从结构上杜绝短路; 阶段 2 起代码注释固化 |
 | 7 | SWITCH 比较附带类型信息防隐式转换 | §3/§5.5: `SWITCHSTART` 保存 cond 类型码, `CASETEST` 按类型严格比较 (与现 executeCase 的 typeof 语义一致) |
@@ -170,7 +170,7 @@ ExprFrame {
 
 | 处置 | 指令 | 理由 (实测) |
 |---|---|---|
-| **删除** (回退行解释器) | `NOP` `MOVE` `GETGLOBAL` `SETGLOBAL` `GLOBALDECL` `ARRAYLEN` `ARRAYASSIGN` `ARRFILL` `PRINT` `PURGEALL` `PURGEVAR` `PURGEEXCEPT` | 语句级寄存器直读直写收益不成立 (v0.3 修订 1): 变量读写走表达式级 `LOADVAR` + 原槽位/查找路径即可; 冷语句 (print/purge/声明) 委托 `STMT` 优于指令化。`PURGEEXCEPT` 恢复描述表设计**保留为待办** (运行期仍按名查表) |
+| **删除** (回退行解释器) | `NOP` `MOVE` `GETGLOBAL` `SETGLOBAL` `GLOBALDECL` `ARRAYLEN` `ARRAYASSIGN` `ARRFILL` `PRINT` `PURGEALL` `PURGEVAR` `PURGEEXCEPT` | 语句级寄存器直读直写收益不成立 (v0.3 修订 1): 变量读写走表达式级 `LOADVAR` + 原槽位/查找路径即可; 冷语句 (print/purge/声明) 委托 `STMT` 优于指令化。v0.2 修订 #4 的 `PURGEEXCEPT` 恢复描述表**确认不实施** (PURGE* 整体不指令化, 行解释器继续按名在局部变量作用域中查找/恢复排除变量, 非待办项) |
 | **删除** | `CALLBUILTIN` | 内置函数调用不单独指令化, 走表达式求值 (调用点编译期预解析已有) |
 | **保留不启用** | `GETARRAY` (表达式级) | BISECT: 完整实现 2048 端到端 +6~8%, 回退表达式树求值无劣化 (v0.3 修订 2) |
 | **已实现** | 其余全部 | 见 §3.1/§3.2 |
