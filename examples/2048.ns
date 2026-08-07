@@ -13,7 +13,7 @@ global over:int = 0
 // 滑动合并: mode 0=左 1=右 2=上 3=下
 // 直接修改传入的 grid, 返回本方向是否发生了移动
 // ------------------------------------------------------------
-:slideDir (mut g:array, mode:int) -> changed:int
+:slideDir (mut g[]:int, mode:int) -> changed:int
 local i:int
 local j:int
 local line:int

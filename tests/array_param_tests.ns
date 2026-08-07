@@ -2,7 +2,7 @@ debug 0
 
 // ========== 测试1: 只读引用传递 (默认) ==========
 // 读正常, 写数组元素抛异常可捕获, 原数组不变
-:sumArr (arr:array) -> total:int
+:sumArr (arr[]:int) -> total:int
 local i:int = 0
 local s:int = 0
 while (i < len(arr))
@@ -24,7 +24,7 @@ print garr[0]
 
 // ========== 测试2: mut 可变引用传递 ==========
 // 函数内修改写穿原数组
-:setFirst (mut arr:array, val:int) -> :void
+:setFirst (mut arr[]:int, val:int) -> :void
 arr[0] = val
 :end
 call setFirst(mut garr, 77)
@@ -32,7 +32,7 @@ print garr[0]
 
 // ========== 测试3: copy 副本传递 ==========
 // 函数内修改不影响原数组 (副本独立可写)
-:maxArr (arr:array) -> max:int
+:maxArr (arr[]:int) -> max:int
 local i2:int = 1
 local m:int = 0
 m = arr[0]
@@ -51,7 +51,7 @@ print m1
 print garr[0]
 
 // ========== 测试4: 数组返回值 ==========
-:makeArr () -> res:array
+:makeArr () -> res[]:int
 local array tmp[3]:int = [5, 6, 7]
 res = tmp
 return res
@@ -62,18 +62,18 @@ print r1[2]
 print len(r1)
 
 // ========== 测试5: mut 匹配检查 ==========
-:needMut (mut arr:array) -> :void
+:needMut (mut arr[]:int) -> :void
 :end
 call needMut(garr)
 print "after mismatch1"
 
-:needRO (arr:array) -> :void
+:needRO (arr[]:int) -> :void
 :end
 call needRO(mut garr)
 print "after mismatch2"
 
 // ========== 测试6: 递归 + 数组参数 ==========
-:rsum (arr:array, idx:int) -> acc:int
+:rsum (arr[]:int, idx:int) -> acc:int
 local v:int = 0
 v = arr[idx]
 local nxt:int = 0
@@ -92,7 +92,7 @@ call rsum(nums, 0) -> total
 print total
 
 // ========== 测试7: 局部数组实参 ==========
-:lastElem (arr:array) -> last:int
+:lastElem (arr[]:int) -> last:int
 local n:int = 0
 n = len(arr)
 local e:int = 0
@@ -108,14 +108,14 @@ print le
 call wrapper()
 
 // ========== 测试8: mut 嵌套传参 (两层写穿) ==========
-:doubleIt (mut arr:array) -> :void
+:doubleIt (mut arr[]:int) -> :void
 local i:int = 0
 while (i < len(arr))
     arr[i] = arr[i] * 2
     i = i + 1
 endwhl
 :end
-:applyDouble (mut arr:array) -> :void
+:applyDouble (mut arr[]:int) -> :void
 call doubleIt(mut arr)
 :end
 global array dd[3]:int = [1, 2, 3]
@@ -149,7 +149,7 @@ print ga[1]
 print gb[1]
 
 // ========== 测试11: 数组整体赋值 + 返回声明变量 ==========
-:makeArr2 () -> res:array
+:makeArr2 () -> res[]:int
 local array tmp[3]:int = [5, 6, 7]
 res = tmp
 return res
@@ -160,7 +160,7 @@ print r2[2]
 print len(r2)
 
 // ========== 测试12: 数组字面量实参 ==========
-:firstInt (arr:array) -> first:int
+:firstInt (arr[]:int) -> first:int
 local f:int = 0
 f = arr[0]
 first = f
@@ -169,7 +169,7 @@ return first
 call firstInt([3, 4, 5]) -> fe
 print fe
 
-:firstStr (arr:array) -> first:string
+:firstStr (arr[]:string) -> first:string
 local f:string = ""
 f = arr[1]
 first = f
@@ -178,7 +178,7 @@ return first
 call firstStr(["x", "y"]) -> fe2
 print fe2
 
-:firstBool (arr:array) -> first:bool
+:firstBool (arr[]:bool) -> first:bool
 local f:bool = false
 f = arr[0]
 first = f
@@ -187,7 +187,7 @@ return first
 call firstBool([true, false]) -> fe3
 print fe3
 
-:lenOf (arr:array) -> n:int
+:lenOf (arr[]:int) -> n:int
 local t:int = 0
 t = len(arr)
 n = t
@@ -197,7 +197,7 @@ call lenOf([10, 20, 30, 40]) -> ln
 print ln
 
 // 字面量实参用于 mut 形参 → 报错 (执行继续)
-:mutWrite (mut arr:array) -> :void
+:mutWrite (mut arr[]:int) -> :void
 arr[0] = 9
 :end
 call mutWrite([1, 2])
@@ -205,14 +205,14 @@ print "after mut literal"
 
 // ========== 测试13: return 只能返回声明变量 (数组场景) ==========
 // 违反规则: return 形参数组 → 报错 (执行继续)
-:badRet (arr:array) -> out:array
+:badRet (arr[]:int) -> out[]:int
 return arr
 :end
 call badRet(nums) -> br
 print "after badRet"
 
 // 正确写法: 先整体赋值给返回变量再 return
-:goodRet (arr:array) -> out:array
+:goodRet (arr[]:int) -> out[]:int
 out = arr
 return out
 :end
@@ -231,7 +231,7 @@ print cb[0]
 print len(cb)
 
 // 函数内 copy 整体赋值 + 返回
-:mkCopy () -> res:array
+:mkCopy () -> res[]:int
 local array tmp[2]:int = [5, 6]
 local array cp[2]:int = [0, 0]
 cp = copy(tmp)
@@ -244,7 +244,7 @@ print rcp[0]
 print rcp[1]
 
 // ========== 测试15: copy(只读形参) 深拷贝可写 ==========
-:copyRO (arr:array) -> out:array
+:copyRO (arr[]:int) -> out[]:int
 out = copy(arr)
 return out
 :end
@@ -267,7 +267,7 @@ print global.gp1[1]
 print global.gp2[1]
 
 // ========== 测试18: 只读传播 (整体赋值/返回不泄漏写权限) ==========
-:roLeak (arr:array) -> out:array
+:roLeak (arr[]:int) -> out[]:int
 out = arr
 return out
 :end
@@ -279,7 +279,7 @@ catch (Exception e3)
 endtry
 print garr[0]
 
-:roLocal (arr:array) -> :void
+:roLocal (arr[]:int) -> :void
 local array la[2]:int = [0, 0]
 la = arr
 try

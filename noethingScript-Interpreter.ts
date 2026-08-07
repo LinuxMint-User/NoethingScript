@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.6.5";
+const NSIVersion: string = "2.7.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -310,6 +310,7 @@ interface FunctionParameter {
     name: string;
     type: DataType;
     isMutable?: boolean;  // 是否为可变引用参数 (mut 关键字前置, 仅数组有效)
+    arrayElementType?: DataType;  // 数组形参元素类型 (arr[]:int 中的 int)
 }
 
 // 函数信息接口定义
@@ -321,6 +322,7 @@ interface FunctionInfo {
     endLine: number;
     // 返回值变量名 (函数解析时缓存, 供 executeReturn/结果赋值热路径免重复解析函数定义行)
     returnVarName?: string;
+    returnArrayElementType?: DataType;  // 数组返回值元素类型 (-> st[]:int 中的 int)
     // hasReturnStatement: boolean; // 目前弃用的属性
 
 }
@@ -440,6 +442,9 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_return_type_required: '函数返回值格式错误: 有返回值的函数必须指定返回值类型',
         func_param_format: '函数参数格式错误: 参数 {param} 格式不正确, 应为 "参数名:类型"',
         func_param_mut_array_only: '函数参数格式错误: 参数 {param}, mut 关键字仅适用于数组类型参数',
+        func_param_array_need_elem_type: '函数参数格式错误: 参数 {param}, 数组形参必须声明元素类型, 格式应为 "arr[]:元素类型"',
+        func_return_array_need_elem_type: '函数返回值格式错误: 数组返回值必须声明元素类型, 格式应为 "-> st[]:元素类型"',
+        array_elem_type_mismatch: '数组类型不匹配: 期望 {expected} 数组, 实际是 {actual} 数组',
         func_unclosed_at_eof: '函数定义错误: 程序结束时仍有未结束的函数',
         unsupported_data_type: '不支持的数据类型: {type}',
         func_undefined: '函数 \'{name}\' 未定义',
@@ -805,6 +810,9 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_return_type_required: 'Function return value format error: functions with a return value must specify a return type',
         func_param_format: 'Function parameter format error: parameter {param} is invalid, expected "name:type"',
         func_param_mut_array_only: 'Function parameter format error: parameter {param}, the mut keyword only applies to array parameters',
+        func_param_array_need_elem_type: 'Function parameter format error: parameter {param}, array parameters must declare an element type, expected "arr[]:elementType"',
+        func_return_array_need_elem_type: 'Function return value format error: array return values must declare an element type, expected "-> st[]:elementType"',
+        array_elem_type_mismatch: 'Array type mismatch: expected {expected} array, got {actual} array',
         func_unclosed_at_eof: 'Function definition error: an unclosed function remains at the end of the program',
         unsupported_data_type: 'Unsupported data type: {type}',
         func_undefined: 'Function \'{name}\' is not defined',
@@ -1222,7 +1230,7 @@ class ScopeManager {
     // 添加变量 (全局或局部)
     // slot 参数 (函数参数/返回值绑定专用): 提供时跳过"同名同作用域"线性查重 (静态建表已保证参数间唯一),
     // 并直接把变量登记到帧槽位 SLOT_INDEX[frameId][slot], 免后续 indexSlotVar 的 Map 查找。
-    static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number, slot?: number): boolean {
+    static addVariable(name: string, value: any, type: DataType, startLine: number, endLine: number, isGlobal: boolean = false, isConst: boolean = false, frameId?: number, slot?: number, arrayElementType?: DataType): boolean {
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 函数参数绑定/变量声明每次调用)
         if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_try_add_var', { kind: isConst ? t('dbg_kind_const') : t('dbg_kind_var'), name, value, type, scopeStart: startLine + 1, scopeEnd: endLine === -1 ? t('dbg_last_line') : endLine + 1, isGlobal }));
         // 验证类型
@@ -1250,7 +1258,8 @@ class ScopeManager {
             isConst,  // 添加常量标识
             startLine,
             endLine,
-            frameId
+            frameId,
+            ...(type === DataType.ARRAY && arrayElementType !== undefined ? { arrayElementType } : {})
         };
 
         if (isGlobal) {
@@ -1520,11 +1529,12 @@ class ScopeManager {
         // 函数解析时已缓存返回值变量名, 避免每次返回都重复正则解析函数定义行
         if (funcInfo.returnVarName !== undefined) return funcInfo.returnVarName;
         const funcDefLine = programLines[funcInfo.startLine].trim();
-        const funcMatch = funcDefLine.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]+)(?:\s*:([a-zA-Z0-9_]+))?$/);
+        const funcMatch = funcDefLine.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]*(?:\[\])?)(?:\s*:([a-zA-Z0-9_]+))?$/);
         if (funcMatch) {
             const returnVarNameOrVoid = funcMatch[3];
             if (returnVarNameOrVoid !== ':void') {
-                return returnVarNameOrVoid.startsWith(':') ? returnVarNameOrVoid.substring(1) : returnVarNameOrVoid;
+                const name = returnVarNameOrVoid.startsWith(':') ? returnVarNameOrVoid.substring(1) : returnVarNameOrVoid;
+                return name.endsWith('[]') ? name.slice(0, -2) : name;
             }
         }
         return undefined;
@@ -1729,10 +1739,11 @@ class Interpreter {
                 }
 
                 // 解析函数定义: :函数名 (参数列表) -> 返回值变量名:返回值类型
-                // 支持两种格式: 
+                // 支持两种格式:
                 // 1. 有返回值: :函数名 (参数列表) -> 返回值变量名:返回值类型
                 // 2. 无返回值: :函数名 (参数列表) -> :void
-                const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]+)(?:\s*:([a-zA-Z0-9_]+))?$/);
+                // 数组返回值: :函数名 (参数列表) -> 返回值变量名[]:元素类型
+                const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]*(?:\[\])?)(?:\s*:([a-zA-Z0-9_]+))?$/);
                 if (funcMatch) {
                     const funcName = funcMatch[1];
 
@@ -1742,15 +1753,33 @@ class Interpreter {
                         return;
                     }
                     const paramsStr = funcMatch[2];
-                    const returnVarNameOrVoid = funcMatch[3]; // 返回值变量名或:void
-                    const returnTypeStr = funcMatch[4]; // 返回值类型 (如果有) 
+                    const returnVarNameOrVoid = funcMatch[3]; // 返回值变量名(可带[]表示数组)或:void
+                    const returnTypeStr = funcMatch[4]; // 返回值类型 (如果有)
 
                     // 处理返回值类型
                     let returnType: DataType;
                     let returnVarName: string | null = null;
+                    let returnArrayElementType: DataType | undefined = undefined;
                     // 检查是否是无返回值函数 (:void)
                     if (returnVarNameOrVoid === ':void') {
                         returnType = DataType.UNDEFINED; // 使用UNDEFINED表示void类型
+                    } else if (returnVarNameOrVoid.endsWith('[]')) {
+                        // 数组返回值: -> st[]:元素类型
+                        if (!returnTypeStr) {
+                            reportError(ExceptionType.SYNTAX_ERROR, t('func_return_array_need_elem_type'), i + 1);
+                            return;
+                        }
+                        const arrElemType = Interpreter.getDataTypeFromString(returnTypeStr);
+                        if (arrElemType === DataType.UNDEFINED) {
+                            return; // getDataTypeFromString 已报错
+                        }
+                        if (arrElemType === DataType.ARRAY) {
+                            reportError(ExceptionType.SYNTAX_ERROR, t('array_of_array_forbidden'), i + 1);
+                            return;
+                        }
+                        returnType = DataType.ARRAY;
+                        returnArrayElementType = arrElemType;
+                        returnVarName = returnVarNameOrVoid.slice(0, -2);
                     } else {
                         // 有返回值函数, returnVarNameOrVoid是返回值变量名, returnTypeStr是返回值类型
                         if (!returnTypeStr) {
@@ -1758,6 +1787,11 @@ class Interpreter {
                             return;
                         }
                         returnType = Interpreter.getDataTypeFromString(returnTypeStr);
+                        // 旧语法 -> st:array 已废弃, 数组返回值必须声明元素类型
+                        if (returnType === DataType.ARRAY) {
+                            reportError(ExceptionType.SYNTAX_ERROR, t('func_return_array_need_elem_type'), i + 1);
+                            return;
+                        }
                         // 处理带冒号前缀的返回值变量名
                         returnVarName = returnVarNameOrVoid.startsWith(':') ? returnVarNameOrVoid.substring(1) : returnVarNameOrVoid;
                     }
@@ -1780,7 +1814,25 @@ class Interpreter {
                                 paramName = paramName.substring(4).trim();
                             }
                             const paramTypeStr = parts[1].trim();
-                            const paramType = Interpreter.getDataTypeFromString(paramTypeStr);
+                            let paramType = Interpreter.getDataTypeFromString(paramTypeStr);
+                            if (paramType === DataType.UNDEFINED) {
+                                return; // getDataTypeFromString 已报错
+                            }
+                            let paramArrayElementType: DataType | undefined = undefined;
+                            if (paramName.endsWith('[]')) {
+                                // 数组形参: arr[]:元素类型
+                                paramName = paramName.slice(0, -2);
+                                if (paramType === DataType.ARRAY) {
+                                    reportError(ExceptionType.SYNTAX_ERROR, t('array_of_array_forbidden'), i + 1);
+                                    return;
+                                }
+                                paramArrayElementType = paramType; // 元素类型 (int/float/string/bool/number)
+                                paramType = DataType.ARRAY;
+                            } else if (paramType === DataType.ARRAY) {
+                                // 旧语法 arr:array 已废弃, 数组形参必须声明元素类型
+                                reportError(ExceptionType.SYNTAX_ERROR, t('func_param_array_need_elem_type', {param: paramMatch}), i + 1);
+                                return;
+                            }
                             if (isMutable && paramType !== DataType.ARRAY) {
                                 reportError(ExceptionType.SYNTAX_ERROR, t('func_param_mut_array_only', {param: paramMatch}), i + 1);
                                 return;
@@ -1788,7 +1840,8 @@ class Interpreter {
                             params.push({
                                 name: paramName,
                                 type: paramType,
-                                isMutable: isMutable
+                                isMutable: isMutable,
+                                ...(paramArrayElementType !== undefined ? { arrayElementType: paramArrayElementType } : {})
                             });
                         }
                     }
@@ -1799,7 +1852,8 @@ class Interpreter {
                         returnType: returnType,
                         startLine: i,
                         endLine: -1,
-                        returnVarName: returnVarName || undefined
+                        returnVarName: returnVarName || undefined,
+                        ...(returnArrayElementType !== undefined ? { returnArrayElementType: returnArrayElementType } : {})
                         // hasReturnStatement: false
                     };
                     debugLog(3, () => t('dbg_parse_func', { name: funcName, startLine: i, params: JSON.stringify(params) }));
@@ -1905,7 +1959,7 @@ class Interpreter {
 
             // 函数定义: 参数 + 返回值变量 (帧槽位从0开始)
             if (line.indexOf(':') === 0 && line.match(/^:[a-zA-Z0-9_]+\s*\(.*\)/)) {
-                const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]+)(?:\s*:([a-zA-Z0-9_]+))?$/);
+                const funcMatch = line.match(/^:([a-zA-Z0-9_]+)\s*\((.*)\)\s*->\s*(:?[a-zA-Z0-9_]*(?:\[\])?)(?:\s*:([a-zA-Z0-9_]+))?$/);
                 if (!funcMatch) continue;
                 const frameKey = 'f:' + funcMatch[1] + ':' + i;
                 const fb = blocks.find(b => b.type === 'function' && b.funcKey === frameKey);
@@ -1920,13 +1974,16 @@ class Interpreter {
                         let pname = parts[0].trim();
                         if (pname.startsWith('mut ')) pname = pname.substring(4).trim();
                         if (!pname) continue;
-                        registerDecl(pname, bodyStart, bodyEnd, parts[1].trim().toLowerCase() === 'array', false, frameKey);
+                        const isArray = pname.endsWith('[]') || parts[1].trim().toLowerCase() === 'array';
+                        if (pname.endsWith('[]')) pname = pname.slice(0, -2);
+                        registerDecl(pname, bodyStart, bodyEnd, isArray, false, frameKey);
                         slot++;
                     }
                 }
                 const ret = funcMatch[3];
                 if (ret && ret !== ':void') {
-                    const retName = ret.startsWith(':') ? ret.substring(1) : ret;
+                    let retName = ret.startsWith(':') ? ret.substring(1) : ret;
+                    if (retName.endsWith('[]')) retName = retName.slice(0, -2);
                     registerDecl(retName, bodyStart, bodyEnd, false, false, frameKey);
                     slot++;
                 }
@@ -1987,6 +2044,18 @@ class Interpreter {
                 reportError(ExceptionType.SYNTAX_ERROR, t('unsupported_data_type', {type: typeStr}));
                 return DataType.UNDEFINED;
         }
+    }
+
+    // 数组元素类型兼容判断: from 元素类型能否装入 to 元素类型的数组 (与标量 validateType 语义一致:
+    // NUMBER/FLOAT 接受任意数字, INT 只接受整数, STRING/BOOL 严格相等)
+    static canArrayElementFit(from: DataType, to: DataType): boolean {
+        if (to === DataType.NUMBER || to === DataType.FLOAT) {
+            return from === DataType.INT || from === DataType.FLOAT || from === DataType.NUMBER;
+        }
+        if (to === DataType.INT) {
+            return from === DataType.INT;
+        }
+        return from === to;
     }
 
     // 辅助方法: 从值推断数据类型
@@ -2705,7 +2774,8 @@ class Interpreter {
             if (es === 'true') return { value: true, type: DataType.BOOL };
             if (es === 'false') return { value: false, type: DataType.BOOL };
             const num = Number(es);
-            if (es !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
+            // 整数字面量推断 INT, 小数推断 FLOAT (与语言 int/float 显式区分一致)
+            if (es !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: Number.isInteger(num) ? DataType.INT : DataType.FLOAT };
             throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: es}) } as Exception;
         };
         // 拆分调用实参: 正确忽略数组字面量 [...] 内部与字符串内部的逗号
@@ -2811,6 +2881,16 @@ class Interpreter {
                         rebuildSlotIndex();
                         return;
                     }
+                    // 元素类型校验: 字面量推断类型须与形参声明一致 (数组形参声明了元素类型时)
+                    if (param.arrayElementType !== undefined && literalElements.length > 0) {
+                        const actualElemType = literalElements[0].type;
+                        if (!Interpreter.canArrayElementFit(actualElemType, param.arrayElementType)) {
+                            reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: param.arrayElementType, actual: actualElemType }));
+                            LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                            rebuildSlotIndex();
+                            return;
+                        }
+                    }
                     const literalVar: Variable = {
                         name: paramName,
                         value: "请使用arrayElements属性访问数组元素",
@@ -2834,6 +2914,14 @@ class Interpreter {
                 const arrVar = ScopeManager.getVariable(arrArg.name, currentLinePointer, true, arrArg.name.startsWith('global.'));
                 if (!arrVar || arrVar.type !== DataType.ARRAY) {
                     reportError(ExceptionType.TYPE_ERROR, t('arr_arg_not_array', {name: arrArg.name}));
+                    LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                    rebuildSlotIndex();
+                    return;
+                }
+                // 元素类型校验: 实参数组元素类型须与形参声明一致
+                if (param.arrayElementType !== undefined && arrVar.arrayElementType !== undefined &&
+                    !Interpreter.canArrayElementFit(arrVar.arrayElementType, param.arrayElementType)) {
+                    reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: param.arrayElementType, actual: arrVar.arrayElementType }));
                     LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
                     rebuildSlotIndex();
                     return;
@@ -2892,7 +2980,7 @@ class Interpreter {
                 // 将返回值变量添加到函数的局部作用域中
                 // 初始化为 undefined (doc规则13: 函数返回值变量会被初始化为undefined)
                 // 作用域从函数体开始行到函数结束行; 槽位 = 参数个数 (与静态建表一致, 跳过线性查重)
-                ScopeManager.addVariable(returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
+                ScopeManager.addVariable(returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length, funcInfo.returnArrayElementType);
             }
         }
         debugLog(3, () => t('dbg_current_local_var_details'), LOCAL_VARS);
@@ -8315,7 +8403,8 @@ class NSVMExecutor {
                             if (ess === 'true') return { value: true, type: DataType.BOOL };
                             if (ess === 'false') return { value: false, type: DataType.BOOL };
                             const num = Number(ess);
-                            if (ess !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: DataType.NUMBER };
+                            // 整数字面量推断 INT, 小数推断 FLOAT (与 inferLiteralElement 一致)
+                            if (ess !== '' && !isNaN(num) && isFinite(num)) return { value: num, type: Number.isInteger(num) ? DataType.INT : DataType.FLOAT };
                             throw { type: ExceptionType.SYNTAX_ERROR, message: t('array_literal_element_unresolvable', {value: ess}) } as Exception;
                         });
                     } catch (e) {
@@ -8324,6 +8413,17 @@ class NSVMExecutor {
                         rebuildSlotIndex();
                         frame.pc++;
                         return null;
+                    }
+                    // 元素类型校验: 字面量推断类型须与形参声明一致 (数组形参声明了元素类型时)
+                    if (param.arrayElementType !== undefined && literalElements.length > 0) {
+                        const actualElemType = literalElements[0].type;
+                        if (!Interpreter.canArrayElementFit(actualElemType, param.arrayElementType)) {
+                            reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: param.arrayElementType, actual: actualElemType }));
+                            LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                            rebuildSlotIndex();
+                            frame.pc++;
+                            return null;
+                        }
                     }
                     const literalVar: Variable = {
                         name: paramName,
@@ -8358,6 +8458,15 @@ class NSVMExecutor {
                     frame.pc++;
                     return null;
                 }
+                // 元素类型校验: 实参数组元素类型须与形参声明一致
+                if (param.arrayElementType !== undefined && arrVar.arrayElementType !== undefined &&
+                    !Interpreter.canArrayElementFit(arrVar.arrayElementType, param.arrayElementType)) {
+                    reportError(ExceptionType.TYPE_ERROR, t('array_elem_type_mismatch', { expected: param.arrayElementType, actual: arrVar.arrayElementType }));
+                    LOCAL_VARS = LOCAL_VARS.filter(v => v.frameId !== frameId);
+                    rebuildSlotIndex();
+                    frame.pc++;
+                    return null;
+                }
                 const paramVar: Variable = {
                     name: paramName,
                     value: "请使用arrayElements属性访问数组元素",
@@ -8387,7 +8496,7 @@ class NSVMExecutor {
         // 返回值变量绑定 (复刻 executeCall): 函数体首行跳过标签行, 槽位 = 参数个数 (bodyStartLine 编译期预解析)
         const functionBodyStartLine = meta.bodyStartLine;
         if (funcInfo.returnType !== DataType.UNDEFINED && funcInfo.returnVarName !== undefined) {
-            ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length);
+            ScopeManager.addVariable(funcInfo.returnVarName, undefined, funcInfo.returnType, functionBodyStartLine, funcInfo.endLine, false, false, frameId, funcInfo.params.length, funcInfo.returnArrayElementType);
         }
         if (DEBUG_LEVEL >= 3) debugLog(3, () => t('dbg_current_local_var_details'), LOCAL_VARS);
         if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_func_param_done', { funcName: fnK }));

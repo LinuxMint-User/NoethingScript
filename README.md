@@ -170,7 +170,7 @@ NoethingScript/
 
 ## 版本历史
 
-当前版本 **2.6.5**。完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **2.7.0**。完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## License
 
