@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.6.4";
+const NSIVersion: string = "2.6.5";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -1365,10 +1365,12 @@ class ScopeManager {
             }
         }
 
-        // 2. 再检查全局变量
-        if (GLOBAL_VARS.hasOwnProperty(name)) {
-            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_info_global', { name, value: GLOBAL_VARS[name].value, type: GLOBAL_VARS[name].type, scopeStart: GLOBAL_VARS[name].startLine + 1, scopeEnd: GLOBAL_VARS[name].endLine === -1 ? t('dbg_last_line') : GLOBAL_VARS[name].endLine + 1, line: currentLine + 1 }));
-            return GLOBAL_VARS[name];
+        // 2. 再检查全局变量 (直接访问代替 hasOwnProperty 方法调用: GLOBAL_VARS 值恒为 Variable 对象,
+        //    不存在时(未声明/purge 已 delete)为 undefined, 与 hasOwnProperty 语义完全等价)
+        const globalVar = GLOBAL_VARS[name];
+        if (globalVar !== undefined) {
+            if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_info_global', { name, value: globalVar.value, type: globalVar.type, scopeStart: globalVar.startLine + 1, scopeEnd: globalVar.endLine === -1 ? t('dbg_last_line') : globalVar.endLine + 1, line: currentLine + 1 }));
+            return globalVar;
         }
 
         if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_warn_var_undefined', { name, line: currentLine + 1 }));
@@ -6357,6 +6359,35 @@ class ExpressionEvaluator {
                         return varInfo.value;
                     }
                     // 槽位为空 (变量被 purge/帧清理移除 或 槽位索引未覆盖): 回退原查找路径 (可能命中全局变量)
+                }
+                // 全局槽位快速路径: GLOBAL_VARS 对象属性 O(1) 读取, 免 getVariableInfo 函数调用与内部分支;
+                // 调试输出顺序与 getVariableInfo(入口 lookup → 命中 global_info / 未命中 warn) + 原返回处理逐字节一致
+                if (isGlobal) {
+                    if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_lookup_var_info', { scope: t('dbg_scope_global'), name, line: this.currentLine + 1 }));
+                    const gName = name.startsWith('global.') ? name.slice('global.'.length) : name;
+                    const gv = GLOBAL_VARS[gName];
+                    if (gv === undefined) {
+                        if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_warn_var_undefined', { name, line: this.currentLine + 1 }));
+                        throw {
+                            type: ExceptionType.REFERENCE_ERROR,
+                            message: t('var_undefined_expr_global', { name: name }),
+                            lineNumber: this.currentLine
+                        } as Exception;
+                    }
+                    if (DEBUG_LEVEL >= 1) debugLog(1, () => t('dbg_get_var_info_global', { name, value: gv.value, type: gv.type, scopeStart: gv.startLine + 1, scopeEnd: gv.endLine === -1 ? t('dbg_last_line') : gv.endLine + 1, line: this.currentLine + 1 }));
+                    if (gv.type === DataType.ARRAY) {
+                        DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_array', { scope: t('dbg_scope_global'), name: gv.name, line: this.currentLine + 1 }));
+                        return gv;
+                    }
+                    if (gv.value === undefined) {
+                        throw {
+                            type: ExceptionType.TYPE_ERROR,
+                            message: t('var_value_undefined', { name: name }),
+                            lineNumber: this.currentLine
+                        } as Exception;
+                    }
+                    DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_return_var_value', { scope: t('dbg_scope_global'), name, value: gv.value, line: this.currentLine + 1 }));
+                    return gv.value;
                 }
                 // 无绑定路径: 一次 getVariableInfo 完成类型/存在性/值检查 (原 getVariableType+getVariableInfo 两趟扫描合并)
                 const varInfo = ScopeManager.getVariableInfo(name, this.currentLine, isGlobal);
