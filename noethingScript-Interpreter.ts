@@ -1,10 +1,13 @@
 
 // 解释器版本
-const NSIVersion: string = "2.6.3";
+const NSIVersion: string = "2.6.4";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
 var DEBUG_LEVEL: number = 0; // 默认不输出debug信息
+
+// 命令行是否显式指定 --debug: 命令行优先级最高, 覆盖脚本内 debug 指令
+var CLI_DEBUG_SET: boolean = false;
 
 // 自定义运行时输入处理器 (优先级最高): 由 NSI.setInput() 设置, 未设置时回退到默认 (Node 读 stdin / 浏览器 prompt)
 var INPUT_HANDLER: (() => string) | null = null;
@@ -2129,13 +2132,13 @@ class Interpreter {
             IN_MULTILINE_COMMENT = false;
             CALL_FRAME_ID = 0;
 
-            // 检查第一行是否包含debug关键字
-            if (programLines.length > 0) {
+            // 检查第一行是否包含debug关键字 (命令行 --debug 已显式指定时, 命令行优先级最高, 忽略脚本内 debug 指令)
+            if (!CLI_DEBUG_SET && programLines.length > 0) {
                 const firstLine = programLines[0].trim();
                 if (firstLine.startsWith('debug ')) {
                     const debugLevelStr = firstLine.substring(6).trim();
                     const debugLevel = parseInt(debugLevelStr);
-                    if (!isNaN(debugLevel) && debugLevel >= DEBUG_LEVEL) {
+                    if (!isNaN(debugLevel)) {
                         DEBUG_LEVEL = debugLevel;
                         debugLog(1, () => t('dbg_debug_level_set', { level: DEBUG_LEVEL }));
                     } else {
@@ -2694,7 +2697,7 @@ class Interpreter {
         // 推断数组字面量元素的值与类型
         const inferLiteralElement = (elementStr: string): ArrayElement => {
             const es = elementStr.trim();
-            if ((es.startsWith('"') && es.endsWith('"')) || (es.startsWith("'") && es.endsWith("'"))) {
+            if (es.startsWith('"') && es.endsWith('"')) {
                 return { value: es.slice(1, -1), type: DataType.STRING };
             }
             if (es === 'true') return { value: true, type: DataType.BOOL };
@@ -3392,7 +3395,7 @@ class Interpreter {
         for (let i = 0; i < elementsStr.length; i++) {
             const char = elementsStr[i];
 
-            if (!inString && (char === '"' || char === "'")) {
+            if (!inString && char === '"') {
                 inString = true;
                 stringDelimiter = char;
                 currentElement += char;
@@ -5667,7 +5670,7 @@ class ExpressionEvaluator {
                 }
                 tokens.push(numStr);
                 continue;
-            } else if (code === 34 || code === 39) { // " '
+            } else if (code === 34) { // " (字符串定界符仅双引号; 单引号不是字符串边界)
                 // 解析字符串
                 const quote = char;
                 let str = char;
@@ -5953,8 +5956,8 @@ class ExpressionEvaluator {
             return { kind: 'literal', value: parseInt(token.slice(2), radix) };
         }
 
-        // 检查是否是字符串
-        if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) {
+        // 检查是否是字符串 (仅双引号; 单引号不是字符串边界)
+        if (token.startsWith('"') && token.endsWith('"')) {
             this.currentTokenIndex++;
             return { kind: 'literal', value: token.substring(1, token.length - 1) };
         }
@@ -6696,10 +6699,11 @@ function main() {
             console.log(t('cli_invalid_lang'));
         }
 
-        // 调试等级设置
+        // 调试等级设置: 命令行显式指定时优先级最高, 覆盖脚本内 debug 指令
         if (debugValue !== undefined) {
             if (Number.isInteger(Number(debugValue)) && Number(debugValue) >= 0) {
                 DEBUG_LEVEL = Number(debugValue);
+                CLI_DEBUG_SET = true;
             } else {
                 console.log(t('cli_no_debug_level'));
             }
@@ -8274,7 +8278,7 @@ class NSVMExecutor {
                     try {
                         literalElements = elementStrs.map(es => {
                             const ess = es.trim();
-                            if ((ess.startsWith('"') && ess.endsWith('"')) || (ess.startsWith("'") && ess.endsWith("'"))) {
+                            if (ess.startsWith('"') && ess.endsWith('"')) {
                                 return { value: ess.slice(1, -1), type: DataType.STRING };
                             }
                             if (ess === 'true') return { value: true, type: DataType.BOOL };

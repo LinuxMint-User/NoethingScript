@@ -11,7 +11,7 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 - **函数**：形参、返回值变量、`return` 即时返回；支持 `mut` 可变引用参数与 `copy` 深拷贝
 - **数组**：定长声明、`arrfill` 填充、`len()` 长度；四种传参模式（只读引用/副本/字面量/可变引用 `mut`），整体赋值引用共享，只读视图写保护
 - **异常处理**：`try`/`catch` 可捕获全部错误类型（`SyntaxError`/`TypeError`/`ReferenceError`/`RangeError`/`AssertionError`/循环初始化/循环更新错误等）
-- **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/random）、`len`/`str`/`int`/`float`/`copy`/`input`（运行时输入，命令行读 stdin、浏览器默认 prompt 弹窗且可自定义绑定；浏览器交互模式支持挂起/恢复，供脚本自持主循环）
+- **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/max/min/random）、`len`/`str`/`int`/`float`/`copy`/`input`（运行时输入，命令行读 stdin、浏览器默认 prompt 弹窗且可自定义绑定；浏览器交互模式支持挂起/恢复，供脚本自持主循环）
 - **进制字面量**：二进制 `0b`、八进制 `0o`、十六进制 `0x`
 - **调试控制**：`debug` 级别调节输出详细程度
 - **国际化**：`--lang en|zh` 切换输出语言（默认中文），错误/警告/调试信息全部模板化，语言包可扩展（l10n 友好）
@@ -169,6 +169,7 @@ NoethingScript/
 
 ## 版本历史
 
+- **2.6.4**：规范语义修正——字符串字面量收紧为仅双引号（tokenize/表达式求值/数组字面量实参/数组元素拆分统一,单引号不再是字符串边界,符合语言规范）；`--debug N` 命令行级别最高,显式指定后覆盖脚本内 debug 指令（恢复设计本意）；len(数组) 编译期折叠经实测否决——数组整体赋值会同步 `arrayLength`（引用共享语义),折叠为声明长度在 `a = b` 后语义错误,而免分发的运行时内联实测收益≈0（开销在变量读取),故保持运行时求值,doc 如实描述；全部 23 测试逐字节回归一致,2048 确定性校验逐字节一致
 - **2.6.3**：debugLog 全量 i18n——260 处调试输出从中文写死迁移到 zh/en 语言包（ScopeManager/行解释器/表达式求值/NSVM 编译器与执行器 5 区域,`dbg_` 前缀词条分组管理），`--lang en` 下调试信息全部英文；zh 输出与迁移前逐字节一致,惰性闭包零性能影响；全部 23 测试逐字节回归一致,2048 确定性校验逐字节一致
 - **2.6.2**：函数调用热路径优化——CALLFUNC 元数据编译期预解析函数体首条可执行行（免运行期逐行扫描 `programLines`）、RETV/RET 直调执行器（免 `executeCommand` switch 二次分发）、函数调用路径 debugLog 系统惰性化（低级别免闭包创建,高级别输出逐字节不变）；函数调用合成基准 -8%（9228x→8420x vs JS）,2048 端到端 -4.1%；全部测试逐字节回归一致
 - **2.6.0**：数组指令化（阶段3 深化）——数组声明与赋值按 v0.2 设计稿 §5.7 真正指令化：`NEWARRAY`/`SETARRAY` 指令 + 常量池数组元数据（声明格式正则、元素拆分、初始化值解析全部前移到编译期预解析，失败整体回退行解释器），`executeArrayDeclarationCompiled`/`executeArrayAssignmentCompiled` 外提执行器逐字节复刻调试输出与错误消息（含数组越界/长度不匹配/arrfill 填充）；`GETARRAY` 机制保留但不启用（BISECT 实测完整实现 2048 端到端 +6~8%）；编译期预解析置静默标志防止污染运行期调试输出；`wrapEvalError` 折叠回 `evaluate` 内联（外提会缩小 evaluate 体积触发 Turbofan 将其内联进 NSVMExecutor.run 的 OSR 图，使冷启动编译耗时从 ~13ms 增至 ~18ms）；相对 2a7b98c 数组指令化净收益 -0.8%（官方基准相对 HEAD~1 的 +1.5% 经溯源来自已提交的 CALLFUNC 差异）；全部 24 测试逐字节回归一致，2048 确定性校验逐字节一致
