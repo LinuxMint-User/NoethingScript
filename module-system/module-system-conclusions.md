@@ -22,23 +22,23 @@ project.ns
 **包** (大项目 / 模块)
 
 ```
-mylib/                      # 包根 (包名 = mylib)
+mylib/                      # 包根 (包名 = mylib) —— 包根下是模块的集合
 ├── mylib/
-│   └── mylib.ns            # 主脚本, 必须与包名同名
+│   └── mylib.ns            # 模块: 主模块 (入口模块, 目录与包名同名)
 └── helpers/
-    └── helpers.ns          # 包内子模块, 用 use inner 引用
+    └── helpers.ns          # 模块: 子模块, 用 use inner 引用
 ```
 
 - 包根在**项目根** = 程序 (执行 `mylib/mylib.ns`)
-- 整个包搬进 `modules/{来源}/` = 模块 (`use mylib from custom` 加载同一个主脚本) —— 零代码改动
+- 整个包搬进 `modules/{来源}/` = 模块 (`use mylib from custom` 加载同一个主模块的脚本) —— 零代码改动
 
 ## 三、目录结构 (三层)
 
 `modules/{来源}/{包}/{模块}/{模块}.ns`
 
-- 定位: `use x from S` → `modules/S/x/x/x.ns` (包名 = 模块名 = 主脚本名)
-- `use inner x` → `当前包根/x/x.ns` (当前文件所在包的内部模块)
-- 包内子模块对包外不可见 (`use x from S` 定位不到包内的 x), 想公开就平铺成独立包
+- 定位: `use x from S` → `modules/S/x/x/x.ns` (包名 = 模块名 = 模块脚本名)
+- `use inner x` → `当前包根/x/x.ns` (包根 = 当前文件路径上两级目录, 包内文件路径恒为 `包根/{模块}/{模块}.ns` 无需查找; 校验包根含 manifest 且 package 匹配, 校验 x ∈ manifest.modules, 详见 design.md §3.4)
+- 包内模块对包外不可见 (`use x from S` 定位不到包内的 x), 想公开就平铺成独立包
 
 ## 四、use inner 语法
 
@@ -46,7 +46,7 @@ mylib/                      # 包根 (包名 = mylib)
 use inner x [as z]     # 无 from; 写了 from 报错
 ```
 
-- 仅存在于"包内文件" (包主脚本、包内子模块都可以用)
+- 仅存在于"包内文件" (包内任何模块文件都可以用)
 - inner 的定位由当前文件位置决定 (当前包根), 不需要 from
 
 ## 五、cmdargs / debug 新规则
@@ -93,19 +93,19 @@ endautoinit
 
 - **独立 NS 程序, 单入口 + 子命令** (命令名如 `nsm`), cmdargs 接收子命令参数
 - **管理器本身作为模块发布到模块仓库** (如 `main/nsm`), `update nsm` 即可更新自己 —— **无 self-update 命令**
-- **运行方式**: 管理器在 manifest 声明命令 `nsm` (命令 = 主脚本路径的别名, 确认记录 #27) —— 运行 `node <解释器路径> nsm -- <子命令> [参数]` (解释器把 nsm 解析为主脚本路径, 等价于 `node <解释器路径> modules/main/nsm/nsm/nsm.ns -- install stack`); 日常少打 `--` 可用 shell alias
+- **运行方式**: 管理器在 manifest 声明命令 `nsm` (命令 = 主模块的脚本路径的别名, 确认记录 #27) —— 运行 `node <解释器路径> nsm -- <子命令> [参数]` (解释器把 nsm 解析为主模块的脚本路径, 等价于 `node <解释器路径> modules/main/nsm/nsm/nsm.ns -- install stack`); 日常少打 `--` 可用 shell alias
 - 浏览器下无管理器形态 (模块文件随网页提供, 管理器仅存在于本地命令行)
 
 ### 2. 模块来源 (仓库)
 
 - **独立模块仓库** (与解释器仓库分离, 解释器包不背模块体积): **GitHub 主 / Gitee 镜像**, 基址可配置 (网络失败可切换), 两镜像 URL 结构相同
 - 一个仓库, **顶层目录 = 来源分类** (`main/` / `extra/`)
-- **打包粒度 = 包**: 一个包一个压缩包 (含主模块 + 全部子模块), 解压即 `modules/{来源}/{包}/`; 命名 `包名@模块版本-v适配解释器版本.zip`
+- **打包粒度 = 包**: 一个包一个压缩包 (模块的集合: 主模块 + 子模块), 解压即 `modules/{来源}/{包}/`; 命名 `包名@模块版本-v适配解释器版本.zip`
 - **拉取协议 = http 按路径下载压缩包** (不用 git clone, 按单包拉取)
 - **索引清单 (manifest)**: 每来源一个, 条目 = 来源 / 包名 / 模块版本 / 适配解释器版本 / 压缩包文件名; 清单加字段向后兼容 (老管理器忽略新字段 = 能力变强非破坏)
 - **依赖不由清单标注**: 安装后扫描包内文件头部 `use` 自动发现依赖再递归拉取 (管理器是 NS 程序, 解析自家语法, 符合自举哲学)
 - 安装流程: 拉 manifest (缓存) → 查包 → 下载压缩包 → 解压安装 → 扫描依赖递归
-- **custom 纯本地, 不联网** (仓库只有 main/extra): ① `install <本地压缩包路径>` (不带 from, 由包内 manifest.source 决定装到 custom; 包名须符合规范, 解压到 `modules/custom/{包}/`, 体验同 dnf 本地包安装); ② 手动把符合规范的包文件夹放进 `modules/custom/` 后执行 `refresh custom` 重建本地索引; **custom 本地索引** = 扫描 modules/custom/ 记录包名与版本/适配, 有 manifest 读 manifest, 无 manifest 标记不合规范
+- **custom 纯本地, 不联网** (仓库只有 main/extra): ① `install <本地压缩包路径>` (不带 from、**写了 from 报错**, 由包内 manifest.source 决定装到哪; 包名须符合规范, 解压到 `modules/{来源}/{包}/`, 体验同 dnf 本地包安装); ② 手动把符合规范的包文件夹放进 `modules/custom/` 后执行 `refresh custom` 重建本地索引; **custom 本地索引** = 扫描 modules/custom/ 记录包名与版本/适配, 有 manifest 读 manifest, 无 manifest 标记不合规范
 
 ### 3. 版本适配 (防破坏性更新)
 
@@ -118,16 +118,16 @@ endautoinit
 
 | 命令 | 语义 |
 |---|---|
-| `install <包名 [from <来源>] \| 本地压缩包路径> [@<版本>]` | 包名 + from main/extra: 拉清单 → 下载压缩包 → 解压安装 → 扫描 use 递归依赖; 本地压缩包路径: 不带 from, 由 manifest.source 决定装到哪, 适配检查 + 同名确认 + `--force`, 解压到 `modules/{来源}/{包}/` 并重建索引; 覆盖规则见 §9.1 |
+| `install <包名 [from <来源>] \| 本地压缩包路径> [@<版本>]` | 包名 + from main/extra (**from 缺省 main**): 拉清单 → 下载压缩包 → 解压安装 → 扫描 use 递归依赖; 本地压缩包路径: **不带 from (写了 from 报错)**, 由 manifest.source 决定装到哪, 适配检查 + 同名确认 + `--force`, 解压到 `modules/{来源}/{包}/` 并重建索引; 覆盖规则见 §9.1 |
 | `update [<包>]` | 模块更新到**适配当前解释器**的最新版 (安全更新, 解释器不变; 无参 = 全部模块) |
 | `upgrade [<包>]` | 模块**跨适配段**大升级 (含确认, `--force` 跳过; 无参 = 全部模块) |
 | `check-update [<包>]` / `check-upgrade [<包>]` | 只查不装 (无参 = 全部, 报告有无新版本/适配变化, 默认强制刷新清单) |
 | `refresh <main\|extra\|custom> \| all` | 重建指定仓库的本地索引/清单缓存: custom 重扫 `modules/custom/` (手动丢包后执行), main/extra 强制重拉远程清单, all 刷新全部 |
 | `list` | 已安装模块 + 孤立标记 |
 | `search <关键词>` | 本地索引包名子串 (main/extra 清单缓存 + custom 本地索引, 不联网; 缓存过期即自动重拉, 手动最新走 refresh) |
-| `remove <包> [from <来源>]` | 只删指定包, **不动依赖** (孤立包由 list 标记, 管理器看不到主脚本 use, 自动清理有误删风险) |
+| `remove <包> [from <来源>]` | 只删指定包, **不动依赖** (孤立包由 list 标记, 管理器看不到主程序 use, 自动清理有误删风险) |
 
-- **本地压缩包安装 (定稿, 确认记录 #28/#29)**: `install <本地压缩包路径>` **不带 from** (远程 from 是"来源", 本地装到哪由**包内 manifest** 决定 —— 来源身份包自携带, 两语义干净分离); **来源安全**: 远程安装来源由拉取路径强决定 (main/ 拉的装 main), 且 **manifest.source 与拉取来源不一致 → 警告** (防篡改); 本地安装按 manifest 来源装, **目标已有同名包一律确认、`--force` 才覆盖** (伪造来源的兜底); 流程 = 管理器读 zip 内 manifest → 适配检查 (zip 文件名/manifest 适配版本, 不等警告 + `--force`) → 解压到 `modules/{来源}/{包}/` → 重建索引; **manifest**: 包根 `modules/{来源}/{包}/manifest`, JSON (node 原生), 字段 package/version(x.y.z)/ns/source/command(数组)/description, 必选 package/version/ns/source (缺一或解析失败 → 不合规范), 未知字段忽略; **打包工具 = 独立包 `nsmp`**: 扫描包目录自动生成 manifest (包名=目录名、依赖=扫 use, version/source/command 参数提供, ns 默认打包时解释器版本), 作者零手写, 手写仍合法; 打包只管产物 (zip 上传/清单更新作者 git 手动); **无 manifest 丢包 → 标记不合规范** (版本/适配留空); **依赖获取**: 扫描包内 use (性能差距可忽略——安装主导开销是下载/解压; use 权威不失真, manifest 标注副本会漂移; 加载器运行时本就扫 use 建依赖图), manifest 不标依赖; **search**: 默认本地索引, 缓存过期自动重拉, 不加 `--refresh`
+- **本地压缩包安装 (定稿, 确认记录 #28/#29)**: `install <本地压缩包路径>` **不带 from (写了 from 报错)** (远程 from 是"来源", 本地装到哪由**包内 manifest** 决定 —— 来源身份包自携带, 两语义干净分离); **来源安全**: 远程安装来源由拉取路径强决定 (main/ 拉的装 main), 且 **manifest.source 与拉取来源不一致 → 警告并阻止安装**, 需用户手动 `--force` 强制安装 (规避篡改风险); 本地安装按 manifest 来源装, **目标已有同名包一律确认、`--force` 才覆盖** (伪造来源的兜底); 流程 = 管理器读 zip 内 manifest → 适配检查 (zip 文件名/manifest 适配版本, 不等警告 + `--force`) → 解压到 `modules/{来源}/{包}/` → 重建索引; **manifest**: 包根 `modules/{来源}/{包}/manifest`, JSON (node 原生), 字段 package/version(x.y.z)/ns/source/command(数组)/description/**modules**(包根下模块目录名集合, use inner 校验, 见 design.md §3.4), 必选 package/version/ns/source (缺一或解析失败 → 不合规范), 且 **`manifest.package == 包目录名`** (不一致 → 不合规范/安装报错; 打包工具 nsmp 生成时保证, 手写/丢包需校验), 未知字段忽略; **打包工具 = 独立包 `nsmp`**: 扫描包目录自动生成 manifest (包名=目录名、依赖=扫 use、**modules=扫模块目录集合**, version/source/command 参数提供, ns 默认打包时解释器版本), 作者零手写, 手写仍合法; 打包只管产物 (zip 上传/清单更新作者 git 手动); **无 manifest 丢包 → 标记不合规范** (版本/适配留空); **依赖获取**: 扫描包内 use (性能差距可忽略——安装主导开销是下载/解压; use 权威不失真, manifest 标注副本会漂移; 加载器运行时本就扫 use 建依赖图), manifest 不标依赖; **search**: 默认本地索引, 缓存过期自动重拉, 不加 `--refresh`
 
 - **解释器本体更新: 解释器自己负责** —— Node 原生网络能力, 接受参数自查自更 (如 `ns --check-upgrade` / `--upgrade`), **现在就能做**; 管理器不管解释器, upgrade 只管模块; 将来 NS 重写解释器后是否进仓库统一管理为**可选** (非必须)
 
@@ -142,4 +142,20 @@ endautoinit
 2. 版本号 v0.8 → v0.9; 文档历史新增 v0.9 条目
 3. §10.4 "唯一剩余待定" 清零 (M7 已定稿); M7 里程碑描述同步
 4. 总结文件头部版本号同步 v0.9
-5. 审查修正: custom 来源机制明确 (纯本地不联网, install 本地压缩包路径不带 from、由包内 manifest.source 决定, 或手动丢包 + refresh custom, 本地索引有 manifest 读版本/适配、无 manifest 标记不合规范); 命令集加 `refresh <main|extra|custom> | all`、install 支持本地路径并重建索引; update/upgrade 无参=全部、check 系列支持 [<包>] 粒度、search 默认本地索引 (缓存过期自动重拉, 不强制联网); 版本覆盖规则定稿 (降级/换源需 --force, update/upgrade 只升不降); 来源安全定稿 (远程来源由拉取路径强决定 + manifest.source 不一致警告, 本地同名已有一律确认 + --force 兜底); 命令包装定稿 (确认记录 #27: manifest 声明命令 = 主脚本路径别名, 保留 -- 两层结构, 名字→路径替换后照旧执行, 命令索引/同名提示, 少打 -- 由 shell alias 解决); manifest 定稿 (确认记录 #28: 包根 manifest + JSON 格式 + 字段 package/version/ns/source/command/description + 打包工具独立自动生成 + 无 manifest 丢包标记不合规范); manifest 细则与打包工具定稿 (确认记录 #29: version 用 x.y.z 点分数字可排序、command 数组、必选 package/version/ns/source、未知字段忽略、解析失败/缺必选 → 不合规范; 打包工具独立包 **nsmp**, `nsmp pack --version --source [--command] [--ns]`, ns 默认打包时解释器版本, 打包只管产物、上传/清单更新作者 git 手动); 头部区四块同级互不嵌套各至多一次、debug 必须物理首行、其余顺序建议非强制、use 只能出现在 modules 块内 (autoinit/主内容区 use 报错); §2.3 autoinit 注释措辞统一; §5.2.8 过时表述改指 §9; M7 里程碑与 v0.9 历史条目命令集补 refresh; 管理器运行方式更新为命令形式 (确认记录 #27)
+5. 审查修正: custom 来源机制明确 (纯本地不联网, install 本地压缩包路径不带 from、由包内 manifest.source 决定, 或手动丢包 + refresh custom, 本地索引有 manifest 读版本/适配、无 manifest 标记不合规范); 命令集加 `refresh <main|extra|custom> | all`、install 支持本地路径并重建索引; update/upgrade 无参=全部、check 系列支持 [<包>] 粒度、search 默认本地索引 (缓存过期自动重拉, 不强制联网); 版本覆盖规则定稿 (降级/换源需 --force, update/upgrade 只升不降); 来源安全定稿 (远程来源由拉取路径强决定 + manifest.source 不一致警告, 本地同名已有一律确认 + --force 兜底); 命令包装定稿 (确认记录 #27: manifest 声明命令 = 主程序路径别名, 保留 -- 两层结构, 名字→路径替换后照旧执行, 命令索引/同名提示, 少打 -- 由 shell alias 解决); manifest 定稿 (确认记录 #28: 包根 manifest + JSON 格式 + 字段 package/version/ns/source/command/description + 打包工具独立自动生成 + 无 manifest 丢包标记不合规范); manifest 细则与打包工具定稿 (确认记录 #29: version 用 x.y.z 点分数字可排序、command 数组、必选 package/version/ns/source、未知字段忽略、解析失败/缺必选 → 不合规范; 打包工具独立包 **nsmp**, `nsmp pack --version --source [--command] [--ns]`, ns 默认打包时解释器版本, 打包只管产物、上传/清单更新作者 git 手动); 头部区四块同级互不嵌套各至多一次、debug 必须物理首行、其余顺序建议非强制、use 只能出现在 modules 块内 (autoinit/主内容区 use 报错); §2.3 autoinit 注释措辞统一; §5.2.8 过时表述改指 §9; M7 里程碑与 v0.9 历史条目命令集补 refresh; 管理器运行方式更新为命令形式 (确认记录 #27); 约束明确化 (2026-08-11 复查): ① use inner 当前包根判定规则 (逐级向上找含 `{名}/{名}.ns` 主模块的脚本形态的目录, 找不到 = 无包 inner 报错, §3.4); ② `manifest.package == 包目录名` 校验 (不一致 → 不合规范/安装报错); ③ 来源标识格式改为 `[模块 {来源}/{包}/{模块}]` (带来源与包名, 跨来源/跨包同名不混淆, §3/确认记录 #22); ④ source 校验不一致 → 警告并阻止安装需 `--force` (防篡改); ⑤ install 本地路径写 from → 报错; ⑥ param 绑定先于 autoinit 执行 (autoinit 与正文同级别、共享同一空间, 被 use 时只执行 autoinit, §3.3/§5.2.2); use inner 定位改 manifest 方案 (2026-08-11, design.md §3.4): 包根 = 当前文件路径上两级目录 (包内文件路径恒为 `包根/{模块}/{模块}.ns` 无需查找), 校验包根 (含 manifest 且 manifest.package == 包名, 否则无包 inner 报错), 校验模块 (x ∈ manifest.modules 包根下模块目录名集合, 不在报错 "包内无此模块 x"), **取代上述①"逐级向上找主模块的脚本形态"**; manifest 新增 `modules` 字段 (nsmp 扫模块目录集合自动生成); 目录说辞统一为 `包/模块/模块.ns` (包根下是模块的集合, 与包同名的模块 = **主模块/入口模块**、其余为子模块, 无"包里有包")
+
+## 九、性能模型 (确认记录 #30, 已应用于 design.md §7.5)
+
+- **目标**: 模块函数调用与普通函数同价、加载成本与模块数线性、无逐调用开销
+- **运行期 (热点路径, 零额外开销)**: 模块函数与普通函数**共用同一调用管道** (函数体 NSVM 指令化, 无解释器双管道); `call xxx.func` **编译期**绑定模块命名空间成员 (运行期无字符串查找); 模块内查找链两跳 (局部 → 模块私有全局 → 报错, 与主程序同构, 无第三跳); 值互通零转换 (NS 值底层即 JS 值); 来源标识 `[模块 {来源}/{包}/{模块}]` 只走输出/错误路径, 不进计算路径
+- **加载期 (一次性, 与模块数线性)**: 两阶段 + 源码缓存 (每模块只读一次); 跨文件幂等 (每模块只加载一次, 总成本 = 各模块编译一次之和); 相对普通脚本额外成本仅读文件 + 扫 use + 建命名空间 + 编译 (KB 级可忽略)
+- **内存**: 每模块 = 命名空间对象 + 编译产物; **加载完成后释放模块源码** (缓存只服务加载期)
+- **实现注意点 (兑现"不牺牲性能"承诺的关键)**: ① **点分 call 必须 NSVM 编译** (CALL 指令支持模块命名空间寻址; 反转 §5 占位期"含点分名 call 回退行解释器"策略, 否则点分调用全掉行解释器、性能反而不如普通函数; §5 注记已补指向) ② **源码释放** (加载完成释放源码字符串, 只保留编译产物)
+- **结论**: 守住两条注意点, 模块系统性能等价于同量代码写在单个文件里
+
+## 十、设计稿定位与回退策略 (确认记录 #31, 已应用于 design.md)
+
+- **设计稿定位**: 不仅含模块系统, 还含对解释器的**破坏性更新以扩展解释器能力使模块管理器模块能够工作** (cmdargs 语言级参数接收、点分调用、保留字预留等)
+- **cmdargs 是语言级能力**: 让 NS 脚本有接收命令行参数的能力 (而非只能靠 `input()` 互动式输入), **独立于模块系统**; 模块管理器只是使用者之一 (非为管理器而设) —— §5.2 背景/§5.2.8/§10.4 表述已同步; **设计定稿 ≠ 已实现**: cmdargs 语法与关键字预留均为 2.7.x 计划 (尚未实现, §10.2 已完成清单不含 cmdargs)
+- **回退策略 (点分 call)**: **设计上不留回退** (NS 静态语言, 点分调用编译期全可解析, NSVM 必须支持 §7.5 注意点①); 实现过渡期 (M1 起 NSVM CALL 支持模块寻址前) **允许临时回退行解释器**保功能正确, M5 接入 NSVM 后**移除回退** —— M1 里程碑已同步
+- 其余同步: M7 里程碑补 #27-#29 (包内 manifest/本地压缩包安装/命令包装/nsmp 独立包); §3 模块文件顶层内容表补 cmdargs 行; 命令集表格 install/remove 显式标注 from 缺省 main
