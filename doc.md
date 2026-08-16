@@ -253,6 +253,7 @@ default
     operate var, var, ...
 endswc
 ```
+`switch` 条件仅允许 `int` 或 `string` 类型（数字必须为整数，浮点 `1.5` 报错）；该检查**直接报告而不抛异常**，即使写在 try-catch 内也不可捕获（见"异常处理"）。
 
 ### 控制关键字
 - `break`: 跳出当前循环或switch
@@ -305,7 +306,7 @@ catch (Exception ErrorName)
     operate var, var, ...
 endtry
 ```
-catch 中的异常变量 `ErrorName` 绑定为 string 类型的局部变量（值为错误消息），作用域从 catch 行到 `endtry`。可被捕获的异常包括 `SyntaxError`、`TypeError`、`ReferenceError`、`RangeError`、`AssertionError` 等；未被捕获的异常由解释器输出错误信息。
+catch 中的异常变量 `ErrorName` 绑定为 string 类型的局部变量（值为错误消息），作用域从 catch 行到 `endtry`。**运行期抛出的异常**可被捕获，包括 `ReferenceError`、`RangeError`、`AssertionError` 及多数 `TypeError` 等；未被捕获的异常由解释器输出错误信息。注意：**少数检查直接报告而不抛异常，此类错误不可捕获**——const/param 只读赋值、switch 条件类型检查（详见"switch分支"），以及编译期（解析期/NSVM 编译期）报出的错误，均不受 try-catch 影响。
 
 ## 函数
 
@@ -557,6 +558,111 @@ purge all except varName
 ```
 默认清除所有局部变量，全局变量不支持`except`关键字
 
+## 运行前参数 (cmdargs)
+
+语言无 `argv`，外部进语言的只有字符串。三条 I/O 通道：`print`（输出，关键字）、`input()`（运行中输入，函数）、`cmdargs` 块（启动参数，声明式接收）。`cast.类型`（`cast.int`/`cast.float`）是 cmdargs 的 param 专属的"字符串 → 类型化变量"接收类型；`input()` 返回字符串，需要类型化请用 `int()`/`float()` 显式转换（声明初始化不允许函数调用，先声明后赋值）。
+
+### cmdargs 块
+
+```ns
+cmdargs
+param cmd:string = "help"
+param verbose:bool = false as "v"
+endcmdargs
+```
+
+- **位置**：脚本头部（`debug` 指令之后、主内容之前），与 `modules` 块同级（见"模块系统"）；全文件**至多一个**
+- **只对入口文件生效**：参数只传给被解释器直接执行的文件；被 `use` 的模块写了 `cmdargs` **不报错、不生效**，参数保持默认值（模块作者两手准备：作入口时收命令行参数，被 use 时靠 API 传参）
+- **绑定时机**：入口文件**执行前**完成解析与绑定，**先于 autoinit 与正文执行**——autoinit 内可直接使用 param；autoinit 与正文同级别、共享同一空间
+
+### param 声明
+
+语法：`param 名:类型 = 默认值`，可再跟 `as "短名"` 提供短参数别名（命令行用 `-短名 值`，与 `--全名 值` 并存）：
+
+| 类型 | 说明 |
+|---|---|
+| `string` | 字符串 |
+| `bool` | 布尔，命令行作开关使用 |
+| `cast.int` | 接收字符串按 `int()` 语义转换后再存 |
+| `cast.float` | 接收字符串按 `float()` 语义转换后再存 |
+
+- 命名规则与普通变量完全一致
+- 默认值**必须有**且只能是字面量
+- param 变量**只读**，程序内修改报错（与 `const` 一致）；需改写先读出赋给普通变量
+
+### 命令行匹配
+
+命令行两层结构：`--` 是独立记号（前后空格隔开），从这里开始后面全部归脚本：
+
+```bash
+node dist/noethingScript-Interpreter.js --debug 1 script.ns -- arg1 arg2 ...
+```
+
+脚本参数区按 cmdargs 定义切分（两步流程）：
+
+1. **先处理带横杠的有名参数**：`--名字 值` 全名、`-短名 值` 短名；`bool` 是开关——传入即翻转默认值，后面紧邻的东西不归它管；`string`/`cast` 必须消费后面紧邻的一个值，缺值报错
+2. **再处理匿名参数**（不带横杠）：从剩余未赋值的 param 中按原声明顺序重排，把裸参数按重排顺序填充（`bool` 不接收匿名值）；少的用默认值，多的丢弃并给出警告
+
+错误规则：未知有名参数（基本是拼写错误）报错；脚本参数区内不允许孤立的 `--`（`--` 必须紧跟字母组成 `--名字`）；`cast` 转换失败报错并标注变量名；头部 param 声明语法错误（格式/未知类型/缺默认值/短名与全名相同/重复声明/默认值非字面量）为运行前错误，报错后整体终止、程序不执行。
+
+例：`param debug:bool = false` 时传 `--debug 1` → `debug` 变 `true`、`1` 是独立匿名参数（两个）；`param debug:cast.int = 0` 时同样传 `--debug 1` → `debug` 就是 `1`（一个）。
+
+浏览器中通过 `NSI.setCmdargs(args)` 设置脚本参数区（对应命令行 `--` 之后的部分），不调用则参数区为空、param 全部用默认值。
+
+## 模块系统
+
+NS 支持多文件模块化：把可复用的函数与数据封装进模块文件，主程序用 `use` 声明激活并跨文件调用。完整设计见 [module-system/design.md](module-system/design.md)。
+
+### use 语句
+
+`use` 必须位于文件头部的 `modules ... endmodules` 块内：
+
+```ns
+modules
+use tools from main
+use stack from main as st
+endmodules
+```
+
+语法：`use [inner] 模块名 [from 来源] [as 别名]`
+
+- `模块名` 与普通变量命名一致；**对象名** = 模块名（或 `as` 后的别名），之后用对象名调用
+- `from 来源` 指定来源目录，仅允许 `main`/`extra`/`custom`（三分类目录），默认 `main`
+- `use inner` 引用**当前包**内模块（按当前文件路径上两级目录定位包根），不能带 `from`
+- 头部区结构：`debug`（必须物理首行）/ `modules` 块 / `cmdargs` 块 / `autoinit` 块**同级、互不嵌套**，各自全文件至多一次，惯例顺序 `debug → modules → cmdargs → autoinit`（非强制）；块内只允许对应内容（modules 块内只允许 `use` + 空行 + 注释）；主内容区出现 `use` 报错
+
+### 模块文件组织
+
+模块目录唯一（命令行 `--modules DIR` 配置，默认 `modules/`），组织形式为三分类目录：
+
+```
+modules/{来源}/{包}/{模块}/{模块}.ns
+```
+
+例：`use tools from main` 定位 `modules/main/tools/tools/tools.ns`。每包可有 `manifest` 元数据文件；模块文件头部同样可有 `modules` 块（嵌套 `use` 依赖，递归加载、跨文件幂等——模块实例全局唯一、循环依赖检测）。
+
+### 模块函数调用
+
+模块函数与普通用户函数统一走 `call` 语句（点分调用），同一管道 → 函数体天然吃 NSVM 指令化：
+
+```ns
+call stack.newStack(mut st)
+call stack.pop(mut st) -> v
+```
+
+模块符号挂在模块命名空间对象上（不进全局函数表，与主程序全局零冲突）；模块函数内查找链为**局部变量 → 模块私有全局 → 未声明报错**，不访问主程序任何全局；与主程序交互的唯一通道是"调用 + 返回值"，数组形参/返回值/`mut` 写穿等边界语义与普通函数完全一致。
+
+### autoinit 与顶层动作
+
+- `autoinit ... endautoinit` 块（头部区、至多一个）在**模块被 use 时执行**（入口脚本则与正文都执行）；模块内 global 声明与函数定义加载期全文件统一建立，autoinit 可自由引用
+- 模块内顶层可执行语句**在被 use 时不执行**（只执行 autoinit 区间）；文件作为程序入口直接执行时顶层语句正常执行
+- 模块上下文中的输出与未捕获错误强制带来源标识 `[模块 来源/包/模块]`，跨来源/跨包同名不混淆
+- 模块函数内错误与普通函数一致：主程序 `try-catch` 可捕获；**加载期错误**（use 失败/模块语法错误/依赖循环）由模块管理器与加载器负责，不可 `try-catch`，报错后整体终止
+
+### 浏览器中使用
+
+浏览器需注入模块加载能力（嵌入式刚需）：`NSI.setModuleLoader(name => 源码字符串)`（同步原语，`name` 为模块定位名，不存在返回 `null`）、`NSI.setModuleDir(dir)`（配置模块目录，默认 `modules`）、`NSI.setCurrentFilePath(path)`（设置当前文件定位标识，供 `use inner` 定位包根）。
+
 ## 关键字列表
 ```ns
 global, local, number, int, float, string, bool, array, 
@@ -565,7 +671,9 @@ while, endwhl, switch, case, default, endswc,
 break, continue, return, assert, endasrt, try, 
 catch, endtry, Exception, :functionName, :end, 
 null, undefined, void, jump, :tagname, arrfill, 
-purge, all, except, call, print, debug, mut, copy
+purge, all, except, call, print, debug, mut, copy, 
+modules, endmodules, use, from, as, inner, 
+cmdargs, endcmdargs, param, autoinit, endautoinit, cast
 ```
 
 ## 异常类型
@@ -637,11 +745,28 @@ node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
 
 `--help`/`--version` 为独立参数，不需要提供文件名，且优先于其他检查。
 
+#### 模块目录
+
+```bash
+node dist/noethingScript-Interpreter.js 脚本文件名.ns --modules mydir
+```
+
+配置模块目录（唯一，默认 `modules`），`use` 语句按此目录定位模块文件（见"模块系统"）。
+
+#### 脚本参数区
+
+```bash
+node dist/noethingScript-Interpreter.js 脚本文件名.ns -- arg1 arg2 ...
+```
+
+`--` 是独立记号（前后空格隔开），从这里开始后面全部归脚本，由入口文件的 cmdargs 声明按规则接收（见"运行前参数 (cmdargs)"）；与 `--name`（横杠紧跟字母）天然不冲突。
+
 #### 参数约定
 
 - 可选参数与文件名**顺序任意**，文件名必须是第一个**非 `-` 开头**的参数
-- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--help`/`--version`
+- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--modules`/`--help`/`--version`；`--` 是脚本参数区分隔符
 - **不支持短参数**（如 `-h`/`-v`）；未知参数（含短参数）会提示"未知参数"并退出，不会被当作文件名
+- 脚本参数区内不存在"未知可选参数"概念：`--` 之后的一切（含 `-h` 这类横杠串）都按 cmdargs 规则交给脚本解析
 
 ### 浏览器中使用
 
@@ -665,7 +790,7 @@ node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`，以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
+`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`、`setCmdargs(args)`（设置脚本参数区，对应命令行 `--` 之后的部分）、`setModuleLoader(loader)`/`setModuleDir(dir)`/`setCurrentFilePath(path)`（模块加载能力注入，见"模块系统"），以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 与语言包 `LANG_PACKS`。在 Node 环境中加载同一文件不会挂载 `NSI`，命令行行为不受影响；连续多次 `run()` 之间状态互相隔离（每次重新加载程序）。
 
 ##### 交互执行（程序模式）
 

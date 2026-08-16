@@ -1,0 +1,26 @@
+Tip: Run with --lang en for English messages.
+0
+1
+0
+4
+5
+1024
+3
+4
+4
+5
+1
+random ok
+caught math arg: Math.pow 需要 2 个参数
+255
+10
+15
+256
+16
+16
+31
+10
+[ERROR 2] [行 58] 类型错误: 不能将常量 'lc' 赋值
+10
+caught local const arr: 数组 la 是常量数组, 不能被赋值
+1

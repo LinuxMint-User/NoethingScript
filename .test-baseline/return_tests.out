@@ -1,0 +1,17 @@
+Tip: Run with --lang en for English messages.
+[ERROR 2] [行 21] 类型错误: 函数 func0 期望无返回值, 但找到return语句
+[ERROR 2] [行 111] 类型错误: 函数 noReturnFunc 期望返回 int 类型的值, 但未找到return语句
+6
+1
+-1
+negative
+zero
+positive
+10
+1
+0
+[ERROR 2] [行 111] 类型错误: 函数 noReturnFunc 期望返回 int 类型的值, 但最终执行到函数结束标记
+0
+[ERROR 2] [行 121] 类型错误: return 只能返回函数 returnGlobalBad 声明的返回变量 out, 不能返回 sharedVal
+[ERROR 2] [行 122] 类型错误: 函数 returnGlobalBad 期望返回 string 类型的值, 但最终执行到函数结束标记
+global_msg

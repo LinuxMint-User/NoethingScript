@@ -1,0 +1,2 @@
+Tip: Run with --lang en for English messages.
+[ERROR 1] [行 6] 语法错误: param 声明格式错误: 应为 param 名:类型 = 默认值 [as "短名"] (类型: string/bool/cast.int/cast.float)

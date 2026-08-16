@@ -1,0 +1,14 @@
+Tip: Run with --lang en for English messages.
+case 0
+nested case 0
+nested case 1
+nested default
+nested default
+nested default
+case 1
+default
+default
+default
+matched b
+not default
+str default

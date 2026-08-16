@@ -48,3 +48,6 @@
 - [x] 隐式转换禁止 (2.7.2 收紧: + 混合类型报错, 一元 +/! 类型检查, string 赋值收紧, str/int/float 拒收布尔, 显式转换唯一通道)
 - [x] 条件表达式必须布尔 (2.7.2 truthy 拒绝: while/for/assert/jump 非布尔条件一律报错——此前 `while (5)` 因 JS 真值化静默通过、`assert (5)` 静默通过、`jump (5): tag` 静默跳转; 报错后 while/for 跳过循环体、assert 跳过断言体、jump 不跳转, 与 NSVM JZ/JNZ/ASSERTCHK 双路径一致)
 - [x] &&/|| 有条件短路 (2.7.2: 左侧为 false (&&) 或 true (||) 时右侧不求值——`false && 1/0` 不抛除零; 右侧允许计算型内置函数 "函数模样的运算符" (Math.*/String.*/Bit.*/len/str/int/float, 无副作用); 仅禁止 I/O 型 input() (与 print 同属 I/O 通道, 有副作用, 短路跳过会静默不问输入, 解析期报语法错误可捕获); 两侧仍强制布尔; NSVM 含 &&/|| 表达式整体回退树求值)
+- [x] cmdargs 运行前参数 (入口文件默认值场景: 多类型 param string/bool/cast.int/cast.float 绑定为只读全局、autoinit 内可直接引用、cast 转换后参与运算、param 修改报错与 const 一致; 基线 tests/cmdargs_tests.out; 命令行参数场景 --名字/-短名/匿名按序/bool 开关/cast 转换按 doc.md 手动验证)
+- [x] cmdargs 头部语法错误 (param 声明格式错误为运行前错误, 报错后整体终止、程序不执行; 基线 tests/cmdargs_syntax_error.out)
+- [x] 模块系统 (module-test/ 专项: modules 块 + use from/as、点分 call 调用、模块私有命名空间、来源标识 [模块 来源/包/模块]、模块 autoinit、模块函数错误可被主程序 try-catch 捕获; 基线 module-test/baseline/main.out)

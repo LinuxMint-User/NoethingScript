@@ -1,0 +1,33 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 3
+[DEBUG 2] [Line 2] 执行指令 global x:int = 0
+[DEBUG 1] [Line 2] 尝试添加变量: x, 值: 0, 类型: int, 作用域: 2-末行, 是否全局: true
+[DEBUG 1] [Line 2] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 2] 全局变量 x 添加成功
+[DEBUG 2] [Line 3] 执行指令 assert (x = 0)
+[DEBUG 1] [Line 3] 执行assert语句: (x = 0)
+[DEBUG 2] [Line 3] 解析表达式中: x,=,0
+[DEBUG 2] [Line 3] 解析表达式中: x,=,0
+[DEBUG 2] [Line 3] 解析逻辑或运算中: x,=,0
+[DEBUG 2] [Line 3] 解析逻辑与运算中: x,=,0
+[DEBUG 2] [Line 3] 解析相等性运算中: x,=,0
+[DEBUG 2] [Line 3] 解析关系运算中: x,=,0
+[DEBUG 2] [Line 3] 解析加法和减法运算中: x,=,0
+[DEBUG 2] [Line 3] 解析乘法、除法和取模运算中: x,=,0
+[DEBUG 2] [Line 3] 解析幂运算中: x,=,0
+[DEBUG 2] [Line 3] 解析一元运算符中: x,=,0
+[DEBUG 2] [Line 3] 解析基本元素中: x,=,0
+[ERROR 2] [行 3] 类型错误: 条件表达式必须返回布尔值, 但实际返回了 object 类型
+[DEBUG 2] [Line 6] 执行指令 print "x = 0"
+[DEBUG 2] [Line 6] 解析表达式中: "x = 0"
+[DEBUG 2] [Line 6] 解析逻辑或运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析逻辑与运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析相等性运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析关系运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析加法和减法运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析乘法、除法和取模运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析幂运算中: "x = 0"
+[DEBUG 2] [Line 6] 解析一元运算符中: "x = 0"
+[DEBUG 2] [Line 6] 解析基本元素中: "x = 0"
+x = 0
+[DEBUG 1] [Line 9] 程序执行完毕

@@ -1,0 +1,29 @@
+// tests/cmdargs_tests.ns — cmdargs 运行前参数功能测试 (设计稿 §5.2)
+// 回归口径: 无命令行参数区 (-- 之后为空) 时所有 param 绑定为声明默认值, 先于 autoinit 与正文执行。
+// 命令行参数场景 (--cmd build -v / 匿名按声明序填充 / bool 开关翻转 / cast 转换等) 按 §5.2.6 两层结构
+// 在命令行手动验证 (如 `node dist/noethingScript-Interpreter.js tests/cmdargs_tests.ns -- --cmd build -v -n 42`),
+// 无法进无参数回归基线。
+cmdargs
+param cmd:string = "help" as "c"
+param verbose:bool = false as "v"
+param count:cast.int = 0 as "n"
+param ratio:cast.float = 1.5 as "r"
+endcmdargs
+// autoinit 与正文同级别、共享同一空间 (§5.2.2): autoinit 内可直接使用已绑定为默认值的 param
+autoinit
+print "autoinit: " + cmd
+endautoinit
+print "cmd=" + cmd
+if (verbose)
+print "verbose=true"
+else
+print "verbose=false"
+endif
+print "count=" + str(count)
+print "ratio=" + str(ratio)
+// cast 类型在绑定期已按 int()/float() 语义转换 (§5.2.5): 表达式内可正常参与运算
+print "count+1=" + str(count + 1)
+print "ratio*2=" + str(ratio * 2)
+// param 变量只读, 程序内修改报错 (与 const 一致, §5.2.3); 需改写先读出赋给普通变量
+cmd = "x"
+print "done"

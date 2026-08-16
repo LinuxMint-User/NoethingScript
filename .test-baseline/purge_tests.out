@@ -1,0 +1,251 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 3
+[DEBUG 2] [Line 2] 执行指令 global var0:int = 0
+[DEBUG 1] [Line 2] 尝试添加变量: var0, 值: 0, 类型: int, 作用域: 2-末行, 是否全局: true
+[DEBUG 1] [Line 2] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 2] 全局变量 var0 添加成功
+[DEBUG 2] [Line 3] 执行指令 global var1:string = ""
+[DEBUG 1] [Line 3] 尝试添加变量: var1, 值: , 类型: string, 作用域: 3-末行, 是否全局: true
+[DEBUG 1] [Line 3] 验证数据类型: 值 "", 类型 string
+[DEBUG 1] [Line 3] 全局变量 var1 添加成功
+[DEBUG 2] [Line 4] 执行指令 global var3:string = ""
+[DEBUG 1] [Line 4] 尝试添加变量: var3, 值: , 类型: string, 作用域: 4-末行, 是否全局: true
+[DEBUG 1] [Line 4] 验证数据类型: 值 "", 类型 string
+[DEBUG 1] [Line 4] 全局变量 var3 添加成功
+[DEBUG 2] [Line 5] 执行指令 var0 = 1
+[DEBUG 1] [Line 5] 执行操作指令: var0 = 1
+[DEBUG 2] [Line 5] 解析表达式中: var0,=,1
+[DEBUG 2] [Line 5] 解析表达式中: var0,=,1
+[DEBUG 2] [Line 5] 解析逻辑或运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析逻辑与运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析相等性运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析关系运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析加法和减法运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析乘法、除法和取模运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析幂运算中: var0,=,1
+[DEBUG 2] [Line 5] 解析一元运算符中: var0,=,1
+[DEBUG 2] [Line 5] 解析基本元素中: var0,=,1
+[DEBUG 1] [Line 5] 获得解析结果
+[DEBUG 1] [Line 5] 处理普通变量赋值 (type: assignment) : var0 = 1
+[DEBUG 2] [Line 5] 查找变量: var0 (行 5)
+[DEBUG 2] [Line 5]   找到全局变量: var0 = 0
+[DEBUG 2] [Line 5] 查找变量信息: var0 (行 5)
+[DEBUG 1] [Line 5] 获取变量信息 var0 (全局): 值=0, 类型=int, 作用域=2-末行, 行号=5
+[DEBUG 2] [Line 5] 设置局部变量 var0 (行 5)
+[DEBUG 1] [Line 5] 验证数据类型: 值 1, 类型 int
+[DEBUG 2] [Line 6] 执行指令 var1 = "hi"
+[DEBUG 1] [Line 6] 执行操作指令: var1 = "hi"
+[DEBUG 2] [Line 6] 解析表达式中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析表达式中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析逻辑或运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析逻辑与运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析相等性运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析关系运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析加法和减法运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析乘法、除法和取模运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析幂运算中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析一元运算符中: var1,=,"hi"
+[DEBUG 2] [Line 6] 解析基本元素中: var1,=,"hi"
+[DEBUG 1] [Line 6] 获得解析结果
+[DEBUG 1] [Line 6] 处理普通变量赋值 (type: assignment) : var1 = "hi"
+[DEBUG 2] [Line 6] 查找变量: var1 (行 6)
+[DEBUG 2] [Line 6]   找到全局变量: var1 = ""
+[DEBUG 2] [Line 6] 查找变量信息: var1 (行 6)
+[DEBUG 1] [Line 6] 获取变量信息 var1 (全局): 值=, 类型=string, 作用域=3-末行, 行号=6
+[DEBUG 2] [Line 6] 设置局部变量 var1 (行 6)
+[DEBUG 1] [Line 6] 验证数据类型: 值 hi, 类型 string
+[DEBUG 2] [Line 7] 执行指令 var3 = "global var3"
+[DEBUG 1] [Line 7] 执行操作指令: var3 = "global var3"
+[DEBUG 2] [Line 7] 解析表达式中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析表达式中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析逻辑或运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析逻辑与运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析相等性运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析关系运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析加法和减法运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析乘法、除法和取模运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析幂运算中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析一元运算符中: var3,=,"global var3"
+[DEBUG 2] [Line 7] 解析基本元素中: var3,=,"global var3"
+[DEBUG 1] [Line 7] 获得解析结果
+[DEBUG 1] [Line 7] 处理普通变量赋值 (type: assignment) : var3 = "global var3"
+[DEBUG 2] [Line 7] 查找变量: var3 (行 7)
+[DEBUG 2] [Line 7]   找到全局变量: var3 = ""
+[DEBUG 2] [Line 7] 查找变量信息: var3 (行 7)
+[DEBUG 1] [Line 7] 获取变量信息 var3 (全局): 值=, 类型=string, 作用域=4-末行, 行号=7
+[DEBUG 2] [Line 7] 设置局部变量 var3 (行 7)
+[DEBUG 1] [Line 7] 验证数据类型: 值 global var3, 类型 string
+[DEBUG 2] [Line 18] 执行指令 call func()
+[DEBUG 1] [Line 18] 开始执行函数调用: func()
+[DEBUG 2] [Line 18] 函数信息: {
+  name: 'func',
+  params: [],
+  returnType: 'undefined',
+  startLine: 7,
+  endLine: 15,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 18] 函数 func 开始传递参数
+[DEBUG 2] [Line 18] 函数信息: {
+  name: 'func',
+  params: [],
+  returnType: 'undefined',
+  startLine: 7,
+  endLine: 15,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 18] 参数数量: 0, 实际参数: []
+[DEBUG 2] [Line 18] 开始参数传递循环
+[DEBUG 2] [Line 18] 函数调用: func, 参数: [] 当前行: 18
+[DEBUG 2] [Line 18] 参数传递循环结束
+[DEBUG 3] [Line 18] 当前局部变量详情: []
+[DEBUG 2] [Line 18] 函数 func 参数传递完成
+[DEBUG 3] [Line 18] 检查参数是否正确添加:
+[DEBUG 3] [Line 18] 详细检查参数:
+[DEBUG 2] [Line 8] 函数体开始行: 9
+[DEBUG 2] [Line 8] 函数 func 变量作用域详情:
+[DEBUG 2] [Line 8]   返回值变量: undefined, 作用域: 9-16
+[DEBUG 2] [Line 8]   参数作用域: 9-16
+[DEBUG 2] [Line 8] 当前流程控制栈: [
+  {
+    type: 'function',
+    funcName: 'func',
+    startLine: 7,
+    endLine: 15,
+    callFrom: 17,
+    returnVarName: undefined,
+    frameId: 1,
+    frameVarStart: 0
+  }
+]
+[DEBUG 2] [Line 9] 执行指令 local var3:int = 6
+[DEBUG 1] [Line 9] 代码块类型 function
+[DEBUG 1] [Line 9] 尝试添加变量: var3, 值: 6, 类型: int, 作用域: 9-16, 是否全局: false
+[DEBUG 1] [Line 9] 验证数据类型: 值 6, 类型 int
+[DEBUG 1] [Line 9] 局部变量 var3 添加成功
+[DEBUG 2] [Line 10] 执行指令 local var4:string = "hello"
+[DEBUG 1] [Line 10] 代码块类型 function
+[DEBUG 1] [Line 10] 尝试添加变量: var4, 值: hello, 类型: string, 作用域: 10-16, 是否全局: false
+[DEBUG 1] [Line 10] 验证数据类型: 值 hello, 类型 string
+[DEBUG 1] [Line 10] 局部变量 var4 添加成功
+[DEBUG 2] [Line 11] 执行指令 print var3
+[DEBUG 2] [Line 11] 解析表达式中: var3
+[DEBUG 2] [Line 11] 解析逻辑或运算中: var3
+[DEBUG 2] [Line 11] 解析逻辑与运算中: var3
+[DEBUG 2] [Line 11] 解析相等性运算中: var3
+[DEBUG 2] [Line 11] 解析关系运算中: var3
+[DEBUG 2] [Line 11] 解析加法和减法运算中: var3
+[DEBUG 2] [Line 11] 解析乘法、除法和取模运算中: var3
+[DEBUG 2] [Line 11] 解析幂运算中: var3
+[DEBUG 2] [Line 11] 解析一元运算符中: var3
+[DEBUG 2] [Line 11] 解析基本元素中: var3
+[DEBUG 2] [Line 11] 检查 var3 是否为变量或函数调用
+6
+[DEBUG 2] [Line 12] 执行指令 print var4
+[DEBUG 2] [Line 12] 解析表达式中: var4
+[DEBUG 2] [Line 12] 解析逻辑或运算中: var4
+[DEBUG 2] [Line 12] 解析逻辑与运算中: var4
+[DEBUG 2] [Line 12] 解析相等性运算中: var4
+[DEBUG 2] [Line 12] 解析关系运算中: var4
+[DEBUG 2] [Line 12] 解析加法和减法运算中: var4
+[DEBUG 2] [Line 12] 解析乘法、除法和取模运算中: var4
+[DEBUG 2] [Line 12] 解析幂运算中: var4
+[DEBUG 2] [Line 12] 解析一元运算符中: var4
+[DEBUG 2] [Line 12] 解析基本元素中: var4
+[DEBUG 2] [Line 12] 检查 var4 是否为变量或函数调用
+hello
+[DEBUG 2] [Line 13] 执行指令 purge all except var4
+[DEBUG 1] [Line 13] 执行清除指令: all except var4
+[DEBUG 1] [Line 13] 匹配到except关键字
+[DEBUG 1] [Line 13] 要排除的变量: var4
+[DEBUG 2] [Line 13] 查找变量信息: var4 (行 13)
+[DEBUG 1] [Line 13] 获取变量信息 var4 (局部): 值=hello, 类型=string, 作用域=10-16, 行号=13
+[DEBUG 1] [Line 13] 已清除所有局部变量
+[DEBUG 1] [Line 13] 已将排除的变量恢复, 当前局部变量有: var4
+[DEBUG 2] [Line 14] 执行指令 print var3
+[DEBUG 2] [Line 14] 查找变量信息: var3 (行 14)
+[DEBUG 1] [Line 14] 获取变量信息 var3 (全局): 值=global var3, 类型=string, 作用域=4-末行, 行号=14
+[DEBUG 2] [Line 14] 直接返回变量值: var3 = global var3 在第14行
+global var3
+[DEBUG 2] [Line 15] 执行指令 print var4
+hello
+[DEBUG 2] [Line 16] 执行指令 :end
+[DEBUG 2] [Line 16] 函数 func 结束标记后的局部变量表: []
+[DEBUG 3] [Line 16] 检查函数 func 是否为 void 函数
+[DEBUG 1] [Line 16] 函数 func 是无返回值函数, 返回调用位置
+[DEBUG 2] [Line 19] 执行指令 purge global.var0
+[DEBUG 1] [Line 19] 执行清除指令: global.var0
+[DEBUG 2] [Line 19] 查找全局变量: var0 (行 19)
+[DEBUG 2] [Line 19]   找到全局变量: var0 = 1
+[DEBUG 1] [Line 19] 已清除全局变量 var0
+[DEBUG 1] [Line 19] 已清除全局变量 var0
+[DEBUG 2] [Line 25] 执行指令 purge var1
+[DEBUG 1] [Line 25] 执行清除指令: var1
+[DEBUG 3] [Line 25] 查找第 25 行所在函数
+[ERROR 1] [行 25] 语法错误: 函数外不可声明局部变量, 若要清除全局变量请用global关键字
+[DEBUG 2] [Line 26] 执行指令 print "after purge outside"
+[DEBUG 2] [Line 26] 解析表达式中: "after purge outside"
+[DEBUG 2] [Line 26] 解析逻辑或运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析逻辑与运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析相等性运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析关系运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析加法和减法运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析乘法、除法和取模运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析幂运算中: "after purge outside"
+[DEBUG 2] [Line 26] 解析一元运算符中: "after purge outside"
+[DEBUG 2] [Line 26] 解析基本元素中: "after purge outside"
+after purge outside
+[DEBUG 2] [Line 33] 执行指令 call fu2()
+[DEBUG 1] [Line 33] 开始执行函数调用: fu2()
+[DEBUG 2] [Line 33] 函数信息: {
+  name: 'fu2',
+  params: [],
+  returnType: 'undefined',
+  startLine: 28,
+  endLine: 31,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 33] 函数 fu2 开始传递参数
+[DEBUG 2] [Line 33] 函数信息: {
+  name: 'fu2',
+  params: [],
+  returnType: 'undefined',
+  startLine: 28,
+  endLine: 31,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 33] 参数数量: 0, 实际参数: []
+[DEBUG 2] [Line 33] 开始参数传递循环
+[DEBUG 2] [Line 33] 函数调用: fu2, 参数: [] 当前行: 33
+[DEBUG 2] [Line 33] 参数传递循环结束
+[DEBUG 3] [Line 33] 当前局部变量详情: []
+[DEBUG 2] [Line 33] 函数 fu2 参数传递完成
+[DEBUG 3] [Line 33] 检查参数是否正确添加:
+[DEBUG 3] [Line 33] 详细检查参数:
+[DEBUG 2] [Line 29] 函数体开始行: 30
+[DEBUG 2] [Line 29] 函数 fu2 变量作用域详情:
+[DEBUG 2] [Line 29]   返回值变量: undefined, 作用域: 30-32
+[DEBUG 2] [Line 29]   参数作用域: 30-32
+[DEBUG 2] [Line 29] 当前流程控制栈: [
+  {
+    type: 'function',
+    funcName: 'fu2',
+    startLine: 28,
+    endLine: 31,
+    callFrom: 32,
+    returnVarName: undefined,
+    frameId: 2,
+    frameVarStart: 0
+  }
+]
+[DEBUG 2] [Line 30] 执行指令 local loc:int = 1
+[DEBUG 1] [Line 30] 代码块类型 function
+[DEBUG 1] [Line 30] 尝试添加变量: loc, 值: 1, 类型: int, 作用域: 30-32, 是否全局: false
+[DEBUG 1] [Line 30] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 30] 局部变量 loc 添加成功
+[DEBUG 2] [Line 31] 执行指令 purge all except global.var1
+[DEBUG 1] [Line 31] 执行清除指令: all except global.var1
+[DEBUG 1] [Line 31] 匹配到except关键字
+[DEBUG 1] [Line 31] 要排除的变量: global.var1
+[ERROR 1] [行 31] 语法错误: except关键字仅适用于局部变量
+[DEBUG 1] [Line 34] 程序执行完毕

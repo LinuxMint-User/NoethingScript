@@ -1,0 +1,11 @@
+[模块 main/tools/tools] tools autoinit
+30
+2
+5
+10
+30
+99
+99
+-7
+caught: 未定义的局部变量 badName
+done

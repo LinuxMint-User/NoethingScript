@@ -1,0 +1,164 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 3
+[DEBUG 2] [Line 44] 执行指令 global const array arr[5]:int = [1, 2, 3, 4, 5]
+[DEBUG 3] [Line 44] 执行全局常量数组声明: arr[5]:int = [1, 2, 3, 4, 5]
+[DEBUG 2] [Line 44] 解析表达式中: 5
+[DEBUG 2] [Line 44] 解析逻辑或运算中: 5
+[DEBUG 2] [Line 44] 解析逻辑与运算中: 5
+[DEBUG 2] [Line 44] 解析相等性运算中: 5
+[DEBUG 2] [Line 44] 解析关系运算中: 5
+[DEBUG 2] [Line 44] 解析加法和减法运算中: 5
+[DEBUG 2] [Line 44] 解析乘法、除法和取模运算中: 5
+[DEBUG 2] [Line 44] 解析幂运算中: 5
+[DEBUG 2] [Line 44] 解析一元运算符中: 5
+[DEBUG 2] [Line 44] 解析基本元素中: 5
+[DEBUG 2] [Line 44] 数组arr使用手动初始化
+[DEBUG 2] [Line 45] 执行指令 global array arr0[5]:int = [4, 3, 2, 1, 0]
+[DEBUG 3] [Line 45] 执行全局变量数组声明: arr0[5]:int = [4, 3, 2, 1, 0]
+[DEBUG 2] [Line 45] 数组arr0使用手动初始化
+[DEBUG 2] [Line 48] 执行指令 print arr[arr0[0]]
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 不是数组赋值, 恢复索引并继续正常解析: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 检查 arr0 是否为变量或函数调用
+[DEBUG 2] [Line 48] 检测到数组元素访问: arr0
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 不是数组赋值, 恢复索引并继续正常解析: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 检查 arr 是否为变量或函数调用
+[DEBUG 2] [Line 48] 检测到数组元素访问: arr
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 不是数组赋值, 恢复索引并继续正常解析: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 检查 arr0 是否为变量或函数调用
+[DEBUG 2] [Line 48] 检测到数组元素访问: arr0
+[DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑或运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析逻辑与运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析相等性运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析关系运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析加法和减法运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析乘法、除法和取模运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析幂运算中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析一元运算符中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 解析基本元素中: arr,[,arr0,[,0,],]
+[DEBUG 2] [Line 48] 查找数组: arr0 (行 48)
+[DEBUG 2] [Line 48] 当前局部变量 (含数组) 数量: 0, 当前全局变量数量: 2
+[DEBUG 2] [Line 48] 局部变量详情: []
+[DEBUG 2] [Line 48] 全局变量详情: {
+  arr: {
+    name: 'arr',
+    value: '请使用arrayElements属性访问数组元素',
+    type: 'array',
+    isGlobal: true,
+    isConst: true,
+    startLine: 43,
+    endLine: -1,
+    frameId: undefined,
+    arrayLength: 5,
+    arrayElementType: 'int',
+    arrayElements: [ [Object], [Object], [Object], [Object], [Object] ]
+  },
+  arr0: {
+    name: 'arr0',
+    value: '请使用arrayElements属性访问数组元素',
+    type: 'array',
+    isGlobal: true,
+    isConst: false,
+    startLine: 44,
+    endLine: -1,
+    frameId: undefined,
+    arrayLength: 5,
+    arrayElementType: 'int',
+    arrayElements: [ [Object], [Object], [Object], [Object], [Object] ]
+  }
+}
+[DEBUG 1] [Line 48] 获取数组 arr0 (全局): 长度=5, 类型=array, 行号=48
+[DEBUG 2] [Line 48] 查找数组: arr (行 48)
+[DEBUG 2] [Line 48] 当前局部变量 (含数组) 数量: 0, 当前全局变量数量: 2
+[DEBUG 2] [Line 48] 局部变量详情: []
+[DEBUG 2] [Line 48] 全局变量详情: {
+  arr: {
+    name: 'arr',
+    value: '请使用arrayElements属性访问数组元素',
+    type: 'array',
+    isGlobal: true,
+    isConst: true,
+    startLine: 43,
+    endLine: -1,
+    frameId: undefined,
+    arrayLength: 5,
+    arrayElementType: 'int',
+    arrayElements: [ [Object], [Object], [Object], [Object], [Object] ]
+  },
+  arr0: {
+    name: 'arr0',
+    value: '请使用arrayElements属性访问数组元素',
+    type: 'array',
+    isGlobal: true,
+    isConst: false,
+    startLine: 44,
+    endLine: -1,
+    frameId: undefined,
+    arrayLength: 5,
+    arrayElementType: 'int',
+    arrayElements: [ [Object], [Object], [Object], [Object], [Object] ]
+  }
+}
+[DEBUG 1] [Line 48] 获取数组 arr (全局): 长度=5, 类型=array, 行号=48
+5
+[DEBUG 1] [Line 49] 程序执行完毕

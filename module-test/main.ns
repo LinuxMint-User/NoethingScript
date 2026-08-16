@@ -1,0 +1,36 @@
+// M5 模块函数调用管道功能测试 (设计稿 §5/§8)
+modules
+use tools from main
+use stack from main
+endmodules
+
+global array st[6]:int = arrfill
+call stack.newStack(mut st)
+call stack.push(mut st, 10)
+call stack.push(mut st, 20)
+call stack.push(mut st, 30)
+call stack.pop(mut st) -> v
+print v
+call stack.size(st) -> n
+print n
+
+call tools.add(2, 3) -> r1
+print r1
+call tools.double(5) -> r2
+print r2
+call tools.sumArr(st) -> s1
+print s1
+call tools.setFirst(mut st, 99)
+print st[0]
+call tools.stackSize(st) -> s2
+print s2
+call tools.neg(7) -> rn
+print rn
+
+// 模块函数内未捕获错误: 主程序 try-catch 可捕获 (确认记录 #19 ③)
+try
+    call tools.danger()
+catch (Exception e)
+    print "caught: " + e
+endtry
+print "done"

@@ -1,0 +1,12 @@
+modules
+use stack from main
+endmodules
+global array st[6]:int = arrfill
+call stack.newStack(mut st)
+print st[0]
+call stack.push(mut st, 10)
+print st[0]
+call stack.push(mut st, 20)
+print st[0]
+call stack.push(mut st, 30)
+print st[0]

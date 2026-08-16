@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.7.2";
+const NSIVersion: string = "2.7.3";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -25,6 +25,66 @@ function isInputSuspend(e: any): boolean {
     return !!e && e.type === '__INPUT_SUSPEND__';
 }
 
+// ===== 模块执行上下文切换 (设计稿 §4 黑盒) =====
+// 模块函数体 / 模块 autoinit 执行期间, 把解释器全局执行状态 (programLines/LINE_INFO/GLOBAL_VARS/TAGS/
+// 槽位表/CURRENT_MODULE) 切换为模块的, 退出时恢复。模块内变量查找链自动成为 局部 → 模块私有全局。
+function pushModuleContext(ns: ModuleNamespace): ModuleContext {
+    const saved: ModuleContext = {
+        programLines, lineInfo: LINE_INFO, globalVars: GLOBAL_VARS, tags: TAGS,
+        slotDecls: SLOT_DECLS, slotByName: SLOT_BY_NAME, slotIndex: SLOT_INDEX,
+        currentModule: CURRENT_MODULE
+    };
+    programLines = ns.sourceLines;
+    LINE_INFO = ns.lineInfo;
+    GLOBAL_VARS = ns.globals;
+    TAGS = ns.tags;
+    SLOT_DECLS = ns.slotDecls;
+    SLOT_BY_NAME = ns.slotByName;
+    SLOT_INDEX = ns.slotIndex;
+    CURRENT_MODULE = ns;
+    // 槽位帧缓存失效: 静态缓存 (帧键 'f:func:startLine') 跨上下文可能误命中 (不同模块同名函数同定义行)
+    ExpressionEvaluator.invalidateSlotFrameCache();
+    return saved;
+}
+
+function popModuleContext(saved: ModuleContext): void {
+    programLines = saved.programLines;
+    LINE_INFO = saved.lineInfo;
+    GLOBAL_VARS = saved.globalVars;
+    TAGS = saved.tags;
+    SLOT_DECLS = saved.slotDecls;
+    SLOT_BY_NAME = saved.slotByName;
+    SLOT_INDEX = saved.slotIndex;
+    CURRENT_MODULE = saved.currentModule;
+    ExpressionEvaluator.invalidateSlotFrameCache();
+}
+
+// 模块函数/autoinit 执行期间的局部变量查找限制 (两跳链第一跳): 模块上下文下只匹配本模块函数帧的局部变量,
+// 杜绝跨模块/跨主程序局部变量误命中 (模块黑盒, 设计稿 §4)。主程序上下文不做限制 (原有语义)。
+function isCurrentModuleFrame(frameId: number | undefined): boolean {
+    if (CURRENT_MODULE === null) return true;
+    return frameId !== undefined && MODULE_FRAME_MODULES[frameId] === CURRENT_MODULE;
+}
+
+// ===== M6 顶层动作来源标识 (设计稿 §3/确认记录 #22) =====
+// 模块执行上下文中所有输出 (print 等行为语句) 与未捕获错误强制在开头加 `[模块 {来源}/{包}/{模块}]` 前缀
+// (解释器侧强制; i18n 模板只负责措辞; 带来源与包名, 跨来源/跨包同名不混淆)。
+// MODULE_OUTPUT_CTX 与 CURRENT_MODULE 分离: 模块 autoinit 加载期执行时 CURRENT_MODULE 为 null
+// (加载期不启用模块查找链切换), 但 autoinit 的输出/错误仍需带来源标识; 模块函数体执行期
+// CURRENT_MODULE 已切换, 二者指向同一命名空间。
+var MODULE_OUTPUT_CTX: ModuleNamespace | null = null;
+
+// 单个命名空间的身份前缀 (空串 = 主程序上下文, 不加前缀)
+function modulePrefixOf(ns: ModuleNamespace | null): string {
+    if (ns === null) return '';
+    return `[模块 ${ns.source}/${ns.pkg}/${ns.module}] `;
+}
+
+// 当前执行上下文的来源标识前缀 (输出/错误报告统一入口使用)
+function moduleSourcePrefix(): string {
+    return MODULE_OUTPUT_CTX !== null ? modulePrefixOf(MODULE_OUTPUT_CTX) : modulePrefixOf(CURRENT_MODULE);
+}
+
 // 自定义debug日志函数
 // 惰性参数: 调用点可将字符串模板等重代价表达式包成 0 参函数 (如 debugLog(2, () => `...${x}...`)),
 // 仅在 DEBUG_LEVEL 达标需要输出时才求值, 避免无条件构造模板字符串 / 调用 Object.keys 等开销。
@@ -46,17 +106,116 @@ function debugLog(level: number, ...args: any[]): void {
 }
 
 // 关键字
+// 2.7.x 关键字预留 (模块系统, 设计稿 §10.1): use/as/from/inner/modules/endmodules/param/cmdargs/endcmdargs/cast/autoinit/endautoinit
+// 已加入保留字 (isValidIdentifier 拒绝作变量/函数/参数名), 现有用户代码使用即报错 (破坏性, 属 2.7.x 计划)
 const keywords = ['global', 'local', 'number', 'int', 'float', 'string', 'bool', 'array', 'true', 'false',
     'const', 'if', 'else', 'endif', 'for', 'endfor',
     'while', 'endwhl', 'switch', 'case', 'default', 'endswc',
     'break', 'continue', 'return', 'assert', 'endasrt', 'try',
     'catch', 'endtry', 'Exception', 'null', 'undefined', 'void',
     'jump', 'arrfill', 'purge', 'all', 'except',
-    'call', 'print', 'debug', 'mut', 'copy'
+    'call', 'print', 'debug', 'mut', 'copy',
+    'use', 'as', 'from', 'inner', 'modules', 'endmodules',
+    'param', 'cmdargs', 'endcmdargs', 'cast', 'autoinit', 'endautoinit'
 ];
 
 // 全局变量存储
 var GLOBAL_VARS: { [key: string]: Variable } = {};
+
+// ===== 模块系统 (设计稿 module-system/design.md) =====
+// 模块命名空间对象 (设计稿 §3/§4): 模块符号挂模块命名空间对象, 不进全局函数表, 与主程序全局零冲突
+interface ModuleNamespace {
+    source: string;      // 来源分类 (main/extra/custom)
+    pkg: string;         // 包名
+    module: string;      // 模块名
+    objName: string;     // 模块对象名 (use xxx as z → z; 默认 = 模块名)
+    funcs: { [name: string]: FunctionInfo };           // 导出成员 (函数定义)
+    funcBlocks: Map<string, NSVMBlock>;                // 函数 NSVM 编译块 (M5 起)
+    globals: { [name: string]: Variable };             // 模块私有全局 (模块内 global 声明)
+    uses: { [objName: string]: ModuleNamespace };      // 本文件 use 的模块 (对象名 → 命名空间; 依赖封装, 不泄漏)
+    returnValues: { [funcName: string]: { [varName: string]: any } }; // 模块函数返回值池 (与主程序 RETURN_VALUES 隔离)
+    sourceLines: string[];                             // 模块源码行
+    lineInfo: LineInfo[];                              // 模块行预处理缓存
+    tags: { [name: string]: number };                  // 模块标签表 (模块函数体内 jump 目标)
+    slotDecls: SlotDecl[];                             // 模块静态槽位声明表 (上下文切换用, 与主程序隔离)
+    slotByName: Map<string, SlotDecl[]>;               // 模块局部变量静态符号表 (上下文切换用)
+    slotIndex: { [frameKey: string]: { [slot: number]: Variable } }; // 模块运行时槽位索引
+    autoinitRange: { start: number; end: number } | null;   // autoinit 块行范围 (模块源码内, 行解释器执行区间)
+    globalLines: number[];                             // 模块内 global 声明行 (加载期执行建立私有全局)
+}
+
+// cmdargs param 声明定义 (设计稿 §5.2.3): param 名:类型 = 默认值 [as "短名"]
+interface CmdargParamDef {
+    name: string;                // 参数名 (命令行 --名字)
+    type: 'string' | 'bool' | 'cast.int' | 'cast.float';  // 接收类型 (cast 为 I/O 边界转换类型 §5.2.5)
+    defaultValue: string;        // 默认值原始字面量串 (绑定期按类型转换)
+    shortName: string | null;    // 短名 (命令行 -短名; null = 未提供)
+}
+
+// 头部区块结构 (设计稿 §2.3): modules / cmdargs / autoinit 三块同级、互不嵌套、各至多一次
+interface HeaderBlocks {
+    modulesRange: { start: number; end: number } | null;
+    cmdargsRange: { start: number; end: number } | null;
+    autoinitRange: { start: number; end: number } | null;
+    cmdargsParams: CmdargParamDef[] | null;            // cmdargs 块内 param 声明 (null = 无 cmdargs 块)
+    uses: { objName: string; source: string; pkg: string; isInner: boolean; asName: string | null }[];
+}
+
+// 模块加载器 (设计稿 §7.1): NSI.setModuleLoader 注入; Node 默认 fs 读 modules/, 浏览器宿主预取后同步查 map。
+// 同步原语: (name => 源码字符串 | null), 返回 null = 模块不存在 (加载器报"模块不存在").
+var MODULE_LOADER: ((name: string) => string | null) | null = null;
+var MODULE_DIR: string = 'modules';                              // 唯一可配置模块目录 (设计稿 §7.3)
+var MODULE_REGISTRY: { [key: string]: ModuleNamespace } = {};    // 已加载模块实例 (key = source/pkg/module, 跨文件幂等 §2.2)
+var PROGRAM_MODULE_OBJS: { [objName: string]: ModuleNamespace } = {};  // 主程序 use 的对象名表
+var CURRENT_MODULE: ModuleNamespace | null = null;               // 当前执行上下文所在模块 (null = 主程序; 模块函数/autoinit 执行期间非空)
+var SKIP_LINES: Set<number> = new Set();                         // 模块被 use 时跳过的顶层行 (仅 autoinit 区间执行; 主程序为空集)
+var HEADER_BLOCKS: HeaderBlocks = {                              // 当前文件头部块解析结果 (M2 起, loadProgram 时建立)
+    modulesRange: null,
+    cmdargsRange: null,
+    autoinitRange: null,
+    cmdargsParams: null,
+    uses: []
+};
+var CMDARGS_ARGV: string[] = [];                                 // 脚本参数区 (设计稿 §5.2.6): 命令行 `--` 之后的裸串, 入口文件 cmdargs 绑定期消费
+
+// 模块执行上下文切换 (设计稿 §4 黑盒): 模块函数/autoinit 执行期间把 programLines/LINE_INFO/GLOBAL_VARS/TAGS
+// 及槽位表切换为模块的, 退出时恢复; 模块内 global. 前缀 = 模块私有全局
+interface ModuleContext {
+    programLines: string[];
+    lineInfo: LineInfo[];
+    globalVars: { [key: string]: Variable };
+    tags: { [name: string]: number };
+    slotDecls: SlotDecl[];
+    slotByName: Map<string, SlotDecl[]>;
+    slotIndex: { [frameKey: string]: { [slot: number]: Variable } };
+    currentModule: ModuleNamespace | null;
+}
+
+// 当前模块函数帧上下文 (CONTROL_FLOW_STACK function 帧扩展字段, 供 executeReturn/executeFunctionEndTag 恢复)
+// 设计: function 帧加 module: ModuleNamespace | null + savedCtx: ModuleContext | null
+// 模块函数帧 → 模块归属表: 帧ID → 模块。模块函数体变量查找 (两跳链: 局部→模块私有全局) 只匹配本模块函数帧的局部变量,
+// 杜绝跨模块/跨主程序的局部变量误命中 (模块黑盒, 设计稿 §4)。
+var MODULE_FRAME_MODULES: { [frameId: number]: ModuleNamespace } = {};
+
+// ===== M4 加载期状态 (设计稿 §7) =====
+var CURRENT_FILE_PATH: string = '';      // 当前文件定位标识 (use inner 定位: 当前包根 = 上两级目录, §3.4; 模块 = 其 loader 名)
+var MODULE_SOURCE_CACHE: { [name: string]: string } = {};   // 模块源码缓存 (两阶段加载共用, 每模块只读一次 §7.2)
+var MODULE_LOAD_FAILED = false;          // 加载期错误标志 (§7.4 不可 try-catch: 报错后整体终止执行, run 不启动)
+var HEADER_PARSE_FAILED = false;         // 入口文件头部语法错误标志 (cmdargs/use/块规则错误: 运行前错误, 报错后整体终止, 程序不执行)
+var MODULE_SYSTEM_READY = false;         // 主程序模块已加载标志 (loadProgram 重置; 防止同一程序重复加载)
+
+// 模块依赖图节点 (阶段1 产物, §7.2): 幂等 key / loader 定位名 / 元数据 / 源码 (缓存) / 直接依赖
+interface ModuleDep {
+    key: string;         // 幂等键 (非 inner: source:模块名; inner: inner:{包根相对路径}:模块名, 跨文件幂等 §2.2)
+    name: string;        // loader 定位名 (相对 MODULE_DIR 或绝对路径, 由 loader 解析)
+    source: string;      // 来源分类 (main/extra/custom; inner 为空串)
+    pkg: string;         // 模块名 (非 inner 时 = 包名; inner 时 = 包内模块名)
+    module: string;      // 模块名 (展示用)
+    objName: string;     // 模块对象名 (use xxx as z → z)
+    isInner: boolean;
+    deps: ModuleDep[];   // 直接依赖 (阶段1 解析模块头部 use 获得)
+    sourceCode: string;  // 模块源码 (源码缓存, 阶段2 复用)
+}
 
 // 局部变量存储
 var LOCAL_VARS: Variable[] = [];
@@ -122,10 +281,13 @@ function indexSlotVar(v: Variable): void {
 }
 
 // 从 LOCAL_VARS 重建运行时槽位索引 (所有 LOCAL_VARS 变更点调用; 非热路径, 低频)
+// 模块上下文 (CURRENT_MODULE 非空): 只索引本模块帧的变量 — 模块槽位表不得混入主程序/其他模块帧变量 (黑盒 §4)
 function rebuildSlotIndex(): void {
     SLOT_INDEX = {};
     for (let i = 0; i < LOCAL_VARS.length; i++) {
-        indexSlotVar(LOCAL_VARS[i]);
+        const v = LOCAL_VARS[i];
+        if (!isCurrentModuleFrame(v.frameId)) continue;
+        indexSlotVar(v);
     }
 }
 
@@ -191,6 +353,8 @@ var CONTROL_FLOW_STACK: ({
     returnVarName?: string;       // 接收返回值的变量名 (call ... -> resultVar 中的 resultVar)
     frameId: number;              // 本次调用帧的唯一ID (递归隔离局部变量用)
     frameVarStart: number;        // 调用时 LOCAL_VARS 长度 (返回时截断清理本帧变量, O(1) 替代 O(n) filter)
+    module?: ModuleNamespace | null;  // 模块函数: 所属模块命名空间 (非模块函数为 undefined, 保持主程序语义)
+    savedCtx?: ModuleContext | null;  // 模块函数: 调用方上下文 (返回时恢复)
 })[] = [];
 
 // 流程控制跳过块栈 (用于for/while等)
@@ -255,7 +419,16 @@ enum StmtType {
     ENDSWC,            // endswc
     PURGE,             // purge ...
     END_TAG,           // :end
-    CONST_PREFIX_ERROR // const global/local 位置错误 (语法错误, 与旧 executeCommand 前置检查一致)
+    CONST_PREFIX_ERROR, // const global/local 位置错误 (语法错误, 与旧 executeCommand 前置检查一致)
+    // 模块系统头部区 (设计稿 §2.3): 与 debug 同级, 各至多一次, 执行期跳过 (加载期处理)
+    MODULES,           // modules 块开始
+    ENDMODULES,        // endmodules
+    USE,               // use xxx [from yyy] [as z] / use inner xxx [as z]
+    CMDARGS,           // cmdargs 块开始
+    ENDCMDARGS,        // endcmdargs
+    PARAM,             // param 名:类型 = 默认值 [as "短名"] (cmdargs 块内声明; 加载期 parseParamDef 校验, 执行期跳过)
+    AUTOINIT,          // autoinit 块开始
+    ENDAUTOINIT        // endautoinit
 }
 
 // 结构化行对象: 预解析的关键字类型 + 预拼接的参数串 (参数与旧 split(/\s+/).slice(1).join(' ') 完全一致)
@@ -395,7 +568,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: '用法: node noethingScript-Interpreter.js <文件名>',
         cli_no_debug_level: '未指定调试参数等级, 初始化默认为 0',
         cli_invalid_lang: '无效的语言参数, 仅支持 en 或 zh, 已保持默认中文',
-        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
+        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--modules/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
         cli_cannot_read: '[错误] 无法读取文件 \'{filename}\': {error}',
         cli_node_required: '[错误] 此脚本需要在Node.js环境中运行以支持文件读取',
         internal_error: '[内部错误] [行 {line}] 解释器内部发生错误: {message}',
@@ -761,6 +934,45 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         dbg_arg_array_type: '参数为数组类型 {arg}',
         dbg_copy_array: 'copy 深拷贝数组: {name} (长度 {length})',
         dbg_exec_func_call: '执行函数调用: name: {funcName} args:{args}',
+        // ===== 模块系统头部区 (设计稿 §2.3/§3) =====
+        use_format: 'use 语句语法错误: 应为 use [inner] 模块名 [from 来源] [as 别名]',
+        use_inner_with_from: 'use inner 不能带 from (inner 用于引用当前包内模块)',
+        use_source_invalid: '来源 {source} 无效, 仅支持 main/extra/custom',
+        use_module_invalid: '模块名 {name} 无效 (不能是关键字或不符合命名规则)',
+        use_duplicate: '重复 use 模块 {name}',
+        use_obj_conflict: '模块对象名 {name} 冲突: 已被 use 为不同模块, 请用 as 改名',
+        use_outside_modules: 'use 只能在 modules ... endmodules 块内使用',
+        // ===== 模块加载期错误 (设计稿 §7.4, 不可 try-catch) =====
+        module_not_found: '模块 \'{name}\' 不存在 ({path})',
+        module_cycle: '模块依赖循环: {chain}',
+        module_syntax_error: '模块 \'{name}\' 语法错误: {err}',
+        module_loader_missing: '模块加载器未配置 (请先调用 setModuleLoader 注入)',
+        module_inner_no_package: '当前文件不在任何包内 (无包根), use inner 不可用',
+        module_inner_no_manifest: '包根缺少 manifest 或 package 与包名不一致 (包根: {path}), use inner 不可用',
+        module_inner_not_found: '包内无此模块 {name} (包根: {path})',
+        module_load_error: '模块 \'{name}\' 加载失败: {err}',
+        input_in_autoinit: '模块 autoinit 内不允许 input() (加载期无交互输入)',
+        modules_block_use_only: '模块块内只允许 use 语句',
+        cmdargs_block_param_only: 'cmdargs 块内只允许 param 声明',
+        param_outside_cmdargs: 'param 只能在 cmdargs ... endcmdargs 块内声明',
+        // ===== cmdargs 运行前参数 (设计稿 §5.2) =====
+        param_format: 'param 声明格式错误: 应为 param 名:类型 = 默认值 [as "短名"] (类型: string/bool/cast.int/cast.float)',
+        param_name_invalid: '参数名 {name} 无效 (禁止关键字或不符合命名规则)',
+        param_short_dup_name: '短名不得与全名相同: {name}',
+        param_short_conflict: '短名 {short} 与已有参数冲突',
+        param_default_literal_only: '参数 {name} 默认值必须是字面量',
+        param_dup: '参数 {name} 重复声明',
+        cmdargs_unknown: '未知参数 --{name}',
+        cmdargs_unknown_short: '未知参数 -{short}',
+        cmdargs_missing_value: '参数 {name} 缺少值',
+        cmdargs_lone_separator: '脚本参数区不允许孤立的 --',
+        cmdargs_convert_fail: '参数 {name} 的值 {value} 转换失败',
+        cmdargs_extra_anon: '匿名参数 {value} 无对应声明, 已丢弃',
+        header_dup: '头部块 {name} 全文件至多出现一次',
+        header_stray_end: '多余的 {end}: 缺少与之配对的 {start}',
+        header_unclosed: '头部块 {name} 未闭合, 缺少 {end}',
+        header_nested: '头部块不可嵌套: {name} 内出现 {other}',
+        header_late: '头部块 {name} 必须位于文件头部 (主内容之前)',
         // ===== 调试输出 (debugLog) 区域E: L6100-8500 =====
         dbg_calc_operation: '计算操作: {operator}, 左操作数: {left} (左类型: {leftType}), 右操作数: {right} (右类型: {rightType})',
         dbg_array_ret_new_var: '数组返回值绑定到新变量 {name}',
@@ -775,7 +987,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: 'Usage: node noethingScript-Interpreter.js <filename>',
         cli_no_debug_level: 'Debug level not specified, defaulting to 0',
         cli_invalid_lang: 'Invalid language, only en or zh are supported, keeping default zh',
-        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
+        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--modules/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
         cli_cannot_read: '[Error] Cannot read file \'{filename}\': {error}',
         cli_node_required: '[Error] This script needs a Node.js environment to support file reading',
         internal_error: '[Internal Error] [Line {line}] Interpreter internal error: {message}',
@@ -1141,6 +1353,45 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         dbg_arg_array_type: 'Argument is of array type {arg}',
         dbg_copy_array: 'copy deep copies array: {name} (length {length})',
         dbg_exec_func_call: 'Executing function call: name: {funcName} args:{args}',
+        // ===== Module system header region (design §2.3/§3) =====
+        use_format: 'Invalid use statement: expected use [inner] <module> [from <source>] [as <alias>]',
+        use_inner_with_from: 'use inner cannot have from (inner refers to modules in the current package)',
+        use_source_invalid: 'Invalid source {source}: only main/extra/custom are supported',
+        use_module_invalid: 'Invalid module name {name} (must not be a keyword or violate naming rules)',
+        use_duplicate: 'Duplicate use of module {name}',
+        use_obj_conflict: 'Module object name {name} conflicts: already used for a different module, use as to rename',
+        use_outside_modules: 'use is only allowed inside a modules ... endmodules block',
+        // ===== Module load-time errors (design §7.4, not try-catchable) =====
+        module_not_found: "Module '{name}' not found ({path})",
+        module_cycle: 'Module dependency cycle: {chain}',
+        module_syntax_error: "Syntax error in module '{name}': {err}",
+        module_loader_missing: 'Module loader not configured (call setModuleLoader first)',
+        module_inner_no_package: 'Current file is not inside any package (no package root), use inner unavailable',
+        module_inner_no_manifest: 'Package root lacks manifest or manifest.package does not match the package name (package root: {path}), use inner unavailable',
+        module_inner_not_found: "No module named {name} in the package (package root: {path})",
+        module_load_error: "Failed to load module '{name}': {err}",
+        input_in_autoinit: 'input() is not allowed inside module autoinit (no interactive input at load time)',
+        modules_block_use_only: 'Only use statements are allowed inside a modules block',
+        cmdargs_block_param_only: 'Only param declarations are allowed inside a cmdargs block',
+        param_outside_cmdargs: 'param is only allowed inside a cmdargs ... endcmdargs block',
+        // ===== cmdargs pre-run params (design §5.2) =====
+        param_format: 'Invalid param declaration: expected param <name>:<type> = <default> [as "<short>"] (types: string/bool/cast.int/cast.float)',
+        param_name_invalid: 'Invalid param name {name} (must not be a keyword or violate naming rules)',
+        param_short_dup_name: 'Short name cannot equal the full name: {name}',
+        param_short_conflict: 'Short name {short} conflicts with an existing param',
+        param_default_literal_only: 'Default value of param {name} must be a literal',
+        param_dup: 'Duplicate param declaration {name}',
+        cmdargs_unknown: 'Unknown param --{name}',
+        cmdargs_unknown_short: 'Unknown param -{short}',
+        cmdargs_missing_value: 'Param {name} is missing a value',
+        cmdargs_lone_separator: 'A lone -- is not allowed inside the script args zone',
+        cmdargs_convert_fail: 'Failed to convert value {value} of param {name}',
+        cmdargs_extra_anon: 'Anonymous arg {value} has no matching declaration, discarded',
+        header_dup: 'Header block {name} may appear at most once per file',
+        header_stray_end: 'Unexpected {end}: no matching {start}',
+        header_unclosed: 'Header block {name} is not closed: missing {end}',
+        header_nested: 'Header blocks cannot be nested: {other} inside {name}',
+        header_late: 'Header block {name} must be at the top of the file (before main content)',
         // ===== Debug output (debugLog) region E: L6100-8500 =====
         dbg_calc_operation: 'Calculating operation: {operator}, left operand: {left} (left type: {leftType}), right operand: {right} (right type: {rightType})',
         dbg_array_ret_new_var: 'Array return value bound to new variable {name}',
@@ -1168,23 +1419,48 @@ function t(key: string, vars?: { [k: string]: any }): string {
 }
 
 // 统一错误报告入口: 输出格式为 "[ERROR N] [行 X] 类型: 消息" (英文时 [Line X] + 英文类型名)
+// M6: 模块执行上下文 (CURRENT_MODULE/MODULE_OUTPUT_CTX) 下强制加 `[模块 {来源}/{包}/{模块}]` 来源前缀;
+// moduleNs 参数供 NSVM 未捕获路径显式指定错误起源模块 (展开时模块上下文已恢复, 无法从 CURRENT_MODULE 取)。
 // line 缺省时取当前执行行 (currentLinePointer + 1)
-function reportError(type: ExceptionType, message: string, line?: number): void {
+function reportError(type: ExceptionType, message: string, line?: number, moduleNs?: ModuleNamespace | null): void {
+    const prefix = moduleNs !== undefined ? modulePrefixOf(moduleNs) : moduleSourcePrefix();
     const lineNum = line !== undefined ? line : currentLinePointer + 1;
     if (LANG === 'en') {
-        console.error(`[ERROR ${ERROR_CODES[type]}] [Line ${lineNum}] ${ERROR_NAMES_EN[type]}: ${message}`);
+        console.error(`${prefix}[ERROR ${ERROR_CODES[type]}] [Line ${lineNum}] ${ERROR_NAMES_EN[type]}: ${message}`);
     } else {
-        console.error(`[ERROR ${ERROR_CODES[type]}] [行 ${lineNum}] ${ERROR_NAMES[type]}: ${message}`);
+        console.error(`${prefix}[ERROR ${ERROR_CODES[type]}] [行 ${lineNum}] ${ERROR_NAMES[type]}: ${message}`);
     }
 }
 
+// 模块加载期错误报告 (设计稿 §7.4): 格式 "[ERROR] 消息" (无脚本行号/类型码), 区别于运行期错误。
+// 加载期错误 (use 失败/模块语法错误/依赖循环) 不可 try-catch (确认记录 #19), 由加载器输出后整体终止执行。
+function reportModuleError(message: string): void {
+    console.error(`[ERROR] ${message}`);
+}
+
+// 纯字符串 dirname (模块定位路径处理用; 不依赖 path 模块 → 浏览器环境可用; 反斜杠统一为正斜杠)
+function nsDirname(p: string): string {
+    const norm = p.replace(/\\/g, '/');
+    const i = norm.lastIndexOf('/');
+    return i === -1 ? '' : norm.substring(0, i);
+}
+
+// 模块定位名 → 可显示路径 (错误消息用, §7.4): 相对 MODULE_DIR 的名加目录前缀, 绝对/越出路径原样显示
+function modulePathDisplay(name: string): string {
+    if (name.length === 0) return name;
+    if (name.indexOf('/') === 0) return name;              // 绝对路径
+    if (name.indexOf('../') === 0) return name;            // 越出模块目录 (程序形态包)
+    return MODULE_DIR + '/' + name;
+}
+
 // 统一警告报告入口: 输出格式为 "[WARN] [行 X] 警告: 消息" (英文时 [Line X] + Warning), 区别于错误
+// M6: 模块执行上下文下同样强制加来源前缀 (模块内行为语句的输出统一带标识, 设计稿 §3)
 function reportWarn(message: string, line?: number): void {
     const lineNum = line !== undefined ? line : currentLinePointer + 1;
     if (LANG === 'en') {
-        console.warn(`[WARN] [Line ${lineNum}] Warning: ${message}`);
+        console.warn(`${moduleSourcePrefix()}[WARN] [Line ${lineNum}] Warning: ${message}`);
     } else {
-        console.warn(`[WARN] [行 ${lineNum}] 警告: ${message}`);
+        console.warn(`${moduleSourcePrefix()}[WARN] [行 ${lineNum}] 警告: ${message}`);
     }
 }
 
@@ -1342,8 +1618,10 @@ class ScopeManager {
 
         if (!isGlobal) {
             // 添加详细的作用域检查
+            // 模块上下文 (CURRENT_MODULE 非空): 只匹配本模块函数帧的局部变量 (两跳链第一跳, 黑盒 §4)
             for (let i = LOCAL_VARS.length - 1; i >= 0; i--) {
                 const varInfo = LOCAL_VARS[i];
+                if (!isCurrentModuleFrame(varInfo.frameId)) continue;
                 const inScope = currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1);
 
@@ -1383,8 +1661,10 @@ class ScopeManager {
         }
         if (!isGlobal) {
             // 1. 先检查局部变量
+            // 模块上下文 (CURRENT_MODULE 非空): 只匹配本模块函数帧的局部变量 (两跳链第一跳, 黑盒 §4)
             for (let i = LOCAL_VARS.length - 1; i >= 0; i--) {
                 const varInfo = LOCAL_VARS[i];
+                if (!isCurrentModuleFrame(varInfo.frameId)) continue;
                 // 检查变量名是否匹配
                 if (varInfo.name === name) {
                     // 检查变量是否在作用域内
@@ -1419,9 +1699,10 @@ class ScopeManager {
             }
         }
         if (!isGlobal) {
-            // 1. 先检查局部变量
+            // 1. 先检查局部变量 (模块上下文: 只匹配本模块函数帧, 黑盒 §4)
             for (let i = LOCAL_VARS.length - 1; i >= 0; i--) {
                 const varInfo = LOCAL_VARS[i];
+                if (!isCurrentModuleFrame(varInfo.frameId)) continue;
                 if (varInfo.name === name &&
                     currentLine >= varInfo.startLine &&
                     (currentLine <= varInfo.endLine || varInfo.endLine === -1)) {
@@ -1539,6 +1820,16 @@ class ScopeManager {
     // 获取当前行所在的函数名
     static getCurrentFunction(currentLine: number): string | null {
         debugLog(3, () => t('dbg_find_func_for_line', { line: currentLine + 1 }));
+        // 模块上下文: 函数行号属于模块源码空间, 只查当前模块函数表 (主程序 FUNCTIONS 的行号区间不适用)
+        if (CURRENT_MODULE) {
+            for (const funcName in CURRENT_MODULE.funcs) {
+                const funcInfo = CURRENT_MODULE.funcs[funcName];
+                if (currentLine >= funcInfo.startLine && currentLine <= funcInfo.endLine) {
+                    return funcName;
+                }
+            }
+            return null;
+        }
         for (const funcName in FUNCTIONS) {
             const funcInfo = FUNCTIONS[funcName];
             if (currentLine >= funcInfo.startLine && currentLine <= funcInfo.endLine) {
@@ -1648,12 +1939,24 @@ class Interpreter {
                 stmt: Interpreter.classifyLine(content)
             };
         });
+        // 解析文件头部区块 (modules/cmdargs/autoinit + use, 设计稿 §2.3/§2.1): 结果供 M4 加载期消费
+        // 头部语法错误 (param 格式/use 语法/块规则) = 运行前错误: 置标志, run() 检测后整体终止, 程序不执行
+        HEADER_PARSE_FAILED = !Interpreter.parseHeaderBlocks();
         currentLinePointer = 0;
         TAGS = {};
         FUNCTIONS = {};
         GLOBAL_VARS = {};
         LOCAL_VARS = [];
         IN_MULTILINE_COMMENT = false;
+        // 模块系统执行期状态重置: 上次运行可能中途退出在模块上下文 (未捕获异常等), 新程序必须回到主程序上下文
+        CURRENT_MODULE = null;
+        MODULE_OUTPUT_CTX = null;
+        MODULE_FRAME_MODULES = {};
+        // M4 加载期状态重置: 新程序重新做两阶段加载 (模块实例缓存 MODULE_REGISTRY/源码缓存跨程序保留, 幂等 §2.2)
+        PROGRAM_MODULE_OBJS = {};
+        SKIP_LINES = new Set();
+        MODULE_LOAD_FAILED = false;
+        MODULE_SYSTEM_READY = false;
 
         // 程序指纹递增: 表达式树缓存按程序隔离 (树节点携带静态槽位绑定, 跨程序不可共享)
         PROGRAM_ID++;
@@ -1671,6 +1974,379 @@ class Interpreter {
         NSVMExecutor.frames = [];
         NSVMExecutor.vmTryStack = [];
         NSVMExecutor.switchStack = [];
+    }
+
+    // 头部语法错误统一出口 (parseHeaderBlocks/parseUseLine 共用): 模块头部 (reportAs 非空, M4 加载期) →
+    // §7.4 模块语法错误格式 "[ERROR] 模块 'x' 语法错误: ..."; 主程序 → 标准脚本错误格式 (带类型码/行号)
+    private static headerError(msg: string, lineNo: number, reportAs: string | null): void {
+        if (reportAs !== null) reportModuleError(t('module_syntax_error', { name: reportAs, err: msg }));
+        else reportError(ExceptionType.SYNTAX_ERROR, msg, lineNo);
+    }
+
+    // 解析文件头部区块 (设计稿 §2.3): modules / cmdargs / autoinit 三块同级、互不嵌套、各至多一次;
+    // use 只能出现在 modules 块内; 块内内容限制; 未闭合/裸结束检测; use 语法解析 (inner/from/as, §2.1)。
+    // 无头部构造的文件为纯 no-op (24/24 逐字节回归红线); 结果写入 HEADER_BLOCKS 供 M4 加载期消费。
+    // reportAs (模块名) 非空 = 加载期解析模块头部 (M4): 语法错误按 §7.4 输出 "[ERROR] 模块 'x' 语法错误: ..."。
+    // 返回 false = 头部语法错误 (已报告), 调用方中止加载。
+    static parseHeaderBlocks(reportAs: string | null = null): boolean {
+        HEADER_BLOCKS = { modulesRange: null, cmdargsRange: null, autoinitRange: null, cmdargsParams: null, uses: [] };
+        // 块类型 → 展示名 (错误消息用; 含结束关键字以统一命名)
+        const blockNameOf = (type: number): string => {
+            switch (type) {
+                case StmtType.MODULES: case StmtType.ENDMODULES: return 'modules';
+                case StmtType.CMDARGS: case StmtType.ENDCMDARGS: return 'cmdargs';
+                case StmtType.AUTOINIT: case StmtType.ENDAUTOINIT: return 'autoinit';
+                default: return String(type);
+            }
+        };
+        const blockMeta: { [type: number]: { name: string; end: string } } = {
+            [StmtType.MODULES]: { name: 'modules', end: 'endmodules' },
+            [StmtType.CMDARGS]: { name: 'cmdargs', end: 'endcmdargs' },
+            [StmtType.AUTOINIT]: { name: 'autoinit', end: 'endautoinit' }
+        };
+        const isBlockKeyword = (type: number): boolean =>
+            type === StmtType.MODULES || type === StmtType.ENDMODULES ||
+            type === StmtType.CMDARGS || type === StmtType.ENDCMDARGS ||
+            type === StmtType.AUTOINIT || type === StmtType.ENDAUTOINIT;
+
+        let inBlock: number | null = null;                           // 当前块类型 (null = 块外)
+        let blockStart = 0;                                          // 当前块开始行 (未闭合报错定位)
+        const seen: { [name: string]: boolean } = { modules: false, cmdargs: false, autoinit: false };
+        let headerRegion = true;                                     // 主内容出现前 = 头部区 (块必须位于头部)
+        let inML = false;                                            // /// 多行注释状态 (与 scanTagsAndFunctions 一致)
+        const useKeys: { [key: string]: string } = {};               // 模块标识(source|inner:模块) → 模块名 (重复 use 检测 §2.2)
+        const objNames: { [name: string]: string } = {};             // 对象名 → 模块标识 (命名冲突检测 §2.2)
+
+        for (let i = 0; i < programLines.length; i++) {
+            const line = programLines[i].trim();
+            if (line === '///') { inML = !inML; continue; }
+            if (inML || line === '' || line.indexOf('//') === 0) continue;
+            // debug 物理首行 (头部构造, 不终止头部区, 沿用现有 debug 处理)
+            if (i === 0 && line.indexOf('debug ') === 0) continue;
+
+            const type = LINE_INFO[i].stmt.type;
+
+            if (inBlock !== null) {
+                // ===== 块内 =====
+                if (inBlock === StmtType.MODULES) {
+                    if (type === StmtType.USE) {
+                        if (!this.parseUseLine(LINE_INFO[i].stmt.params, i, useKeys, objNames, reportAs)) return false;
+                        continue;
+                    }
+                    if (type === StmtType.ENDMODULES) { HEADER_BLOCKS.modulesRange!.end = i; inBlock = null; continue; }
+                    if (isBlockKeyword(type)) {
+                        this.headerError(t('header_nested', { name: 'modules', other: blockNameOf(type) }), i + 1, reportAs);
+                        return false;
+                    }
+                    this.headerError(t('modules_block_use_only'), i + 1, reportAs);
+                    return false;
+                }
+                if (inBlock === StmtType.CMDARGS) {
+                    if (type === StmtType.PARAM) {
+                        // param 声明解析 (设计稿 §5.2.3): 语法/类型/默认值/短名校验; 只对入口文件绑定期生效,
+                        // 模块 (reportAs 非空) 写 cmdargs 不报错、不生效 (§5.2.2), 此处同样校验语法
+                        if (!this.parseParamDef(LINE_INFO[i].stmt.params, i, reportAs)) return false;
+                        continue;
+                    }
+                    if (type === StmtType.ENDCMDARGS) { HEADER_BLOCKS.cmdargsRange!.end = i; inBlock = null; continue; }
+                    if (isBlockKeyword(type)) {
+                        this.headerError(t('header_nested', { name: 'cmdargs', other: blockNameOf(type) }), i + 1, reportAs);
+                        return false;
+                    }
+                    this.headerError(t('cmdargs_block_param_only'), i + 1, reportAs);
+                    return false;
+                }
+                // autoinit 块: 内容不限 (初始化代码区 §3.3), 但不得嵌套块 / 不得 use / 不得 param
+                if (type === StmtType.USE) { this.headerError(t('use_outside_modules'), i + 1, reportAs); return false; }
+                if (type === StmtType.PARAM) { this.headerError(t('param_outside_cmdargs'), i + 1, reportAs); return false; }
+                if (type === StmtType.ENDAUTOINIT) { HEADER_BLOCKS.autoinitRange!.end = i; inBlock = null; continue; }
+                if (isBlockKeyword(type)) {
+                    this.headerError(t('header_nested', { name: 'autoinit', other: blockNameOf(type) }), i + 1, reportAs);
+                    return false;
+                }
+                continue;
+            }
+
+            // ===== 块外 =====
+            switch (type) {
+                case StmtType.USE:
+                    this.headerError(t('use_outside_modules'), i + 1, reportAs);
+                    return false;
+                case StmtType.PARAM:
+                    this.headerError(t('param_outside_cmdargs'), i + 1, reportAs);
+                    return false;
+                case StmtType.ENDMODULES:
+                case StmtType.ENDCMDARGS:
+                case StmtType.ENDAUTOINIT: {
+                    const m = blockMeta[type === StmtType.ENDMODULES ? StmtType.MODULES : type === StmtType.ENDCMDARGS ? StmtType.CMDARGS : StmtType.AUTOINIT];
+                    this.headerError(t('header_stray_end', { end: m.end, start: m.name }), i + 1, reportAs);
+                    return false;
+                }
+                case StmtType.MODULES:
+                case StmtType.CMDARGS:
+                case StmtType.AUTOINIT: {
+                    const m = blockMeta[type];
+                    if (seen[m.name]) {
+                        this.headerError(t('header_dup', { name: m.name }), i + 1, reportAs);
+                        return false;
+                    }
+                    if (!headerRegion) {
+                        this.headerError(t('header_late', { name: m.name }), i + 1, reportAs);
+                        return false;
+                    }
+                    seen[m.name] = true;
+                    inBlock = type;
+                    blockStart = i;
+                    const range = { start: i, end: -1 };
+                    if (type === StmtType.MODULES) HEADER_BLOCKS.modulesRange = range;
+                    else if (type === StmtType.CMDARGS) { HEADER_BLOCKS.cmdargsRange = range; HEADER_BLOCKS.cmdargsParams = []; }
+                    else HEADER_BLOCKS.autoinitRange = range;
+                    continue;
+                }
+                default:
+                    // 主内容: 头部区到此结束
+                    headerRegion = false;
+            }
+        }
+
+        // 未闭合检测: 有开始无结束 (裸结束已在上方报错)
+        if (inBlock !== null) {
+            const m = blockMeta[inBlock];
+            this.headerError(t('header_unclosed', { name: m.name, end: m.end }), blockStart + 1, reportAs);
+            return false;
+        }
+        return true;
+    }
+
+    // use 语句语法解析 (设计稿 §2.1): use [inner] 模块名 [from 来源] [as 别名]
+    // 成功把条目写入 HEADER_BLOCKS.uses; 失败 headerError 报告并返回 false
+    private static parseUseLine(params: string, lineNo: number, useKeys: { [key: string]: string }, objNames: { [key: string]: string }, reportAs: string | null = null): boolean {
+        const p = params.trim();
+        let moduleName: string;
+        let source: string;
+        let asName: string | null;
+        let isInner: boolean;
+
+        if (p.indexOf('inner ') === 0) {
+            // use inner: 定位由当前包根决定, 不带 from (写了 from 报错, §2.1)
+            if (p.search(/\s+from\s+/) !== -1) {
+                this.headerError(t('use_inner_with_from'), lineNo + 1, reportAs);
+                return false;
+            }
+            const m = p.match(/^inner\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*))?\s*$/);
+            if (!m) {
+                this.headerError(t('use_format'), lineNo + 1, reportAs);
+                return false;
+            }
+            moduleName = m[1];
+            asName = m[2] || null;
+            isInner = true;
+            source = '';                                             // 来源由加载期按当前包根决定 (§3.4)
+        } else {
+            const m = p.match(/^([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*))?(?:\s+as\s+([a-zA-Z_][a-zA-Z0-9_]*))?\s*$/);
+            if (!m) {
+                this.headerError(t('use_format'), lineNo + 1, reportAs);
+                return false;
+            }
+            moduleName = m[1];
+            source = m[2] || 'main';
+            asName = m[3] || null;
+            isInner = false;
+            if (source !== 'main' && source !== 'extra' && source !== 'custom') {
+                this.headerError(t('use_source_invalid', { source }), lineNo + 1, reportAs);
+                return false;
+            }
+        }
+
+        // 模块名/对象名命名规则 (与普通变量一致: 允许字符集 + 禁止关键字)
+        if (!Interpreter.isValidIdentifier(moduleName)) {
+            this.headerError(t('use_module_invalid', { name: moduleName }), lineNo + 1, reportAs);
+            return false;
+        }
+        const objName = asName !== null ? asName : moduleName;
+        if (!Interpreter.isValidIdentifier(objName)) {
+            this.headerError(t('use_module_invalid', { name: objName }), lineNo + 1, reportAs);
+            return false;
+        }
+
+        // 同一文件内同一模块只能 use 一次 (来源+模块名组合; inner 视为特殊来源, §2.2)
+        const key = isInner ? 'inner:' + moduleName : source + ':' + moduleName;
+        if (useKeys[key] !== undefined) {
+            this.headerError(t('use_duplicate', { name: moduleName }), lineNo + 1, reportAs);
+            return false;
+        }
+        useKeys[key] = moduleName;
+        // 不同模块被 use 成同一对象名 → 命名冲突 (§2.2), 用 as 改名避让
+        if (objNames[objName] !== undefined && objNames[objName] !== key) {
+            this.headerError(t('use_obj_conflict', { name: objName }), lineNo + 1, reportAs);
+            return false;
+        }
+        objNames[objName] = key;
+
+        // pkg 统一存模块名 (非 inner = 包名=模块名; inner = 包内模块名; 加载期 moduleLocate 用它构造定位)
+        HEADER_BLOCKS.uses.push({ objName, source, pkg: moduleName, isInner, asName });
+        return true;
+    }
+
+    // param 声明解析 (设计稿 §5.2.3): `param 名:类型 = 默认值 [as "短名"]`
+    // 校验: 语法 / 命名规则 (与普通变量一致, 禁关键字) / 短名规则 / 默认值必须为字面量 (不豁免) / 重名与重短名。
+    // 成功把定义写入 HEADER_BLOCKS.cmdargsParams; 失败 headerError 报告并返回 false。
+    private static parseParamDef(params: string, lineNo: number, reportAs: string | null = null): boolean {
+        const m = params.match(/^([A-Za-z_][A-Za-z0-9_]*):(string|bool|cast\.int|cast\.float)\s*=\s*(.+?)(?:\s+as\s+"([A-Za-z0-9_]+)")?\s*$/);
+        if (!m) {
+            this.headerError(t('param_format'), lineNo + 1, reportAs);
+            return false;
+        }
+        const name = m[1];
+        const type = m[2] as CmdargParamDef['type'];
+        const defaultValue = m[3].trim();
+        const shortName = m[4] !== undefined ? m[4] : null;
+
+        // 命名规则与普通变量完全一致 (允许字符集 + 禁止关键字 §5.2.3)
+        if (!Interpreter.isValidIdentifier(name)) {
+            this.headerError(t('param_name_invalid', { name }), lineNo + 1, reportAs);
+            return false;
+        }
+        // 短名 (不带横杠的名字, 命令行 -短名) 不得与全名相同
+        if (shortName !== null && shortName === name) {
+            this.headerError(t('param_short_dup_name', { name }), lineNo + 1, reportAs);
+            return false;
+        }
+
+        // 默认值必须是字面量 (与普通变量声明一致, 不豁免 §5.2.3): string 需双引号, bool 需 true/false,
+        // cast.int 需整数字面量, cast.float 需整数或浮点字面量
+        const validDefault = ((): boolean => {
+            if (type === 'string') return defaultValue.length >= 2 && defaultValue.startsWith('"') && defaultValue.endsWith('"');
+            if (type === 'bool') return defaultValue === 'true' || defaultValue === 'false';
+            if (type === 'cast.int') return /^-?(0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+)$/.test(defaultValue);
+            return /^-?(0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+|\d+\.\d+|\d+)$/.test(defaultValue);
+        })();
+        if (!validDefault) {
+            this.headerError(t('param_default_literal_only', { name }), lineNo + 1, reportAs);
+            return false;
+        }
+
+        // 重名 / 重短名 / 短名撞已有参数名检测 (同一 cmdargs 块内)
+        const defs = HEADER_BLOCKS.cmdargsParams!;
+        for (const d of defs) {
+            if (d.name === name) {
+                this.headerError(t('param_dup', { name }), lineNo + 1, reportAs);
+                return false;
+            }
+            if (shortName !== null && (d.shortName === shortName || d.name === shortName)) {
+                this.headerError(t('param_short_conflict', { short: shortName }), lineNo + 1, reportAs);
+                return false;
+            }
+        }
+
+        defs.push({ name, type, defaultValue, shortName });
+        return true;
+    }
+
+    // param 默认值 → 值 (parseParamDef 已保证字面量; 入口 bindCmdargs 与模块加载期共用, §5.2.2)
+    private static cmdargsDefaultValue(d: CmdargParamDef): any {
+        if (d.type === 'bool') return d.defaultValue === 'true';
+        if (d.type === 'string') return d.defaultValue.slice(1, -1);
+        // 数值字面量解析 (0x/0b/0o/十进制, 与 parseValue 一致)
+        const s = d.defaultValue;
+        if (/^0[xX]/.test(s)) return parseInt(s, 16);
+        if (/^0[bB]/.test(s)) return parseInt(s.slice(2), 2);
+        if (/^0[oO]/.test(s)) return parseInt(s.slice(2), 8);
+        return Number(s);
+    }
+
+    // param 的 NS 数据类型 (§5.2.3: string/bool/cast.int/cast.float)
+    private static cmdargsTypeOf(d: CmdargParamDef): DataType {
+        return d.type === 'string' ? DataType.STRING
+            : d.type === 'bool' ? DataType.BOOL
+            : d.type === 'cast.int' ? DataType.INT : DataType.FLOAT;
+    }
+
+    // cmdargs 绑定 (设计稿 §5.2): 入口文件执行前把 CMDARGS_ARGV 按声明解析, 绑定为只读全局 (param 变量只读, 与 const 一致 §5.2.3)。
+    // 只对入口文件调用 (run() 中 loadModules 之前); 非入口文件 (模块) 不调用 → 不生效, 参数保持默认值 (§5.2.2)。
+    // 匹配规则 (§5.2.4/§5.2.7): 先处理带横杠的有名参数 (--名字 / -短名), 再把剩余未赋值 param 按声明顺序重排,
+    // 最后把不带横杠的裸参数按重排顺序填充; bool 为开关 (传入即翻转默认值, 不吞后面的值), string/cast 消费紧邻一个值;
+    // 未知有名参数报错 (基本是拼写错误), 脚本参数区内孤立 -- 报错, 匿名参数比声明多则丢弃并警告。
+    // 返回 false = 绑定错误 (已报告), 调用方终止执行 (运行前错误, 程序不执行)。
+    private static bindCmdargs(): boolean {
+        const defs = HEADER_BLOCKS.cmdargsParams;
+        if (defs === null || defs.length === 0) return true;
+        const byName: { [k: string]: CmdargParamDef } = {};
+        const byShort: { [k: string]: CmdargParamDef } = {};
+        for (const d of defs) {
+            byName[d.name] = d;
+            if (d.shortName !== null) byShort[d.shortName] = d;
+        }
+        // 默认值 → 值 (parseParamDef 已保证字面量)
+        const defaultOf = (d: CmdargParamDef): any => Interpreter.cmdargsDefaultValue(d);
+        // CLI 值 → 值: string 原样, cast 按 int()/float() 语义转换 (§5.2.5); 转换失败 (NaN) 报错并标注变量名
+        const convertCli = (d: CmdargParamDef, raw: string): any | null => {
+            if (d.type === 'string') return raw;
+            const num = d.type === 'cast.int' ? parseInt(raw, 10) : parseFloat(raw);
+            if (isNaN(num)) {
+                reportError(ExceptionType.TYPE_ERROR, t('cmdargs_convert_fail', { name: d.name, value: raw }));
+                return null;
+            }
+            return num;
+        };
+
+        const assigned: { [name: string]: any } = {};
+        const anonValues: string[] = [];
+        // 第一步: 处理有名参数 + 收集匿名参数 (两步流程 §5.2.7)
+        for (let i = 0; i < CMDARGS_ARGV.length; i++) {
+            const tok = CMDARGS_ARGV[i];
+            if (tok === '--') {
+                // 脚本参数区内不允许孤立的 -- (分隔符由命令行层消费, §5.2.4)
+                reportError(ExceptionType.SYNTAX_ERROR, t('cmdargs_lone_separator'));
+                return false;
+            }
+            let d: CmdargParamDef | undefined;
+            if (tok.startsWith('--')) {
+                d = byName[tok.substring(2)];
+                if (d === undefined) { reportError(ExceptionType.SYNTAX_ERROR, t('cmdargs_unknown', { name: tok.substring(2) })); return false; }
+            } else if (tok.startsWith('-') && tok.length > 1) {
+                d = byShort[tok.substring(1)];
+                if (d === undefined) { reportError(ExceptionType.SYNTAX_ERROR, t('cmdargs_unknown_short', { short: tok.substring(1) })); return false; }
+            } else {
+                anonValues.push(tok);
+                continue;
+            }
+            if (d.type === 'bool') {
+                // bool 是开关: 传入即翻转默认值, 后面紧邻的东西不归它管 (§5.2.4/§5.2.7)
+                assigned[d.name] = d.defaultValue !== 'true';
+                continue;
+            }
+            // string / cast: 必须消费后面紧邻的一个值, 后面没值 (或遇孤立 --) 就报错 (§5.2.4)
+            if (i + 1 >= CMDARGS_ARGV.length || CMDARGS_ARGV[i + 1] === '--') {
+                reportError(ExceptionType.TYPE_ERROR, t('cmdargs_missing_value', { name: d.name }));
+                return false;
+            }
+            const cv = convertCli(d, CMDARGS_ARGV[++i]);
+            if (cv === null) return false;
+            assigned[d.name] = cv;
+        }
+        // 第二步: 剩余未赋值 param 按声明顺序重排, 匿名参数按序填充; 少则默认值, 多则丢弃并警告 (§5.2.4)
+        // bool 是开关不接收值: 匿名填充时跳过, 保持默认值 (有名参数已处理过翻转)
+        let anonIdx = 0;
+        for (const d of defs) {
+            if (assigned[d.name] !== undefined) continue;
+            if (d.type === 'bool') { assigned[d.name] = defaultOf(d); continue; }
+            if (anonIdx < anonValues.length) {
+                const cv = convertCli(d, anonValues[anonIdx++]);
+                if (cv === null) return false;
+                assigned[d.name] = cv;
+            } else {
+                assigned[d.name] = defaultOf(d);
+            }
+        }
+        for (; anonIdx < anonValues.length; anonIdx++) {
+            reportWarn(t('cmdargs_extra_anon', { value: anonValues[anonIdx] }));
+        }
+        // 绑定为只读全局 (param 变量只读, 程序内修改报错与 const 一致 §5.2.3)
+        for (const d of defs) {
+            ScopeManager.addVariable(d.name, assigned[d.name], Interpreter.cmdargsTypeOf(d), 0, -1, true, true);
+        }
+        return true;
     }
 
     // 扫描标签和函数定义
@@ -2048,6 +2724,388 @@ class Interpreter {
         debugLog(1, () => t('dbg_slot_table_built', { count: SLOT_DECLS.length }));
     }
 
+    // ===== M4 模块加载机制 (设计稿 §7) =====
+
+    // 模块定位 (设计稿 §7.3/§3.4): use 条目 → 幂等 key + loader 定位名 (name)。
+    // use xxx from yyy → key='yyy:xxx', name='yyy/xxx/xxx/xxx.ns' (包名=模块名=脚本名, §7.3);
+    // use inner x → key='inner:{包根相对路径}:x', name='{包根相对路径}/x/x.ns' (包根=当前文件路径上两级目录, §3.4)。
+    // inner 需校验包根 manifest (package 与包名一致) 与模块在 manifest.modules 中 (§3.4)。
+    // name 语义: 相对 MODULE_DIR 或绝对路径, 由 loader 负责解析; manifest 也走同一 loader (包根/manifest)。
+    // 失败 → reportModuleError 已报告, 返回 null。
+    static moduleLocate(use: { objName: string; source: string; pkg: string; isInner: boolean }, currentFile: string): { key: string; name: string } | null {
+        if (use.isInner) {
+            // 当前包根 = 当前文件路径上两级目录 (§3.4); 文件路径缺失 (无包) → inner 不可用
+            if (!currentFile) {
+                reportModuleError(t('module_inner_no_package'));
+                return null;
+            }
+            const pkgRoot = nsDirname(nsDirname(currentFile.replace(/\\/g, '/')));
+            if (!pkgRoot) {
+                reportModuleError(t('module_inner_no_package'));
+                return null;
+            }
+            // 校验包根: 包根目录须含 manifest 且 manifest.package == 包名 (§3.4); manifest 走同一 loader (包根/manifest)
+            const manifestText = Interpreter.readModuleSource(pkgRoot + '/manifest', false);
+            let manifestPkg = '';
+            let modules: string[] = [];
+            if (manifestText !== null) {
+                try {
+                    const m = JSON.parse(manifestText);
+                    if (m && typeof m === 'object') {
+                        manifestPkg = typeof m.package === 'string' ? m.package : '';
+                        if (Array.isArray(m.modules)) modules = m.modules.filter((x: any) => typeof x === 'string');
+                    }
+                } catch (e) { manifestPkg = ''; }
+            }
+            if (!manifestPkg) {
+                reportModuleError(t('module_inner_no_manifest', { path: modulePathDisplay(pkgRoot) }));
+                return null;
+            }
+            // 校验模块: x 须在 manifest.modules (包根下模块目录名集合, §3.4)
+            if (modules.indexOf(use.pkg) === -1) {
+                reportModuleError(t('module_inner_not_found', { name: use.pkg, path: modulePathDisplay(pkgRoot) }));
+                return null;
+            }
+            return { key: 'inner:' + pkgRoot + ':' + use.pkg, name: pkgRoot + '/' + use.pkg + '/' + use.pkg + '.ns' };
+        }
+        // 非 inner: 三层目录 {来源}/{包}/{模块}/{模块}.ns, 包名=模块名=脚本名 (§7.3)
+        const name = use.source + '/' + use.pkg + '/' + use.pkg + '/' + use.pkg + '.ns';
+        return { key: use.source + ':' + use.pkg, name };
+    }
+
+    // 读取模块源码 (源码缓存 + loader, 设计稿 §7.2 "每模块只读一次"; 缓存跨两阶段共享)。
+    // manifest 读取 (cache=false) 走同一 loader 但不进源码缓存 (与模块源码命名空间冲突, 避免误命中)。
+    // loader 缺失/加载失败 → 返回 null (不报告, 由调用方按语义报告)。
+    static readModuleSource(name: string, cache: boolean = true): string | null {
+        if (cache && MODULE_SOURCE_CACHE.hasOwnProperty(name)) return MODULE_SOURCE_CACHE[name];
+        if (MODULE_LOADER === null) return null;
+        let src: string | null = null;
+        try {
+            const r = MODULE_LOADER(name);
+            src = (typeof r === 'string') ? r : null;
+        } catch (e) {
+            src = null;
+        }
+        if (src === null) return null;
+        if (cache) MODULE_SOURCE_CACHE[name] = src;
+        return src;
+    }
+
+    // 阶段1: 依赖图构建与检查 (设计稿 §7.2) — 递归解析模块头部 use; 检查模块存在 (loader 可取得)、
+    // 无循环依赖 (visiting 链)、命名冲突 (同文件内 parseUseLine 已查, §2.2)。失败 → reportModuleError 已报告 + 返回 null。
+    static collectModuleGraph(
+        use: { objName: string; source: string; pkg: string; isInner: boolean },
+        visiting: string[],
+        currentFile: string,
+        collected: { [key: string]: ModuleDep }
+    ): ModuleDep | null {
+        const loc = Interpreter.moduleLocate(use, currentFile);
+        if (loc === null) return null;
+        const { key, name } = loc;
+        // 循环依赖检测: 当前递归链上已出现 → 输出环链 (模块名序列, §7.4 格式)
+        const cycIdx = visiting.indexOf(key);
+        if (cycIdx !== -1) {
+            const chain = visiting.slice(cycIdx).concat([key]).map(k => k.substring(k.lastIndexOf(':') + 1)).join(' -> ');
+            reportModuleError(t('module_cycle', { chain }));
+            return null;
+        }
+        if (collected[key]) return collected[key];
+        // 读模块源码 (阶段1 全量读入缓存, 阶段2 复用)
+        const sourceCode = Interpreter.readModuleSource(name);
+        if (sourceCode === null) {
+            reportModuleError(t('module_not_found', { name: use.pkg, path: modulePathDisplay(name) }));
+            return null;
+        }
+        // M6 来源标识 (设计稿 §3): inner 模块身份 = 当前包根上两级目录名 (来源/包名) + 模块名。
+        // 非 inner: 来源 = use.source, 包名 = 模块名 (平铺三层目录 §7.3); 二者身份字段一致。
+        // inner: 包根 = 模块定位名上两级目录 (moduleLocate 已保证 name = 包根/模块/模块.ns);
+        // 来源 = 包根上级目录名, 包名 = 包根目录名, 模块名 = use.pkg (设计稿示例 `[模块 custom/mylib/helpers]`)。
+        let depSource = use.source;
+        let depPkg = use.pkg;
+        if (use.isInner) {
+            const pkgRoot = nsDirname(nsDirname(name));
+            const srcRoot = nsDirname(pkgRoot);
+            depPkg = pkgRoot.substring(pkgRoot.lastIndexOf('/') + 1);
+            depSource = srcRoot.substring(srcRoot.lastIndexOf('/') + 1);
+        }
+        const dep: ModuleDep = { key, name, source: depSource, pkg: depPkg, module: use.pkg, objName: use.objName, isInner: use.isInner, deps: [], sourceCode };
+        collected[key] = dep;
+        // 解析模块头部 (临时切换全局程序状态到模块源码; 头部 use 条目复制后恢复; 语法错误 → headerError 报告)
+        const savedLines = programLines;
+        const savedLineInfo = LINE_INFO;
+        const savedHeader = HEADER_BLOCKS;
+        const savedCurMod = CURRENT_MODULE;
+        const savedCurFile = CURRENT_FILE_PATH;
+        programLines = sourceCode.split('\n');
+        LINE_INFO = programLines.map(raw => {
+            const content = raw.trim();
+            return { content, isEmpty: content === '', isComment: content.indexOf('//') === 0, isEndTag: content === ':end', stmt: Interpreter.classifyLine(content) };
+        });
+        HEADER_BLOCKS = { modulesRange: null, cmdargsRange: null, autoinitRange: null, cmdargsParams: null, uses: [] };
+        CURRENT_MODULE = null;
+        CURRENT_FILE_PATH = name;
+        const ok = Interpreter.parseHeaderBlocks(dep.module);
+        const childUses = HEADER_BLOCKS.uses.slice();
+        programLines = savedLines;
+        LINE_INFO = savedLineInfo;
+        HEADER_BLOCKS = savedHeader;
+        CURRENT_MODULE = savedCurMod;
+        CURRENT_FILE_PATH = savedCurFile;
+        if (!ok) return null;
+        // 递归收集子依赖 (子模块的当前文件定位 = 本模块定位名, inner 定位基于它)
+        visiting.push(key);
+        for (const u of childUses) {
+            const child = Interpreter.collectModuleGraph(u, visiting, name, collected);
+            if (child === null) { visiting.pop(); return null; }
+            dep.deps.push(child);
+        }
+        visiting.pop();
+        return dep;
+    }
+
+    // 阶段2: 按依赖顺序加载 (先依赖后自身, 设计稿 §7.2) — 幂等 (MODULE_REGISTRY, 跨文件实例唯一 §2.2)
+    static loadModuleDeep(dep: ModuleDep): ModuleNamespace | null {
+        if (MODULE_REGISTRY[dep.key]) return MODULE_REGISTRY[dep.key];
+        // 先加载依赖 (依赖命名空间建立后才能被本模块 uses 挂载)
+        const children: { [objName: string]: ModuleNamespace } = {};
+        for (const c of dep.deps) {
+            const cns = Interpreter.loadModuleDeep(c);
+            if (cns === null) return null;
+            children[c.objName] = cns;
+        }
+        const ns = Interpreter.loadModuleFile(dep, children);
+        if (ns === null) return null;
+        MODULE_REGISTRY[dep.key] = ns;
+        return ns;
+    }
+
+    // 阶段2: 编译并加载单个模块文件 — 建命名空间 (扫描函数/槽位表)、执行 global 声明建立模块私有全局、
+    // 执行 autoinit (模块被 use 时只执行 autoinit 区间, §3.3)。模块源码保留在 ns.sourceLines:
+    // 运行期模块上下文切换按行指针语义工作 (pushModuleContext 用 programLines = ns.sourceLines),
+    // 且 NSVM 全量编译失败整体回退行解释器时, 模块函数体须按源码行执行 (行解释器双管道);
+    // 故不执行设计稿 §7.5 注意点② 的"加载后释放源码" — 保留换取上下文切换与回退路径的完整性
+    // (设计稿 §7.1 自述模块文件 KB 级, 内存代价可忽略; NSVM 化后函数体确实走编译产物, 见 ns.funcBlocks)。
+    static loadModuleFile(dep: ModuleDep, children: { [objName: string]: ModuleNamespace }): ModuleNamespace | null {
+        const ns: ModuleNamespace = {
+            source: dep.source, pkg: dep.pkg, module: dep.module, objName: dep.objName,
+            funcs: {}, funcBlocks: new Map(), globals: {}, uses: children, returnValues: {},
+            sourceLines: [], lineInfo: [], tags: {}, slotDecls: [], slotByName: new Map(), slotIndex: {},
+            autoinitRange: null, globalLines: []
+        };
+        ns.sourceLines = dep.sourceCode.split('\n');
+        ns.lineInfo = ns.sourceLines.map(raw => {
+            const content = raw.trim();
+            return { content, isEmpty: content === '', isComment: content.indexOf('//') === 0, isEndTag: content === ':end', stmt: Interpreter.classifyLine(content) };
+        });
+        // 模块半加载上下文: 把全局执行状态切到模块源码 (与执行期 pushModuleContext 不同 — 一次性加载状态;
+        // scanTagsAndFunctions/buildSlotSymbolTable/executeGlobal 均操作全局变量, 加载期切到模块的再搬回命名空间)
+        const saved = {
+            programLines, LINE_INFO, GLOBAL_VARS, TAGS, FUNCTIONS,
+            SLOT_DECLS, SLOT_BY_NAME, SLOT_INDEX,
+            HEADER_BLOCKS, CURRENT_MODULE, CURRENT_FILE_PATH, SKIP_LINES
+        };
+        const restore = (): void => {
+            programLines = saved.programLines;
+            LINE_INFO = saved.LINE_INFO;
+            GLOBAL_VARS = saved.GLOBAL_VARS;
+            TAGS = saved.TAGS;
+            FUNCTIONS = saved.FUNCTIONS;
+            SLOT_DECLS = saved.SLOT_DECLS;
+            SLOT_BY_NAME = saved.SLOT_BY_NAME;
+            SLOT_INDEX = saved.SLOT_INDEX;
+            HEADER_BLOCKS = saved.HEADER_BLOCKS;
+            CURRENT_MODULE = saved.CURRENT_MODULE;
+            CURRENT_FILE_PATH = saved.CURRENT_FILE_PATH;
+            SKIP_LINES = saved.SKIP_LINES;
+            ExpressionEvaluator.invalidateSlotFrameCache();
+        };
+        programLines = ns.sourceLines;
+        LINE_INFO = ns.lineInfo;
+        GLOBAL_VARS = ns.globals;
+        TAGS = {};
+        FUNCTIONS = {};
+        SLOT_DECLS = [];
+        SLOT_BY_NAME = new Map();
+        SLOT_INDEX = {};
+        HEADER_BLOCKS = { modulesRange: null, cmdargsRange: null, autoinitRange: null, cmdargsParams: null, uses: [] };
+        CURRENT_MODULE = null;
+        CURRENT_FILE_PATH = dep.name;
+        SKIP_LINES = new Set();
+
+        // 模块头部 (阶段1 已检查; 此处重复解析以取得 autoinitRange, 语法错误已在阶段1报告过)
+        Interpreter.parseHeaderBlocks(ns.module);
+        ns.autoinitRange = HEADER_BLOCKS.autoinitRange;
+
+        // 编译: 扫描标签与函数定义 → ns.funcs/ns.tags (模块符号挂模块命名空间, 不进全局函数表 §2.2)
+        Interpreter.scanTagsAndFunctions();
+        ns.funcs = FUNCTIONS;
+        ns.tags = TAGS;
+
+        // 槽位符号表 (模块局部变量静态登记, 函数体上下文切换用)
+        Interpreter.buildSlotSymbolTable();
+        ns.slotDecls = SLOT_DECLS;
+        ns.slotByName = SLOT_BY_NAME;
+        ns.slotIndex = SLOT_INDEX;
+
+        // cmdargs param (模块被 use 时 cmdargs 不生效 §5.2.2): 不接收命令行值, 但按默认值绑定为模块私有只读全局,
+        // autoinit/函数内可直接引用; 参数保持默认值 (作入口直接执行时由 bindCmdargs 覆盖为命令行值或默认值)
+        if (HEADER_BLOCKS.cmdargsParams !== null) {
+            for (const p of HEADER_BLOCKS.cmdargsParams) {
+                ScopeManager.addVariable(p.name, Interpreter.cmdargsDefaultValue(p), Interpreter.cmdargsTypeOf(p), 0, -1, true, true);
+            }
+        }
+
+        // 执行 global 声明 (加载期全文件统一建立模块私有全局, 与书写位置无关 §3.3; autoinit 可直接引用正文 global)
+        for (let i = 0; i < ns.sourceLines.length; i++) {
+            if (ns.lineInfo[i].stmt.type === StmtType.GLOBAL) {
+                currentLinePointer = i;
+                Interpreter.executeCommand(ns.lineInfo[i].stmt, ns.lineInfo[i].content);
+                ns.globalLines.push(i);
+            }
+        }
+
+        // autoinit: 模块被 use 时只执行 autoinit 区间 (§3.3); 入口文件的 autoinit 由主程序执行期自然执行 (头部区位置)
+        Interpreter.executeModuleAutoinit(ns);
+
+        restore();
+        return ns;
+    }
+
+    // 模块 autoinit 执行 (模块被 use 时, §3.3): 在模块上下文内执行 autoinit 区间 (调用时 programLines = ns.sourceLines)。
+    // 区间边界控制: 当前行在区间内放行; 处于函数帧 (autoinit 内 call 函数, 函数体在区间外) 也放行;
+    // 越出区间且非函数帧 → 结束 autoinit 阶段。跳过 global 声明行 (加载期已统一建立)。
+    // 未捕获异常 → 输出错误 + 终止执行 (autoinit 是模块初始化, 失败即模块不可用; 加载期错误整体终止 §7.4)。
+    static executeModuleAutoinit(ns: ModuleNamespace): void {
+        const ar = ns.autoinitRange;
+        if (ar === null) return;
+        // M6: autoinit 加载期执行 CURRENT_MODULE 为 null (不启用查找链切换), 输出/错误来源标识走 MODULE_OUTPUT_CTX
+        const savedOutputCtx = MODULE_OUTPUT_CTX;
+        MODULE_OUTPUT_CTX = ns;
+        const savedMultiline = IN_MULTILINE_COMMENT;
+        const inBounds = (): boolean => {
+            if (currentLinePointer < 0 || currentLinePointer >= programLines.length) return false;
+            if (currentLinePointer >= ar.start && currentLinePointer <= ar.end) return true;
+            for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                if (CONTROL_FLOW_STACK[i].type === 'function') return true;
+            }
+            return false;
+        };
+        currentLinePointer = ar.start;
+        while (inBounds()) {
+            try {
+                const info = LINE_INFO[currentLinePointer];
+                const line = info.content;
+                if (line === '///') { IN_MULTILINE_COMMENT = !IN_MULTILINE_COMMENT; currentLinePointer++; continue; }
+                if (IN_MULTILINE_COMMENT) { currentLinePointer++; continue; }
+                if (info.isEmpty || info.isComment) { currentLinePointer++; continue; }
+                // global 声明行: 加载期已执行 (全文件统一建立), autoinit 阶段跳过防重复声明
+                if (info.stmt.type === StmtType.GLOBAL) { currentLinePointer++; continue; }
+                if (line.indexOf(':') === 0) {
+                    if (line.match(/^:[a-zA-Z0-9_]+\s*\(.*\)/)) {
+                        let endLine = -1;
+                        for (let j = currentLinePointer + 1; j < programLines.length; j++) {
+                            if (LINE_INFO[j].isEndTag) { endLine = j; break; }
+                        }
+                        if (endLine !== -1) { currentLinePointer = endLine + 1; continue; }
+                    } else if (info.isEndTag) {
+                        Interpreter.executeCommand(info.stmt, line);
+                    }
+                    currentLinePointer++;
+                    continue;
+                }
+                Interpreter.executeCommand(info.stmt, line);
+                currentLinePointer++;
+            } catch (error) {
+                if (isInputSuspend(error)) {
+                    // 加载期无交互输入通道 (input 挂起无法交还宿主): 模块初始化失败
+                    reportModuleError(t('module_load_error', { name: ns.module, err: t('input_in_autoinit') }));
+                    MODULE_LOAD_FAILED = true;
+                    CONTROL_FLOW_STACK = [];
+                    IN_MULTILINE_COMMENT = savedMultiline;
+                    MODULE_OUTPUT_CTX = savedOutputCtx;
+                    return;
+                }
+                const exception = error as Exception;
+                if (exception.lineNumber === undefined) exception.lineNumber = currentLinePointer;
+                // autoinit 内可 try-catch 自己的错误 (与主程序一致)
+                let tryIdx = -1;
+                for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+                    if (CONTROL_FLOW_STACK[i].type === 'try') { tryIdx = i; break; }
+                }
+                if (tryIdx !== -1) {
+                    const tryFrame = CONTROL_FLOW_STACK[tryIdx] as { type: 'try', start: number };
+                    const catchLine = Interpreter.findCatchLine(tryFrame.start);
+                    if (catchLine !== -1) {
+                        for (let i = CONTROL_FLOW_STACK.length - 1; i > tryIdx; i--) {
+                            const f = CONTROL_FLOW_STACK[i];
+                            if (f.type === 'function' && f.savedCtx) {
+                                popModuleContext(f.savedCtx);
+                                delete MODULE_FRAME_MODULES[f.frameId];
+                            }
+                        }
+                        CONTROL_FLOW_STACK.length = tryIdx + 1;
+                        let excIdx = -1;
+                        for (let i = EXCEPTION_STACK.length - 1; i >= 0; i--) {
+                            if (EXCEPTION_STACK[i].type === ExceptionType.TRY_BLOCK && EXCEPTION_STACK[i].lineNumber === tryFrame.start) {
+                                excIdx = i; break;
+                            }
+                        }
+                        if (excIdx !== -1) EXCEPTION_STACK.length = excIdx;
+                        PENDING_EXCEPTION = exception;
+                        currentLinePointer = catchLine;
+                        continue;
+                    }
+                }
+                // 未捕获: 终止 autoinit (模块初始化失败 → 整体终止)
+                if (Object.values(ExceptionType).includes(exception.type)) {
+                    reportError(exception.type, exception.message);
+                } else {
+                    const nativeMsg = error instanceof Error ? error.message : String(error);
+                    console.error(moduleSourcePrefix() + t('internal_error', { line: currentLinePointer + 1, message: nativeMsg }));
+                    console.error(moduleSourcePrefix() + t('internal_error_hint'));
+                }
+                CONTROL_FLOW_STACK = [];
+                EXCEPTION_STACK = [];
+                PENDING_EXCEPTION = null;
+                IN_MULTILINE_COMMENT = savedMultiline;
+                MODULE_OUTPUT_CTX = savedOutputCtx;
+                MODULE_LOAD_FAILED = true;
+                return;
+            }
+        }
+        IN_MULTILINE_COMMENT = savedMultiline;
+        MODULE_OUTPUT_CTX = savedOutputCtx;
+    }
+
+    // M4 加载入口 (两阶段, 设计稿 §7.2): 阶段1 依赖图构建与检查 → 阶段2 按依赖顺序批量加载 + 挂载主程序对象名表。
+    // 幂等: MODULE_SYSTEM_READY (同程序防重复) / MODULE_REGISTRY + 源码缓存 (跨程序/跨文件 §2.2)。
+    // 加载期错误 (模块不存在/循环/语法错误) → MODULE_LOAD_FAILED = true, 主程序整体不执行 (§7.4 不可 try-catch)。
+    static loadModules(): void {
+        if (MODULE_SYSTEM_READY || MODULE_LOAD_FAILED) return;
+        if (HEADER_BLOCKS.uses.length === 0) return;
+        if (MODULE_LOADER === null) {
+            reportModuleError(t('module_loader_missing'));
+            MODULE_LOAD_FAILED = true;
+            return;
+        }
+        // 阶段1: 依赖图构建与检查 (递归读模块头部解析 use; 存在性/循环检查; 源码缓存)
+        const collected: { [key: string]: ModuleDep } = {};
+        const roots: ModuleDep[] = [];
+        for (const use of HEADER_BLOCKS.uses) {
+            const dep = Interpreter.collectModuleGraph(use, [], CURRENT_FILE_PATH, collected);
+            if (dep === null) { MODULE_LOAD_FAILED = true; return; }
+            roots.push(dep);
+        }
+        // 阶段2: 按依赖顺序 (先依赖后自身) 加载并挂载主程序对象名表 (PROGRAM_MODULE_OBJS)
+        for (const dep of roots) {
+            const ns = Interpreter.loadModuleDeep(dep);
+            if (ns === null) { MODULE_LOAD_FAILED = true; return; }
+            PROGRAM_MODULE_OBJS[dep.objName] = ns;
+        }
+        MODULE_SYSTEM_READY = true;
+    }
+
+
 
     // 辅助方法: 将字符串类型转换为DataType枚举 (阶段3 NSVM 复用)
     static getDataTypeFromString(typeStr: string): DataType {
@@ -2222,6 +3280,8 @@ class Interpreter {
 
     // 执行程序
     static run(): void {
+        // 入口文件头部语法错误 (loadProgram 期置标志): 已报告, 整体终止, 程序不执行 (与绑定/加载期错误同级)
+        if (HEADER_PARSE_FAILED) return;
         if (!INPUT_SUSPENDED) {
             // 首次执行: 重置执行现场
             currentLinePointer = 0;
@@ -2244,6 +3304,25 @@ class Interpreter {
                         debugLog(1, () => t('dbg_doc_debug_lower', { docLevel: debugLevel, extLevel: DEBUG_LEVEL }));
                     }
                     // 跳过debug行
+                    currentLinePointer = 1;
+                }
+            }
+
+            // cmdargs 绑定 (设计稿 §5.2): 入口文件执行前把命令行参数按声明解析为只读全局, 先于 autoinit 与正文执行 (§5.2.2);
+            // 只对入口生效 (模块不调用); 绑定错误 (未知参数/缺值/转换失败/孤立 --) → 已报告, 整体终止, 程序不执行
+            if (!Interpreter.bindCmdargs()) return;
+
+            // M4 模块加载 (两阶段, 设计稿 §7.2): 构建依赖图 → 按依赖序加载模块 + 执行模块 autoinit;
+            // 加载期错误 (模块不存在/循环/语法错误) 不可 try-catch (§7.4), 报错后整体终止执行
+            Interpreter.loadModules();
+            if (MODULE_LOAD_FAILED) return;
+            // 模块加载执行 autoinit 会改动 currentLinePointer (模块源码行空间), 恢复主程序执行起点;
+            // 无模块时 loadModules 不改动行指针, 保留上方 debug 首行跳过结果 (行解释器回退路径不得把
+            // `debug N` 首行当表达式执行)
+            if (HEADER_BLOCKS.uses.length > 0) {
+                currentLinePointer = 0;
+                // 重新应用 debug 首行跳过 (与上方判定一致; 模块加载后行指针已重置, 需重新计算起点)
+                if (!CLI_DEBUG_SET && programLines.length > 0 && programLines[0].trim().startsWith('debug ')) {
                     currentLinePointer = 1;
                 }
             }
@@ -2341,7 +3420,16 @@ class Interpreter {
                     // 从 try 起始行向后查找对应的 catch 行 (跳过嵌套 try)
                     const catchLine = Interpreter.findCatchLine(tryFrame.start);
                     if (catchLine !== -1) {
-                        // 弹出 try 帧之上的所有控制流帧 (函数帧/循环帧/if帧等), 保留 try 帧本身
+                        // 弹出 try 帧之上的所有控制流帧 (函数帧/循环帧/if帧等), 保留 try 帧本身。
+                        // 模块函数帧 (savedCtx 非空) 一并展开: 从内到外恢复被弹模块帧的执行上下文,
+                        // 使后续 findCatchLine/executeCatch 在 try 所属上下文中工作 (模块函数内错误可被主程序 try-catch 捕获, 确认记录 #19)
+                        for (let i = CONTROL_FLOW_STACK.length - 1; i > tryIdx; i--) {
+                            const f = CONTROL_FLOW_STACK[i];
+                            if (f.type === 'function' && f.savedCtx) {
+                                popModuleContext(f.savedCtx);
+                                delete MODULE_FRAME_MODULES[f.frameId];
+                            }
+                        }
                         CONTROL_FLOW_STACK.length = tryIdx + 1;
                         // 同步清理异常栈中该 try 块之上的标记
                         let excIdx = -1;
@@ -2392,7 +3480,8 @@ class Interpreter {
         'global', 'local', 'const', 'call', 'return', 'jump', 'print',
         'if', 'else', 'endif', 'while', 'endwhl', 'for', 'endfor',
         'break', 'continue', 'try', 'catch', 'endtry', 'assert', 'endasrt',
-        'switch', 'case', 'default', 'endswc', 'purge', ':end'
+        'switch', 'case', 'default', 'endswc', 'purge', ':end',
+        'modules', 'endmodules', 'use', 'cmdargs', 'endcmdargs', 'param', 'autoinit', 'endautoinit'
     ];
     // 关键字集合: Set.has O(1), 替代每行执行时对数组的线性 indexOf (行分发热路径)
     private static readonly KEYWORD_SET: Set<string> = new Set(Interpreter.KEYWORD_COMMANDS);
@@ -2443,6 +3532,15 @@ class Interpreter {
             case 'endswc': return { type: StmtType.ENDSWC, params: '' };
             case 'purge': return { type: StmtType.PURGE, params };
             case ':end': return { type: StmtType.END_TAG, params: '' };
+            // 模块系统头部区行 (设计稿 §2.3): 加载期处理, 执行期跳过
+            case 'modules': return { type: StmtType.MODULES, params: '' };
+            case 'endmodules': return { type: StmtType.ENDMODULES, params: '' };
+            case 'use': return { type: StmtType.USE, params };
+            case 'cmdargs': return { type: StmtType.CMDARGS, params: '' };
+            case 'endcmdargs': return { type: StmtType.ENDCMDARGS, params: '' };
+            case 'param': return { type: StmtType.PARAM, params };
+            case 'autoinit': return { type: StmtType.AUTOINIT, params: '' };
+            case 'endautoinit': return { type: StmtType.ENDAUTOINIT, params: '' };
             case 'const':
                 // const + global/local → 语法错误 (与旧 executeCommand 前置检查一致); 其他 const 前缀行 → OP (executeOperation 整行)
                 if (parts.length > 1 && (parts[1].toLowerCase() === 'global' || parts[1].toLowerCase() === 'local')) {
@@ -2541,6 +3639,16 @@ class Interpreter {
                 return;
             case StmtType.END_TAG:
                 Interpreter.executeFunctionEndTag();
+                return;
+            // 模块系统头部区行: 加载期已处理 (use 由模块加载器消费, cmdargs 由入口 bindCmdargs 消费), 执行期跳过
+            case StmtType.MODULES:
+            case StmtType.ENDMODULES:
+            case StmtType.USE:
+            case StmtType.CMDARGS:
+            case StmtType.ENDCMDARGS:
+            case StmtType.PARAM:
+            case StmtType.AUTOINIT:
+            case StmtType.ENDAUTOINIT:
                 return;
             case StmtType.CONST_PREFIX_ERROR:
                 reportError(ExceptionType.SYNTAX_ERROR, t('var_decl_global_local_format'));
@@ -2725,6 +3833,29 @@ class Interpreter {
     }
 
     // 执行函数调用
+    // 调用目标解析 (支持点分模块函数, 设计稿 §5): 返回 { funcInfo, ns } | null
+    // ns 非空 = 模块函数 (目标挂模块命名空间); 模块上下文 (CURRENT_MODULE) 内查找链: 模块内函数 → 本文件 use 的模块
+    static resolveFunction(funcName: string): { funcInfo: FunctionInfo, ns: ModuleNamespace | null } | null {
+        const dotIdx = funcName.indexOf('.');
+        if (dotIdx === -1) {
+            // 无点: 模块上下文内查当前模块的函数 (主程序函数表对模块不可见, 黑盒); 主程序查 FUNCTIONS
+            if (CURRENT_MODULE) {
+                const fi = CURRENT_MODULE.funcs[funcName];
+                return fi ? { funcInfo: fi, ns: CURRENT_MODULE } : null;
+            }
+            const fi = FUNCTIONS[funcName];
+            return fi ? { funcInfo: fi, ns: null } : null;
+        }
+        // 点分: 对象名表 (模块上下文 = 本文件 uses; 主程序 = PROGRAM_MODULE_OBJS)
+        const objName = funcName.substring(0, dotIdx);
+        const member = funcName.substring(dotIdx + 1);
+        const objTable = CURRENT_MODULE ? CURRENT_MODULE.uses : PROGRAM_MODULE_OBJS;
+        const ns = objTable[objName];
+        if (!ns) return null;
+        const fi = ns.funcs[member];
+        return fi ? { funcInfo: fi, ns } : null;
+    }
+
     static executeCall(params: string): void {
         debugLog(1, () => t('dbg_start_func_call', { params }));
         // 匹配格式: 函数名(参数1, 参数2, ...) -> 结果变量 或 函数名(参数1, 参数2, ...)
@@ -2733,8 +3864,8 @@ class Interpreter {
         let argsStr: string;
         let resultVar: string | undefined;
         if (params.indexOf('->') !== -1) {
-            // 点分函数名 (模块函数 xxx.func) 待模块系统实现时引入
-            const matchWithResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
+            // 点分函数名 (模块函数 xxx.func) 自模块系统 M1 起支持
+            const matchWithResult = params.match(/^([a-zA-Z0-9_.]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
             if (matchWithResult) {
                 funcName = matchWithResult[1];
                 argsStr = matchWithResult[2];
@@ -2744,7 +3875,7 @@ class Interpreter {
                 return;
             }
         } else {
-            const matchWithoutResult = params.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
+            const matchWithoutResult = params.match(/^([a-zA-Z0-9_.]+)\((.*)\)$/);
             if (matchWithoutResult) {
                 funcName = matchWithoutResult[1];
                 argsStr = matchWithoutResult[2];
@@ -2755,7 +3886,10 @@ class Interpreter {
             }
         }
 
-        if (!FUNCTIONS[funcName]) {
+        // 函数查找 (设计稿 §5 两跳查找链): 点分名 = 模块函数 (查模块命名空间);
+        // 无点名: 模块上下文 (CURRENT_MODULE) 查当前模块函数, 主程序查 FUNCTIONS
+        const resolved = Interpreter.resolveFunction(funcName);
+        if (!resolved) {
             // 函数未定义: 抛引用错误 (可被try-catch捕获)
             throw {
                 type: ExceptionType.REFERENCE_ERROR,
@@ -2764,7 +3898,7 @@ class Interpreter {
             } as Exception;
         }
 
-        const funcInfo = FUNCTIONS[funcName];
+        const funcInfo = resolved.funcInfo;
         debugLog(2, () => t('dbg_func_info'), funcInfo);
 
         // 检查返回值变量
@@ -2992,9 +4126,11 @@ class Interpreter {
         // 设置currentLinePointer为函数体开始行, 准备执行函数
         // 函数体开始行是函数定义行后的第一行非标签行
         let functionBodyStartLine = funcInfo.startLine + 1;
-        // 跳过可能存在的标签行或其他非执行行
+        // 跳过可能存在的标签行或其他非执行行;
+        // 模块函数: startLine/endLine 属模块源码行空间, 扫描须用模块源码 (主程序 programLines 行号空间不同, 会越界)
+        const scanLines = resolved.ns ? resolved.ns.sourceLines : programLines;
         while (functionBodyStartLine < funcInfo.endLine) {
-            const checkLine = programLines[functionBodyStartLine].trim();
+            const checkLine = scanLines[functionBodyStartLine].trim();
             // 如果是标签行或空行, 继续下一行
             if (checkLine === '' || checkLine.indexOf(':') === 0) {
                 functionBodyStartLine++;
@@ -3062,7 +4198,15 @@ class Interpreter {
         debugLog(2, () => t('dbg_func_scope_details', { funcName }));
         debugLog(2, () => t('dbg_return_var_scope', { name: returnVarName, scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
         debugLog(2, () => t('dbg_param_scope', { scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
-        CONTROL_FLOW_STACK.push({
+        // 模块函数: 切换执行上下文到模块命名空间 (programLines/LINE_INFO/GLOBAL_VARS/TAGS/槽位表/CURRENT_MODULE),
+        // 返回时由 executeReturn/executeFunctionEndTag 恢复调用方上下文
+        let savedCtx: ModuleContext | null = null;
+        if (resolved.ns) {
+            savedCtx = pushModuleContext(resolved.ns);
+            MODULE_FRAME_MODULES[frameId] = resolved.ns;
+        }
+        // module/savedCtx 仅模块函数帧设置, 普通函数帧不设 — 调试输出 (CONTROL_FLOW_STACK 序列化) 逐字节保持基线
+        const cf: any = {
             type: 'function',
             funcName: funcInfo.name,
             startLine: funcInfo.startLine,
@@ -3071,7 +4215,12 @@ class Interpreter {
             returnVarName: resultVar,
             frameId: frameId,
             frameVarStart: callVarStart
-        });
+        };
+        if (resolved.ns) {
+            cf.module = resolved.ns;
+            cf.savedCtx = savedCtx;
+        }
+        CONTROL_FLOW_STACK.push(cf);
         debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
     }
 
@@ -3569,7 +4718,8 @@ class Interpreter {
                         return;
                     }
                 }
-                const funcInfo = FUNCTIONS[block.funcName];
+                // 模块函数: funcInfo 从所属模块函数表取 (主程序 FUNCTIONS 不含模块函数)
+                const funcInfo = block.module ? block.module.funcs[block.funcName] : FUNCTIONS[block.funcName];
 
                 // 规则: return 只能返回函数声明的返回变量
                 const defReturnVar = ScopeManager.getReturnVarName(funcInfo);
@@ -3608,17 +4758,19 @@ class Interpreter {
                 }
                 if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_return_from_var', { value: returnValue }));
 
-                // 将返回值存储到RETURN_VALUES池中并做好标记
-                if (!RETURN_VALUES.hasOwnProperty(block.funcName)) {
-                    RETURN_VALUES[block.funcName] = {};
+                // 将返回值存储到返回值池: 模块函数 → 模块命名空间私有池 (跨模块同名函数返回值隔离);
+                // 主程序函数 → RETURN_VALUES
+                const returnPool = block.module ? block.module.returnValues : RETURN_VALUES;
+                if (!returnPool.hasOwnProperty(block.funcName)) {
+                    returnPool[block.funcName] = {};
                 }
                 if (returnValueStr) {
                     // 优先存储 return 语句中的变量名
-                    RETURN_VALUES[block.funcName][returnValueStr] = returnValue;
+                    returnPool[block.funcName][returnValueStr] = returnValue;
                     // 同时存储函数定义中的返回值变量名（两者可能不同）
                     const defReturnVar = ScopeManager.getReturnVarName(funcInfo);
                     if (defReturnVar && defReturnVar !== returnValueStr) {
-                        RETURN_VALUES[block.funcName][defReturnVar] = returnValue;
+                        returnPool[block.funcName][defReturnVar] = returnValue;
                     }
                 } else {
                     reportError(ExceptionType.UNKNOWN_ERROR, t('return_value_name_mismatch'));
@@ -3626,7 +4778,7 @@ class Interpreter {
                 }
                 if (DEBUG_LEVEL >= 2) {
                     debugLog(2, () => t('dbg_store_return', { funcName: block.funcName, returnValueStr, returnValue }));
-                    debugLog(2, () => t('dbg_return_pool'), RETURN_VALUES);
+                    debugLog(2, () => t('dbg_return_pool'), returnPool);
                 }
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
@@ -3637,10 +4789,18 @@ class Interpreter {
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长 (内存 + 帧缓存失效)
                 delete SLOT_INDEX[String(block.frameId)];
                 if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_local_vars_after_cleanup'), LOCAL_VARS);
+                // 模块函数: 清理帧后恢复调用方执行上下文 (programLines/LINE_INFO/GLOBAL_VARS/TAGS/槽位表/CURRENT_MODULE),
+                // 返回值池引用 (block.module.returnValues) 在上下文切换后仍有效
+                if (block.savedCtx) {
+                    popModuleContext(block.savedCtx);
+                    delete MODULE_FRAME_MODULES[block.frameId];
+                    // 参数绑定发生在调用方上下文, 槽位条目登记在调用方 SLOT_INDEX (上方 delete 清理的是模块侧), 一并回收防泄漏
+                    delete SLOT_INDEX[String(block.frameId)];
+                }
                 // 再处理返回值赋值（此时局部变量已清理，返回变量安全添加）
                 // 注意: 用调用行 (block.callFrom) 而非当前 return 行作为结果变量作用域起点,
                 // 否则递归时 return 行晚于调用点, 结果变量会被误判为"未声明"而创建隐式重复变量, 遮蔽静态声明。
-                handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, block.callFrom);
+                handleReturnValueAssignment(block.funcName, funcInfo, block.returnVarName, block.callFrom, block.module);
                 if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_control_stack_cleaned'), CONTROL_FLOW_STACK);
                 currentLinePointer = block.callFrom;
                 break; // 停止遍历, 防止处理残留函数帧
@@ -3658,7 +4818,8 @@ class Interpreter {
         try {
             // 使用表达式求值器处理参数
             const value = Interpreter.evaluateExpression(params);
-            console.log(value);
+            // M6 来源标识: 模块执行上下文下的 print 强制在开头加 `[模块 {来源}/{包}/{模块}]` (设计稿 §3)
+            console.log(moduleSourcePrefix() + value);
         } catch (error) {
             // 自定义异常 (如ReferenceError) 重新抛出, 供try-catch捕获
             if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
@@ -5014,13 +6175,21 @@ class Interpreter {
             const block = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
             if (block.type === 'function') {
                 // 没有显式return到达函数结束标记，先弹出函数帧再处理
-                const funcInfo = FUNCTIONS[block.funcName];
+                // 模块函数: funcInfo 从所属模块函数表取 (主程序 FUNCTIONS 不含模块函数)
+                const funcInfo = block.module ? block.module.funcs[block.funcName] : FUNCTIONS[block.funcName];
                 // 清理本帧局部变量: 帧变量按 LIFO 连续位于 LOCAL_VARS 尾部, 截断到调用时位置即可 (O(1), 替代 O(n) filter)
                 // 注意: 无需重建槽位索引 — 函数帧ID单调递增不复用, 被清理帧的陈旧槽位条目不可达
                 LOCAL_VARS.length = block.frameVarStart;
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长
                 delete SLOT_INDEX[String(block.frameId)];
                 CONTROL_FLOW_STACK.pop();
+                // 模块函数: 弹出帧后恢复调用方执行上下文
+                if (block.savedCtx) {
+                    popModuleContext(block.savedCtx);
+                    delete MODULE_FRAME_MODULES[block.frameId];
+                    // 参数绑定发生在调用方上下文, 槽位条目登记在调用方 SLOT_INDEX (上方 delete 清理的是模块侧), 一并回收防泄漏
+                    delete SLOT_INDEX[String(block.frameId)];
+                }
                 if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_func_end_local_vars', { name: funcInfo.name }), LOCAL_VARS);
                 if (!ScopeManager.isVoidFunction(funcInfo)) {
                     reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', {name: funcInfo.name, type: funcInfo.returnType}));
@@ -6578,6 +7747,12 @@ class ExpressionEvaluator {
     private static slotFrameKey: string = '';
     private static slotFrameId: number = -1;
     private static slotFrameDepth: number = -1;
+    // 模块上下文切换时失效帧缓存: 缓存帧键 'f:func:startLine' 跨上下文可能误命中 (不同模块同名函数同定义行)
+    static invalidateSlotFrameCache(): void {
+        ExpressionEvaluator.slotFrameKey = '';
+        ExpressionEvaluator.slotFrameId = -1;
+        ExpressionEvaluator.slotFrameDepth = -1;
+    }
     // 槽位读取: 顶层帧固定 'top' 键; 函数帧从控制流栈查找匹配的调用帧 (递归时栈顶即最内层, 语义与"后入先匹配"一致)
     static readSlot(binding: { frameKey: string, slot: number }): Variable | null {
         // 帧缓存命中: 栈深一致时栈顶函数帧必为同一帧 (热路径最常见, 放在最前省掉 'top' 字符串比较)
@@ -6961,9 +8136,10 @@ class ExpressionEvaluator {
     }
 }
 
-// 添加Node.js环境下的文件系统模块导入
+// 添加Node.js环境下的文件系统模块导入 (模块默认 loader 用 fs/path 读 modules/, 设计稿 §7.1)
 if (typeof require !== 'undefined') {
     var fs = require('fs');
+    var path = require('path');
 }
 
 // 打印使用帮助 (双语, 跟随当前输出语言)
@@ -6977,6 +8153,7 @@ function printHelp(): void {
         console.log('  <filename>      NoethingScript script file to execute');
         console.log('  --debug N       Set debug level 0-3 (default 0)');
         console.log('  --lang en|zh    Set output language (default zh)');
+        console.log('  --modules DIR   Set module directory (default: modules)');
         console.log('  --help          Show this help message');
         console.log('  --version       Show version number');
     } else {
@@ -6988,6 +8165,8 @@ function printHelp(): void {
         console.log('  <文件名>        要执行的 NoethingScript 脚本文件');
         console.log('  --debug N       设置调试级别 0-3 (默认 0)');
         console.log('  --lang en|zh    设置输出语言 (默认 zh)');
+        console.log('  --modules DIR   设置模块目录 (默认: modules)');
+        console.log('  --              分隔符: 之后的参数全部归脚本 (入口文件 cmdargs 按声明接收)');
         console.log('  --help          显示本帮助');
         console.log('  --version       显示版本号');
     }
@@ -6999,17 +8178,32 @@ function main() {
     if (typeof process !== 'undefined' && process.argv) {
         // 获取命令行参数 (从 Node.js 进程的命令行参数中提取除前两个参数之外的所有参数)
         const args = process.argv.slice(2);
-        // 通用可选参数解析: 支持 --debug N 与 --lang en|zh, 顺序任意, 文件名必须是第一个非可选参数
+        // 通用可选参数解析: 支持 --debug N 与 --lang en|zh 与 --modules DIR, 顺序任意, 文件名必须是第一个非可选参数;
+        // 独立记号 `--` 是分隔符 (设计稿 §5.2.6): 从这里开始后面全部归脚本 (脚本参数区, 入口文件 cmdargs 消费)
         let filename: string | undefined;
         let debugValue: string | undefined;
         let langArg: string | undefined;
+        let modulesArg: string | undefined;
         const unknownArgs: string[] = [];
+        const scriptArgs: string[] = [];
+        let scriptArgsStart = false;
         for (let i = 0; i < args.length; i++) {
+            if (scriptArgsStart) {
+                scriptArgs.push(args[i]);
+                continue;
+            }
+            if (args[i] === '--') {
+                scriptArgsStart = true;
+                continue;
+            }
             if (args[i] === '--debug') {
                 debugValue = args[i + 1];
                 i++;
             } else if (args[i] === '--lang') {
                 langArg = args[i + 1];
+                i++;
+            } else if (args[i] === '--modules') {
+                modulesArg = args[i + 1];
                 i++;
             } else if (args[i].startsWith('-') && args[i] !== '--help' && args[i] !== '--version') {
                 // 未知可选参数兜底: 以 - 开头的未知参数 (含短参数如 -h) 记入列表, 不当作文件名处理
@@ -7018,6 +8212,7 @@ function main() {
                 filename = args[i];
             }
         }
+        CMDARGS_ARGV = scriptArgs;
 
         // 语言设置: 仅接受 en/zh, 其他值忽略 (保持默认中文)
         if (langArg === 'en') {
@@ -7036,12 +8231,18 @@ function main() {
             }
         }
 
-        // --help / --version: 独立参数, 显示后直接退出 (不读取脚本)
-        if (args.includes('--help')) {
+        // 模块目录设置 (设计稿 §7.3): 命令行 --modules 配置唯一模块目录 (默认 'modules')
+        if (modulesArg !== undefined) {
+            MODULE_DIR = modulesArg;
+        }
+
+        // --help / --version: 独立参数, 显示后直接退出 (不读取脚本); 仅检查分隔符 `--` 前的解释器参数, 脚本参数区内同名串不算
+        const interpreterArgs = args.slice(0, args.indexOf('--') === -1 ? args.length : args.indexOf('--'));
+        if (interpreterArgs.includes('--help')) {
             printHelp();
             process.exit(0);
         }
-        if (args.includes('--version')) {
+        if (interpreterArgs.includes('--version')) {
             console.log(`NoethingScript Interpreter v${NSIVersion}`);
             process.exit(0);
         }
@@ -7069,6 +8270,19 @@ function main() {
             // 读取文件内容
             const code = fs.readFileSync(filename, 'utf8');
 
+            // 当前文件定位 (M4 模块加载: use inner 按当前文件路径上两级目录定位包根, 设计稿 §3.4)
+            CURRENT_FILE_PATH = path.resolve(filename);
+            // 默认模块 loader (设计稿 §7.1): fs 按模块定位名读 {MODULE_DIR}/{name}; 文件不存在 → null (加载器报"模块不存在")
+            if (MODULE_LOADER === null) {
+                MODULE_LOADER = (name: string): string | null => {
+                    try {
+                        return fs.readFileSync(path.resolve(MODULE_DIR, name), 'utf8');
+                    } catch (e) {
+                        return null;
+                    }
+                };
+            }
+
             // 加载并执行程序
             Interpreter.loadProgram(code);
             Interpreter.run();
@@ -7083,20 +8297,23 @@ function main() {
 }
 
 // 处理函数返回值赋值逻辑
-function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, resultVar: string | undefined, oldLinePointer: number): void {
+// ns: 模块函数所属命名空间 (非空 → 从 ns.returnValues 读返回值, 主程序函数 → RETURN_VALUES)
+function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, resultVar: string | undefined, oldLinePointer: number, ns?: ModuleNamespace | null): void {
+    // 返回值池: 模块函数 → 模块命名空间私有池 (跨模块同名函数返回值隔离); 主程序函数 → RETURN_VALUES
+    const returnPool = ns ? ns.returnValues : RETURN_VALUES;
     // 检查函数是否有返回值且调用时有接收变量
     if (funcInfo.returnType !== DataType.UNDEFINED && resultVar !== undefined) {
         // 数组返回值专门路径: 结果变量绑定返回数组的结构 (引用共享)
         if (funcInfo.returnType === DataType.ARRAY) {
-            if (RETURN_VALUES.hasOwnProperty(funcName)) {
-                const funcReturnValues = RETURN_VALUES[funcName];
+            if (returnPool.hasOwnProperty(funcName)) {
+                const funcReturnValues = returnPool[funcName];
                 // 函数定义中的返回值变量名 (函数解析时已缓存, 免重复正则解析定义行)
                 const returnVarName = funcInfo.returnVarName;
                 let arrStruct: Variable | undefined;
                 if (returnVarName && funcReturnValues.hasOwnProperty(returnVarName)) {
                     arrStruct = funcReturnValues[returnVarName] as Variable;
                 }
-                delete RETURN_VALUES[funcName];
+                delete returnPool[funcName];
                 if (!arrStruct || arrStruct.type !== DataType.ARRAY || !arrStruct.arrayElements) {
                     reportError(ExceptionType.TYPE_ERROR, t('func_no_valid_array_return', {name: funcName}), oldLinePointer + 1);
                     return;
@@ -7158,8 +8375,8 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
         }
 
         // 从返回值池中获取返回值
-        if (RETURN_VALUES.hasOwnProperty(funcName)) {
-            const funcReturnValues = RETURN_VALUES[funcName];
+        if (returnPool.hasOwnProperty(funcName)) {
+            const funcReturnValues = returnPool[funcName];
 
             // 函数定义中的返回值变量名 (函数解析时已缓存, 免重复正则解析定义行)
             const returnVarName = funcInfo.returnVarName;
@@ -7174,7 +8391,7 @@ function handleReturnValueAssignment(funcName: string, funcInfo: FunctionInfo, r
                 ScopeManager.setVariable(resultVar, returnValue, oldLinePointer);
 
                 // 清理返回值池中该函数的返回值
-                delete RETURN_VALUES[funcName];
+                delete returnPool[funcName];
             } else {
                 // 没有返回值, 设置为默认值
                 let defaultValue: any;
@@ -7513,11 +8730,50 @@ class NSVMCompiler {
                 funcBlocks.set(r.name, fb);
             }
             NSVMExecutor.funcBlocks = funcBlocks;
+
+            // M5: 编译已加载模块的函数体进 NSVM (设计稿 §5/确认记录 #31: 点分 call 必须编译进 NSVM,
+            // 模块函数与普通函数共用同一调用管道); 任一模块函数编译失败 → 整体回退行解释器
+            // (模块函数在行解释器路径下同样可执行, 与主程序函数编译失败行为一致)
+            for (const objName in PROGRAM_MODULE_OBJS) {
+                if (!this.compileModuleFuncs(PROGRAM_MODULE_OBJS[objName])) return false;
+            }
             return true;
         } catch (e) {
             debugLog(1, () => t('dbg_nsvm_compile_failed', { error: (e as Error).stack || e }));
             return false;
         }
+    }
+
+    // M5: 编译模块函数体进 NSVM (设计稿 §5: 模块函数与普通函数共用同一调用管道)。
+    // 递归先编译依赖 (ns.uses), 再编译本模块; 幂等: funcBlocks 非空即已编译 (跨文件共享命名空间实例)。
+    // 编译期间切换 programLines/LINE_INFO/CURRENT_MODULE 到模块源码空间 (resolveFunction 按模块查找链解析
+    // 函数体内的本模块/use 模块调用, 与加载期/执行期的上下文切换同构); 编译完成恢复。
+    private static compileModuleFuncs(ns: ModuleNamespace): boolean {
+        if (ns.funcBlocks.size > 0) return true; // 幂等 (跨模块共享 use 同一命名空间实例)
+        for (const objName in ns.uses) {
+            if (!this.compileModuleFuncs(ns.uses[objName])) return false;
+        }
+        const savedProgramLines = programLines;
+        const savedLineInfo = LINE_INFO;
+        const savedModule = CURRENT_MODULE;
+        programLines = ns.sourceLines;
+        LINE_INFO = ns.lineInfo;
+        CURRENT_MODULE = ns;
+        try {
+            const fbMap = new Map<string, NSVMBlock>();
+            for (const name in ns.funcs) {
+                const f = ns.funcs[name];
+                const fb = this.compileBlock(f.startLine + 1, f.endLine, new Array<boolean>(programLines.length).fill(false), name);
+                if (!fb) return false;
+                fbMap.set(name, fb);
+            }
+            ns.funcBlocks = fbMap;
+        } finally {
+            programLines = savedProgramLines;
+            LINE_INFO = savedLineInfo;
+            CURRENT_MODULE = savedModule;
+        }
+        return true;
     }
 
     // 编译一个块 (startLine..endLine 含); funcName=null 表示全局块
@@ -7613,16 +8869,21 @@ class NSVMCompiler {
                     const p = stmt.params;
                     let funcName: string, argsStr: string, resultVar: string | undefined;
                     if (p.indexOf('->') !== -1) {
-                        const m = p.match(/^([a-zA-Z0-9_]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
+                        const m = p.match(/^([a-zA-Z0-9_.]+)\((.*)\)\s*->\s*([a-zA-Z0-9_]+)$/);
                         if (!m) return null; // call_format → 回退
                         funcName = m[1]; argsStr = m[2]; resultVar = m[3];
                     } else {
-                        const m = p.match(/^([a-zA-Z0-9_]+)\((.*)\)$/);
+                        const m = p.match(/^([a-zA-Z0-9_.]+)\((.*)\)$/);
                         if (!m) return null; // call_format → 回退
                         funcName = m[1]; argsStr = m[2]; resultVar = undefined;
                     }
-                    const funcInfo = FUNCTIONS[funcName];
-                    if (!funcInfo) return null; // func_undefined (运行期抛错, 可被 try-catch 捕获) → 回退
+                    // M5: 统一 resolveFunction 解析 (普通函数 + 模块函数点分名 xxx.func);
+                    // 已加载的模块函数编译进 NSVM, 运行期 executeCallCompiled 切换模块上下文并从 ns.funcBlocks 取函数块
+                    // (设计稿 §5/确认记录 #31: 点分 call 必须编译进 NSVM, 无行解释器回退);
+                    // 未命中 (func_undefined, 运行期抛错可被 try-catch 捕获) → 整体回退行解释器
+                    const resolved = Interpreter.resolveFunction(funcName);
+                    if (!resolved) return null;
+                    const funcInfo = resolved.funcInfo;
                     if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) return null; // func_result_var_missing → 回退
                     if (resultVar !== undefined && funcInfo.returnType === DataType.UNDEFINED) return null; // func_result_var_unexpected → 回退
                     // 实参拆分 + 个数校验 (不足报错 func_arg_count_insufficient / 多余警告 func_extra_args_ignored, 均为运行期行为 → 不匹配即回退)
@@ -7644,10 +8905,12 @@ class NSVMCompiler {
                     }
                     const fnK = this.constIndex(funcName);
                     const modesK = this.constIndex(Int32Array.from(modes));
-                    // 函数体首条可执行行编译期预解析 (跳过空行/标签行), 运行期免每次调用重复扫描 programLines
+                    // 函数体首条可执行行编译期预解析 (跳过空行/标签行), 运行期免每次调用重复扫描 programLines;
+                    // 模块函数: startLine/endLine 属模块源码行空间, 扫描须用模块源码 (主程序 programLines 行号空间不同, 会越界)
+                    const scanLines = resolved.ns ? resolved.ns.sourceLines : programLines;
                     let bodyStartLine = funcInfo.startLine + 1;
                     while (bodyStartLine < funcInfo.endLine) {
-                        const checkLine = programLines[bodyStartLine].trim();
+                        const checkLine = scanLines[bodyStartLine].trim();
                         if (checkLine === '' || checkLine.indexOf(':') === 0) {
                             bodyStartLine++;
                             continue;
@@ -7964,6 +9227,16 @@ class NSVMCompiler {
                 }
                 case StmtType.END_TAG:
                     // :end 已在上方处理 (funcName != null 时 emit RET)
+                    break;
+                case StmtType.MODULES:
+                case StmtType.ENDMODULES:
+                case StmtType.USE:
+                case StmtType.CMDARGS:
+                case StmtType.ENDCMDARGS:
+                case StmtType.PARAM:
+                case StmtType.AUTOINIT:
+                case StmtType.ENDAUTOINIT:
+                    // 模块系统头部区行: 加载期已处理, 不产生指令 (编译期跳过, 不回退)
                     break;
                 default:
                     return null;
@@ -8442,15 +9715,23 @@ class NSVMExecutor {
                     const curFrame = NSVMExecutor.frames.pop() as NSVMFrame;
                     const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
                     if (topFrame && topFrame.type === 'function') {
-                        const funcInfo = FUNCTIONS[topFrame.funcName];
                         const block = topFrame as any;
+                        // M5: 模块函数 funcInfo 从所属模块函数表取 (主程序 FUNCTIONS 不含模块函数)
+                        const funcInfo = block.module ? block.module.funcs[block.funcName] : FUNCTIONS[topFrame.funcName];
                         LOCAL_VARS.length = block.frameVarStart;
                         delete SLOT_INDEX[String(block.frameId)];
                         CONTROL_FLOW_STACK.pop();
+                        // M5: 模块函数帧恢复调用方上下文 (与 executeFunctionEndTag 一致);
+                        // 参数绑定发生在调用方上下文, 槽位条目登记在调用方 SLOT_INDEX (上方 delete 清理的是模块侧), 一并回收防泄漏
+                        if (block.savedCtx) {
+                            popModuleContext(block.savedCtx);
+                            delete MODULE_FRAME_MODULES[block.frameId];
+                            delete SLOT_INDEX[String(block.frameId)];
+                        }
                         if (funcInfo && !ScopeManager.isVoidFunction(funcInfo)) {
                             reportError(ExceptionType.TYPE_ERROR, t('func_reached_end_no_return', { name: funcInfo.name, type: funcInfo.returnType }));
                         } else {
-                            debugLog(1, () => t('dbg_func_void_return', { name: funcInfo.name }));
+                            debugLog(1, () => t('dbg_func_void_return', { name: funcInfo ? funcInfo.name : block.funcName }));
                         }
                     }
                     frame = NSVMExecutor.frames[NSVMExecutor.frames.length - 1];
@@ -8470,6 +9751,9 @@ class NSVMExecutor {
                 }
                 const exception = error as Exception;
                 if (exception.lineNumber === undefined) exception.lineNumber = currentLinePointer;
+                // M6: 未捕获错误起源模块 — 展开时记录最先弹出的模块函数帧 (最内层 = 错误产生处);
+                // 报告时显式指定来源标识 (此时模块上下文已恢复, CURRENT_MODULE 取不到)
+                let uncaughtOriginNs: ModuleNamespace | null = null;
 
                 // 从当前帧向调用方链查找最近 handler
                 let handled = false;
@@ -8523,8 +9807,18 @@ class NSVMExecutor {
                         for (let j = NSVMExecutor.switchStack.length - 1; j >= 0; j--) {
                             if (NSVMExecutor.switchStack[j].block === f.block) NSVMExecutor.switchStack.splice(j, 1);
                         }
+                        // M5: 恢复被弹模块函数帧的执行上下文 (主循环异常展开的对应物, 见 run() catch 分支):
+                        // 从内到外对被弹函数帧 popModuleContext, 使冒泡到调用方时上下文为其所属模块/主程序
                         for (let j = CONTROL_FLOW_STACK.length - 1; j >= 0; j--) {
-                            if (CONTROL_FLOW_STACK[j].type === 'function') {
+                            const cfs = CONTROL_FLOW_STACK[j];
+                            if (cfs.type === 'function') {
+                                const funcFrame = cfs as any;
+                                if (funcFrame.savedCtx) {
+                                    // M6: 最内层模块函数帧 = 错误起源模块 (后续 reportError 来源标识用)
+                                    if (uncaughtOriginNs === null && funcFrame.module) uncaughtOriginNs = funcFrame.module;
+                                    popModuleContext(funcFrame.savedCtx);
+                                    delete MODULE_FRAME_MODULES[funcFrame.frameId];
+                                }
                                 CONTROL_FLOW_STACK.length = j;
                                 break;
                             }
@@ -8537,11 +9831,11 @@ class NSVMExecutor {
                 if (!handled) {
                     // 未捕获: 与主循环一致 — reportError 后终止执行, 并复刻主循环退出时的收尾调试输出
                     if (Object.values(ExceptionType).includes(exception.type)) {
-                        reportError(exception.type, exception.message);
+                        reportError(exception.type, exception.message, undefined, uncaughtOriginNs);
                     } else {
                         const nativeMsg = error instanceof Error ? error.message : String(error);
-                        console.error(t('internal_error', { line: currentLinePointer + 1, message: nativeMsg }));
-                        console.error(t('internal_error_hint'));
+                        console.error(modulePrefixOf(uncaughtOriginNs) + t('internal_error', { line: currentLinePointer + 1, message: nativeMsg }));
+                        console.error(modulePrefixOf(uncaughtOriginNs) + t('internal_error_hint'));
                     }
                     currentLinePointer = programLines.length;
                     if (EXCEPTION_STACK.length > 0) debugLog(1, () => t('dbg_program_stopped_error'));
@@ -8561,7 +9855,13 @@ class NSVMExecutor {
         const argc = modesK.length;
         const fnK = consts[a] as string;
         const meta = consts[c] as NSVMCallMeta;
-        const funcInfo = FUNCTIONS[fnK];
+        // M5: 统一 resolveFunction 解析 (普通函数 + 模块函数点分名 xxx.func, 设计稿 §5);
+        // 编译期已校验存在 (func_undefined 编译期回退 STMT), 此处防御性抛错语义与 executeCall 一致 (可被 try-catch 捕获)
+        const resolvedFn = Interpreter.resolveFunction(fnK);
+        if (!resolvedFn) {
+            throw { type: ExceptionType.REFERENCE_ERROR, message: t('func_undefined', { name: fnK }), lineNumber: currentLinePointer } as Exception;
+        }
+        const funcInfo = resolvedFn.funcInfo;
         const oldPc = frame.pc;
         // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 每调用 ~20 个 debugLog 闭包)
@@ -8770,20 +10070,36 @@ class NSVMExecutor {
             debugLog(2, () => t('dbg_return_var_scope', { name: funcInfo.returnType !== DataType.UNDEFINED ? funcInfo.returnVarName : undefined, scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
             debugLog(2, () => t('dbg_param_scope', { scopeStart: functionBodyStartLine + 1, scopeEnd: funcInfo.endLine === -1 ? t('dbg_last_line') : funcInfo.endLine + 1 }));
         }
-        // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复)
-        CONTROL_FLOW_STACK.push({
+        // 模块函数: 切换执行上下文到模块命名空间 (programLines/LINE_INFO/GLOBAL_VARS/TAGS/槽位表/CURRENT_MODULE),
+        // 返回时由 executeReturn/executeFunctionEndTag 恢复调用方上下文 (与 executeCall 行解释器路径一致)
+        let savedCtx: ModuleContext | null = null;
+        if (resolvedFn.ns) {
+            savedCtx = pushModuleContext(resolvedFn.ns);
+            MODULE_FRAME_MODULES[frameId] = resolvedFn.ns;
+        }
+        // 压 function 帧 (复刻 executeCall, callFrom = 调用源行号供返回/报错恢复;
+        // funcName 用无点名 funcInfo.name — executeReturn/executeFunctionEndTag 按 block.module.funcs[funcName] 取模块函数表;
+        // module/savedCtx 仅模块函数帧设置, 普通函数帧不设 — 调试输出 (CONTROL_FLOW_STACK 序列化) 逐字节保持基线)
+        const cf: any = {
             type: 'function',
-            funcName: fnK,
+            funcName: funcInfo.name,
             startLine: funcInfo.startLine,
             endLine: funcInfo.endLine,
             callFrom: oldLinePointer,
             returnVarName: meta.resultVar,
             frameId: frameId,
             frameVarStart: callVarStart
-        });
+        };
+        if (resolvedFn.ns) {
+            cf.module = resolvedFn.ns;
+            cf.savedCtx = savedCtx;
+        }
+        CONTROL_FLOW_STACK.push(cf);
         if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_control_flow_stack'), CONTROL_FLOW_STACK);
-        // 切换到 callee 的 VM 块
-        const fb = NSVMExecutor.funcBlocks.get(fnK);
+        // 切换到 callee 的 VM 块: 模块函数块挂模块命名空间 funcBlocks (编译期 compileModuleFuncs 填充)
+        const fb = resolvedFn.ns
+            ? resolvedFn.ns.funcBlocks.get(funcInfo.name)
+            : NSVMExecutor.funcBlocks.get(fnK);
         if (fb) {
             NSVMExecutor.frames.push({
                 block: fb, pc: 0, retAddr: oldPc + 1,
@@ -8811,6 +10127,23 @@ function nsiRun(code: string): void {
     Interpreter.run();
 }
 
+// 浏览器入口 (M4, 设计稿 §7.1): 注入模块加载器 — 同步原语 (name => 源码字符串, name 为模块定位名
+// 如 'main/stack/stack/stack.ns' 或 inner 的包根相对路径; 不存在 → 返回 null)。浏览器宿主预取后同步查 map。
+function nsiSetModuleLoader(loader: ((name: string) => string | null) | null): void {
+    MODULE_LOADER = loader;
+}
+
+// 浏览器入口 (M4, 设计稿 §7.3): 配置唯一模块目录 (默认 'modules'; 与命令行 --modules 同源语义)
+function nsiSetModuleDir(dir: string): void {
+    MODULE_DIR = dir;
+}
+
+// 浏览器入口 (M4, 设计稿 §3.4): 设置当前文件定位标识 (use inner 按"上两级目录"定位包根;
+// 传模块定位名如 'main/foo/foo/foo.ns' 或绝对路径; 不设置 = 无包 → inner 不可用)
+function nsiSetCurrentFilePath(filePath: string): void {
+    CURRENT_FILE_PATH = filePath;
+}
+
 // 浏览器入口: 切换输出语言 ('zh' | 'en')
 function nsiSetLanguage(lang: 'zh' | 'en'): void {
     if (lang === 'en' || lang === 'zh') {
@@ -8821,6 +10154,12 @@ function nsiSetLanguage(lang: 'zh' | 'en'): void {
 // 浏览器入口: 绑定自定义运行时输入处理器 (同步函数, 返回一行字符串; 传入 null 恢复默认 prompt)
 function nsiSetInput(handler: (() => string) | null): void {
     INPUT_HANDLER = handler;
+}
+
+// 浏览器入口 (cmdargs, 设计稿 §5.2): 设置脚本参数区 (对应命令行 `--` 之后的部分), 入口文件 cmdargs 绑定期消费。
+// 不调用则参数区为空, param 全部用默认值。
+function nsiSetCmdargs(args: string[]): void {
+    CMDARGS_ARGV = Array.isArray(args) ? args.map(String) : [];
 }
 
 // 浏览器入口: 交互执行 — 脚本自持主流程, 遇到 input() 且无可用输入时挂起并通知宿主,
@@ -8855,6 +10194,10 @@ if (typeof window !== 'undefined') {
         setLanguage: nsiSetLanguage,
         getLanguage: (): 'zh' | 'en' => LANG,
         setInput: nsiSetInput,
+        setCmdargs: nsiSetCmdargs,
+        setModuleLoader: nsiSetModuleLoader,
+        setModuleDir: nsiSetModuleDir,
+        setCurrentFilePath: nsiSetCurrentFilePath,
         Interpreter: Interpreter,
         ExpressionEvaluator: ExpressionEvaluator,
         ScopeManager: ScopeManager,

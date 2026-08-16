@@ -1,0 +1,8 @@
+// tests/cmdargs_syntax_error.ns — cmdargs 头部语法错误测试 (设计稿 §5.2.3)
+// 回归口径: param 声明格式错误 (如缺类型/默认值/短名冲突/重复声明等) 在头部解析期报语法错误,
+// 程序整体终止不执行 (运行前错误, 与加载期错误同级不可 try-catch)。
+// 此处验证 param 声明缺类型: 应为 param 名:类型 = 默认值 [as "短名"]。
+cmdargs
+param badparam
+endcmdargs
+print "not reached"

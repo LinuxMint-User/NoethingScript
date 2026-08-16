@@ -1,0 +1,58 @@
+// modules/main/tools/tools/tools.ns — 工具模块 (M5 功能测试)
+// 依赖: stack 模块 (use stack from main, 与主程序共享实例, 跨文件幂等 §2.2)
+modules
+use stack from main
+endmodules
+
+// 模块被 use 时只执行 autoinit (§3.3): 顶层语句不执行, autoinit 先于主程序正文
+autoinit
+print "tools autoinit"
+endautoinit
+
+// 模块私有全局 (与主程序全局零冲突, 黑盒 §4)
+global counter:int = 0
+
+:add (a:int, b:int) -> r:int
+r = a + b
+return r
+:end
+
+// 本模块函数嵌套调用 (double → add): 模块上下文内无点名查找本模块函数
+:double (x:int) -> r:int
+call add(x, x) -> r
+return r
+:end
+
+// 按元数据槽模式求和: st[0] 存栈顶下标, 数据从 st[1] 起 (设计稿 §8)
+:sumArr (st[]:int) -> r:int
+local i:int = 1
+local s:int = 0
+while (i <= st[0])
+    s = s + st[i]
+    i = i + 1
+endwhl
+r = s
+return r
+:end
+
+// mut 数组形参: 调用方显式 mut 且声明一致才允许 (确认记录 #19)
+:setFirst (mut arr[]:int, val:int) -> :void
+arr[0] = val
+:end
+
+:neg (a:number) -> r:number
+r = 0 - a
+return r
+:end
+
+// 跨模块调用 (tools → stack): 模块函数体内调用 use 的模块函数
+:stackSize (st[]:int) -> n:int
+call stack.size(st) -> n
+return n
+:end
+
+// 未捕获错误: 冒泡到调用方, 主程序 try-catch 可捕获 (确认记录 #19 ③)
+:danger () -> :void
+local x:int = 0
+badName = x + 1
+:end

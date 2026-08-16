@@ -1,0 +1,45 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 3
+[DEBUG 2] [Line 3] 执行指令 global var0:int = 0
+[DEBUG 1] [Line 3] 尝试添加变量: var0, 值: 0, 类型: int, 作用域: 3-末行, 是否全局: true
+[DEBUG 1] [Line 3] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 3] 全局变量 var0 添加成功
+[DEBUG 2] [Line 12] 执行指令 global.var0 = 6
+[DEBUG 1] [Line 12] 执行操作指令: global.var0 = 6
+[DEBUG 2] [Line 12] 解析表达式中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析表达式中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析逻辑或运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析逻辑与运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析相等性运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析关系运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析加法和减法运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析乘法、除法和取模运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析幂运算中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析一元运算符中: global.var0,=,6
+[DEBUG 2] [Line 12] 解析基本元素中: global.var0,=,6
+[DEBUG 1] [Line 12] 获得解析结果
+[DEBUG 1] [Line 12] 处理普通变量赋值 (type: assignment) : global.var0 = 6
+[DEBUG 2] [Line 12] 查找全局变量: var0 (行 12)
+[DEBUG 2] [Line 12]   找到全局变量: var0 = 0
+[DEBUG 2] [Line 12] 查找全局变量信息: var0 (行 12)
+[DEBUG 1] [Line 12] 获取变量信息 var0 (全局): 值=0, 类型=int, 作用域=3-末行, 行号=12
+[DEBUG 2] [Line 12] 设置全局变量 var0 (行 12)
+[DEBUG 1] [Line 12] 验证数据类型: 值 6, 类型 int
+[DEBUG 2] [Line 13] 执行指令 print global.var0
+[DEBUG 2] [Line 13] 解析表达式中: global.var0
+[DEBUG 2] [Line 13] 解析逻辑或运算中: global.var0
+[DEBUG 2] [Line 13] 解析逻辑与运算中: global.var0
+[DEBUG 2] [Line 13] 解析相等性运算中: global.var0
+[DEBUG 2] [Line 13] 解析关系运算中: global.var0
+[DEBUG 2] [Line 13] 解析加法和减法运算中: global.var0
+[DEBUG 2] [Line 13] 解析乘法、除法和取模运算中: global.var0
+[DEBUG 2] [Line 13] 解析幂运算中: global.var0
+[DEBUG 2] [Line 13] 解析一元运算符中: global.var0
+[DEBUG 2] [Line 13] 解析基本元素中: global.var0
+[DEBUG 2] [Line 13] 检查 global.var0 是否为变量或函数调用
+[DEBUG 2] [Line 13] 检测到全局访问前缀
+[DEBUG 2] [Line 13] 查找全局变量信息: global.var0 (行 13)
+[DEBUG 1] [Line 13] 获取变量信息 var0 (全局): 值=6, 类型=int, 作用域=3-末行, 行号=13
+[DEBUG 2] [Line 13] 直接返回全局变量值: global.var0 = 6 在第13行
+6
+[DEBUG 1] [Line 14] 程序执行完毕

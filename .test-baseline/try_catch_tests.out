@@ -1,0 +1,16 @@
+Tip: Run with --lang en for English messages.
+caught1: 类型不匹配: 期望 int, 实际是字符串
+after try1
+try2 body: 10
+after try2
+inner caught: 类型不匹配: 期望 int, 实际是布尔值
+after inner try
+after try3
+note: recovered, err: 类型不匹配: 期望 int, 实际是字符串
+caught func error: 类型不匹配: 期望 int, 实际是字符串
+after func try
+global after: 5
+caught ref assign: 未定义的局部变量 undefinedVar
+caught ref read: 未定义的变量 undefinedVar2
+caught ref func: 函数 'notExistFunc' 未定义
+done

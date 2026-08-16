@@ -1,0 +1,99 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 3
+[DEBUG 2] [Line 3] 执行指令 global var0:number = 0
+[DEBUG 1] [Line 3] 尝试添加变量: var0, 值: 0, 类型: number, 作用域: 3-末行, 是否全局: true
+[DEBUG 1] [Line 3] 验证数据类型: 值 0, 类型 number
+[DEBUG 1] [Line 3] 全局变量 var0 添加成功
+[DEBUG 2] [Line 18] 执行指令 call func0()
+[DEBUG 1] [Line 18] 开始执行函数调用: func0()
+[DEBUG 2] [Line 18] 函数信息: {
+  name: 'func0',
+  params: [],
+  returnType: 'undefined',
+  startLine: 12,
+  endLine: 15,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 18] 函数 func0 开始传递参数
+[DEBUG 2] [Line 18] 函数信息: {
+  name: 'func0',
+  params: [],
+  returnType: 'undefined',
+  startLine: 12,
+  endLine: 15,
+  returnVarName: undefined
+}
+[DEBUG 2] [Line 18] 参数数量: 0, 实际参数: []
+[DEBUG 2] [Line 18] 开始参数传递循环
+[DEBUG 2] [Line 18] 函数调用: func0, 参数: [] 当前行: 18
+[DEBUG 2] [Line 18] 参数传递循环结束
+[DEBUG 3] [Line 18] 当前局部变量详情: []
+[DEBUG 2] [Line 18] 函数 func0 参数传递完成
+[DEBUG 3] [Line 18] 检查参数是否正确添加:
+[DEBUG 3] [Line 18] 详细检查参数:
+[DEBUG 2] [Line 13] 函数体开始行: 14
+[DEBUG 2] [Line 13] 函数 func0 变量作用域详情:
+[DEBUG 2] [Line 13]   返回值变量: undefined, 作用域: 14-16
+[DEBUG 2] [Line 13]   参数作用域: 14-16
+[DEBUG 2] [Line 13] 当前流程控制栈: [
+  {
+    type: 'function',
+    funcName: 'func0',
+    startLine: 12,
+    endLine: 15,
+    callFrom: 17,
+    returnVarName: undefined,
+    frameId: 1,
+    frameVarStart: 0
+  }
+]
+[DEBUG 2] [Line 14] 执行指令 var0 = var0 + 1
+[DEBUG 1] [Line 14] 执行操作指令: var0 = var0 + 1
+[DEBUG 2] [Line 14] 解析表达式中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析表达式中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析逻辑或运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析逻辑与运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析相等性运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析关系运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析加法和减法运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析乘法、除法和取模运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析幂运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析一元运算符中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析基本元素中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 检查 var0 是否为变量或函数调用
+[DEBUG 2] [Line 14] 解析乘法、除法和取模运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析幂运算中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析一元运算符中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 解析基本元素中: var0,=,var0,+,1
+[DEBUG 2] [Line 14] 查找变量信息: var0 (行 14)
+[DEBUG 1] [Line 14] 获取变量信息 var0 (全局): 值=0, 类型=number, 作用域=3-末行, 行号=14
+[DEBUG 2] [Line 14] 直接返回变量值: var0 = 0 在第14行
+[DEBUG 1] [Line 14] 获得解析结果
+[DEBUG 1] [Line 14] 处理普通变量赋值 (type: assignment) : var0 = var0 + 1
+[DEBUG 2] [Line 14] 查找变量: var0 (行 14)
+[DEBUG 2] [Line 14]   找到全局变量: var0 = 0
+[DEBUG 2] [Line 14] 查找变量信息: var0 (行 14)
+[DEBUG 1] [Line 14] 获取变量信息 var0 (全局): 值=0, 类型=number, 作用域=3-末行, 行号=14
+[DEBUG 2] [Line 14] 设置局部变量 var0 (行 14)
+[DEBUG 1] [Line 14] 验证数据类型: 值 1, 类型 number
+[DEBUG 2] [Line 16] 执行指令 :end
+[DEBUG 2] [Line 16] 函数 func0 结束标记后的局部变量表: []
+[DEBUG 3] [Line 16] 检查函数 func0 是否为 void 函数
+[DEBUG 1] [Line 16] 函数 func0 是无返回值函数, 返回调用位置
+[DEBUG 2] [Line 19] 执行指令 print var0
+[DEBUG 2] [Line 19] 解析表达式中: var0
+[DEBUG 2] [Line 19] 解析逻辑或运算中: var0
+[DEBUG 2] [Line 19] 解析逻辑与运算中: var0
+[DEBUG 2] [Line 19] 解析相等性运算中: var0
+[DEBUG 2] [Line 19] 解析关系运算中: var0
+[DEBUG 2] [Line 19] 解析加法和减法运算中: var0
+[DEBUG 2] [Line 19] 解析乘法、除法和取模运算中: var0
+[DEBUG 2] [Line 19] 解析幂运算中: var0
+[DEBUG 2] [Line 19] 解析一元运算符中: var0
+[DEBUG 2] [Line 19] 解析基本元素中: var0
+[DEBUG 2] [Line 19] 检查 var0 是否为变量或函数调用
+[DEBUG 2] [Line 19] 查找变量信息: var0 (行 19)
+[DEBUG 1] [Line 19] 获取变量信息 var0 (全局): 值=1, 类型=number, 作用域=3-末行, 行号=19
+[DEBUG 2] [Line 19] 直接返回变量值: var0 = 1 在第19行
+1
+[DEBUG 1] [Line 28] 程序执行完毕

@@ -1,0 +1,24 @@
+Tip: Run with --lang en for English messages.
+caught readonly: 循环变量 i 是只读的, 禁止修改
+caught readonly: 循环变量 i 是只读的, 禁止修改
+caught readonly: 循环变量 i 是只读的, 禁止修改
+caught null: 表达式中出现 null 值, 不被允许
+caught undefined: 表达式中出现 undefined 值, 不被允许
+caught ref var: 未定义的变量 noSuchVar
+caught assert: assertion failed
+[WARN] [行 54] 警告: 传入函数 twoArg 的参数多于定义, 忽略多出的传入参数
+3
+[ERROR 2] [行 58] 类型错误: 传入函数 twoArg 的参数数量过少: 期望 2, 实际 1
+after few args
+[ERROR 2] [行 62] 类型错误: 函数 twoArg 参数 1 类型错误
+after bad type
+caught type mismatch: == 两侧类型必须相同, 无法比较 number 与 string
+[ERROR 3] [行 78] 引用错误: 循环变量 'k' 作用域内禁止声明同名变量
+loop body 0
+[ERROR 3] [行 78] 引用错误: 循环变量 'k' 作用域内禁止声明同名变量
+loop body 1
+after comment
+caught uninit var: 变量 uninitInt 的值为 undefined, 不能被使用
+caught undef result: 变量 rr 的值为 undefined, 不能被使用
+[ERROR 2] [行 110] 类型错误: switch语句的条件表达式只能是int或string类型, 数字必须为整数
+after switch float

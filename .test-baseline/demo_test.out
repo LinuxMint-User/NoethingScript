@@ -1,0 +1,815 @@
+Tip: Run with --lang en for English messages.
+[DEBUG 1] [Line 1] Debug级别设置为: 1
+[DEBUG 1] [Line 4] 尝试添加变量: counter, 值: 0, 类型: int, 作用域: 4-末行, 是否全局: true
+[DEBUG 1] [Line 4] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 4] 全局变量 counter 添加成功
+[DEBUG 1] [Line 5] 尝试添加变量: name, 值: NoethingScript, 类型: string, 作用域: 5-末行, 是否全局: true
+[DEBUG 1] [Line 5] 验证数据类型: 值 NoethingScript, 类型 string
+[DEBUG 1] [Line 5] 全局变量 name 添加成功
+[DEBUG 1] [Line 6] 尝试添加变量: flag, 值: false, 类型: bool, 作用域: 6-末行, 是否全局: true
+[DEBUG 1] [Line 6] 验证数据类型: 值 false, 类型 bool
+[DEBUG 1] [Line 6] 全局变量 flag 添加成功
+[DEBUG 1] [Line 13] 尝试添加常量: MAX_RETRIES, 值: 3, 类型: int, 作用域: 13-末行, 是否全局: true
+[DEBUG 1] [Line 13] 验证数据类型: 值 3, 类型 int
+[DEBUG 1] [Line 13] 全局变量 MAX_RETRIES 添加成功
+=== NoethingScript Demo ===
+[DEBUG 1] [Line 42] 获取变量信息 name (全局): 值=NoethingScript, 类型=string, 作用域=5-末行, 行号=42
+[DEBUG 1] [Line 42] 计算操作: +, 左操作数: "Language: " (左类型: string), 右操作数: "NoethingScript" (右类型: string)
+Language: NoethingScript
+[DEBUG 1] [Line 44] 开始执行函数调用: sumArray(6) -> counter
+[DEBUG 1] [Line 44] 尝试添加变量: arrLen, 值: 6, 类型: int, 作用域: 17-24, 是否全局: false
+[DEBUG 1] [Line 44] 验证数据类型: 值 6, 类型 int
+[DEBUG 1] [Line 44] 局部变量 arrLen 添加成功
+[DEBUG 1] [Line 44] 尝试添加变量: total, 值: undefined, 类型: int, 作用域: 17-24, 是否全局: false
+[DEBUG 1] [Line 44] 验证数据类型: 值 undefined, 类型 int
+[DEBUG 1] [Line 44] 未初始化变量, 存储 undefined
+[DEBUG 1] [Line 44] 局部变量 total 添加成功
+[WARN] [行 17] 警告: 变量 'total' 声明但未初始化
+[DEBUG 1] [Line 17] 代码块类型 function
+[DEBUG 1] [Line 17] 尝试添加变量: i, 值: 0, 类型: int, 作用域: 17-24, 是否全局: false
+[DEBUG 1] [Line 17] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 17] 局部变量 i 添加成功
+[DEBUG 1] [Line 18] 执行操作指令: total = 0
+[DEBUG 1] [Line 18] 获得解析结果
+[DEBUG 1] [Line 18] 处理普通变量赋值 (type: assignment) : total = 0
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 20] 执行操作指令: total = total + primes[i]
+[DEBUG 1] [Line 20] 获取数组 primes (全局): 长度=6, 类型=array, 行号=20
+[DEBUG 1] [Line 20] 获得解析结果
+[DEBUG 1] [Line 20] 处理普通变量赋值 (type: assignment) : total = total + primes[i]
+[DEBUG 1] [Line 21] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 21] 获得解析结果
+[DEBUG 1] [Line 21] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 23] 验证数据类型: 值 41, 类型 int
+[DEBUG 1] [Line 45] 获取变量信息 counter (全局): 值=41, 类型=int, 作用域=4-末行, 行号=45
+[DEBUG 1] [Line 45] 计算操作: +, 左操作数: "Sum of primes: " (左类型: string), 右操作数: "41" (右类型: string)
+Sum of primes: 41
+[DEBUG 1] [Line 47] 开始执行函数调用: findInPrimes(7) -> flag
+[DEBUG 1] [Line 47] 尝试添加变量: target, 值: 7, 类型: int, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 47] 验证数据类型: 值 7, 类型 int
+[DEBUG 1] [Line 47] 局部变量 target 添加成功
+[DEBUG 1] [Line 47] 尝试添加变量: found, 值: undefined, 类型: bool, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 47] 验证数据类型: 值 undefined, 类型 bool
+[DEBUG 1] [Line 47] 未初始化变量, 存储 undefined
+[DEBUG 1] [Line 47] 局部变量 found 添加成功
+[WARN] [行 28] 警告: 变量 'found' 声明但未初始化
+[DEBUG 1] [Line 28] 代码块类型 function
+[DEBUG 1] [Line 28] 尝试添加变量: i, 值: 0, 类型: int, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 28] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 28] 局部变量 i 添加成功
+[DEBUG 1] [Line 29] 执行操作指令: found = false
+[DEBUG 1] [Line 29] 获得解析结果
+[DEBUG 1] [Line 29] 处理普通变量赋值 (type: assignment) : found = false
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 2, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 3, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 32] 执行操作指令: found = true
+[DEBUG 1] [Line 32] 获得解析结果
+[DEBUG 1] [Line 32] 处理普通变量赋值 (type: assignment) : found = true
+[DEBUG 1] [Line 33] 验证数据类型: 值 true, 类型 bool
+[DEBUG 1] [Line 48] 获取变量信息 flag (全局): 值=true, 类型=bool, 作用域=6-末行, 行号=48
+Found 7 in primes: true
+[DEBUG 1] [Line 54] 开始执行函数调用: findInPrimes(8) -> flag
+[DEBUG 1] [Line 54] 尝试添加变量: target, 值: 8, 类型: int, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 54] 验证数据类型: 值 8, 类型 int
+[DEBUG 1] [Line 54] 局部变量 target 添加成功
+[DEBUG 1] [Line 54] 尝试添加变量: found, 值: undefined, 类型: bool, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 54] 验证数据类型: 值 undefined, 类型 bool
+[DEBUG 1] [Line 54] 未初始化变量, 存储 undefined
+[DEBUG 1] [Line 54] 局部变量 found 添加成功
+[WARN] [行 28] 警告: 变量 'found' 声明但未初始化
+[DEBUG 1] [Line 28] 代码块类型 function
+[DEBUG 1] [Line 28] 尝试添加变量: i, 值: 0, 类型: int, 作用域: 28-38, 是否全局: false
+[DEBUG 1] [Line 28] 验证数据类型: 值 0, 类型 int
+[DEBUG 1] [Line 28] 局部变量 i 添加成功
+[DEBUG 1] [Line 29] 执行操作指令: found = false
+[DEBUG 1] [Line 29] 获得解析结果
+[DEBUG 1] [Line 29] 处理普通变量赋值 (type: assignment) : found = false
+[DEBUG 1] [Line 29] 获取变量信息 found (局部): 值=undefined, 类型=bool, 作用域=28-38, 行号=29
+[DEBUG 1] [Line 29] 验证数据类型: 值 false, 类型 bool
+[DEBUG 1] [Line 30] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=30
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 2, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 3, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 4, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 5, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
+[DEBUG 1] [Line 31] if 条件为假在第 31 行
+[DEBUG 1] [Line 35] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 获得解析结果
+[DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=28-38, 行号=35
+[DEBUG 1] [Line 35] 验证数据类型: 值 6, 类型 int
+[DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
+[DEBUG 1] [Line 37] 验证数据类型: 值 false, 类型 bool
+[DEBUG 1] [Line 55] 获取变量信息 flag (全局): 值=false, 类型=bool, 作用域=6-末行, 行号=55
+[DEBUG 1] [Line 55] if 条件为假在第 55 行
+Found 8 in primes: false
+[DEBUG 1] [Line 62] 执行switch语句: counter % 3
+[DEBUG 1] [Line 62] 获取变量信息 counter (全局): 值=41, 类型=int, 作用域=4-末行, 行号=62
+[DEBUG 1] [Line 62] switch语句的条件表达式值: 2
+[DEBUG 1] [Line 63] 处理 case 语句
+[DEBUG 1] [Line 66] 处理 case 语句
+counter mod 3 = 2
+--- Multiplication Table ---
+[DEBUG 1] [Line 76] 尝试添加变量: i, 值: 1, 类型: int, 作用域: 76-82, 是否全局: false
+[DEBUG 1] [Line 76] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 76] 局部变量 i 添加成功
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "1" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "1*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "1*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "1*1=" (左类型: string), 右操作数: "1" (右类型: string)
+1*1=1
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 2, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*1=" (左类型: string), 右操作数: "2" (右类型: string)
+2*1=2
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "2*2=" (左类型: string), 右操作数: "4" (右类型: string)
+2*2=4
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 3, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*1=" (左类型: string), 右操作数: "3" (右类型: string)
+3*1=3
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*2=" (左类型: string), 右操作数: "6" (右类型: string)
+3*2=6
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "3*3=" (左类型: string), 右操作数: "9" (右类型: string)
+3*3=9
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 4, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*1=" (左类型: string), 右操作数: "4" (右类型: string)
+4*1=4
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*2=" (左类型: string), 右操作数: "8" (右类型: string)
+4*2=8
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*3=" (左类型: string), 右操作数: "12" (右类型: string)
+4*3=12
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "4*4=" (左类型: string), 右操作数: "16" (右类型: string)
+4*4=16
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 5, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*1=" (左类型: string), 右操作数: "5" (右类型: string)
+5*1=5
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*2=" (左类型: string), 右操作数: "10" (右类型: string)
+5*2=10
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*3=" (左类型: string), 右操作数: "15" (右类型: string)
+5*3=15
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*4=" (左类型: string), 右操作数: "20" (右类型: string)
+5*4=20
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*" (左类型: string), 右操作数: "5" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*5" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "5*5=" (左类型: string), 右操作数: "25" (右类型: string)
+5*5=25
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 6, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*1=" (左类型: string), 右操作数: "6" (右类型: string)
+6*1=6
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*2=" (左类型: string), 右操作数: "12" (右类型: string)
+6*2=12
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*3=" (左类型: string), 右操作数: "18" (右类型: string)
+6*3=18
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*4=" (左类型: string), 右操作数: "24" (右类型: string)
+6*4=24
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "5" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*5" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*5=" (左类型: string), 右操作数: "30" (右类型: string)
+6*5=30
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*" (左类型: string), 右操作数: "6" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*6" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "6*6=" (左类型: string), 右操作数: "36" (右类型: string)
+6*6=36
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=6, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=6, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 7, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*1=" (左类型: string), 右操作数: "7" (右类型: string)
+7*1=7
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*2=" (左类型: string), 右操作数: "14" (右类型: string)
+7*2=14
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*3=" (左类型: string), 右操作数: "21" (右类型: string)
+7*3=21
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*4=" (左类型: string), 右操作数: "28" (右类型: string)
+7*4=28
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "5" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*5" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*5=" (左类型: string), 右操作数: "35" (右类型: string)
+7*5=35
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "6" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*6" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*6=" (左类型: string), 右操作数: "42" (右类型: string)
+7*6=42
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*" (左类型: string), 右操作数: "7" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*7" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "7*7=" (左类型: string), 右操作数: "49" (右类型: string)
+7*7=49
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=7, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=7, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 8, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*1=" (左类型: string), 右操作数: "8" (右类型: string)
+8*1=8
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*2=" (左类型: string), 右操作数: "16" (右类型: string)
+8*2=16
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*3=" (左类型: string), 右操作数: "24" (右类型: string)
+8*3=24
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*4=" (左类型: string), 右操作数: "32" (右类型: string)
+8*4=32
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "5" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*5" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*5=" (左类型: string), 右操作数: "40" (右类型: string)
+8*5=40
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "6" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*6" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*6=" (左类型: string), 右操作数: "48" (右类型: string)
+8*6=48
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "7" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*7" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*7=" (左类型: string), 右操作数: "56" (右类型: string)
+8*7=56
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*" (左类型: string), 右操作数: "8" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*8" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "8*8=" (左类型: string), 右操作数: "64" (右类型: string)
+8*8=64
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 78] if 条件为假在第 78 行
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=8, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=8, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 9, 类型 int
+[DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
+[DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
+[DEBUG 1] [Line 77] 局部变量 j 添加成功
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "1" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*1" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*1=" (左类型: string), 右操作数: "9" (右类型: string)
+9*1=9
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "2" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*2" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*2=" (左类型: string), 右操作数: "18" (右类型: string)
+9*2=18
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "3" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*3" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*3=" (左类型: string), 右操作数: "27" (右类型: string)
+9*3=27
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "4" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*4" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*4=" (左类型: string), 右操作数: "36" (右类型: string)
+9*4=36
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "5" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*5" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*5=" (左类型: string), 右操作数: "45" (右类型: string)
+9*5=45
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "6" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*6" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*6=" (左类型: string), 右操作数: "54" (右类型: string)
+9*6=54
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "7" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*7" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*7=" (左类型: string), 右操作数: "63" (右类型: string)
+9*7=63
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "8" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*8" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*8=" (左类型: string), 右操作数: "72" (右类型: string)
+9*8=72
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9" (左类型: string), 右操作数: "*" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*" (左类型: string), 右操作数: "9" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*9" (左类型: string), 右操作数: "=" (右类型: string)
+[DEBUG 1] [Line 79] 计算操作: +, 左操作数: "9*9=" (左类型: string), 右操作数: "81" (右类型: string)
+9*9=81
+[DEBUG 1] [Line 81] 执行操作指令: j = j + 1
+[DEBUG 1] [Line 81] 获得解析结果
+[DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
+[DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
+[DEBUG 1] [Line 82] 执行操作指令: i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=9, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 获得解析结果
+[DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=9, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 82] 验证数据类型: 值 10, 类型 int
+[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=10, 类型=int, 作用域=76-82, 行号=82
+[DEBUG 1] [Line 84] 程序执行完毕

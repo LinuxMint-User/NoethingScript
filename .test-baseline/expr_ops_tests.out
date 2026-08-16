@@ -1,0 +1,77 @@
+Tip: Run with --lang en for English messages.
+ge true
+ge false ok
+ge rev true
+and true
+and false ok
+caught and type: 逻辑运算符 && 要求左操作数是布尔类型
+or true
+or false ok
+caught or type: 逻辑运算符 || 要求右操作数是布尔类型
+8
+512
+18
+18
+16
+not ok
+not false ok
+false
+2.5
+4.5
+3.5
+caught div0: 除零错误
+1
+2
+3
+42
+2
+3
+3
+14
+20
+8
+8
+13
+5
+-5
+7
+ab
+3.3333333333333335
+14
+3+4
+3
+12
+5
+true
+caught bad ref: 声明初始化仅允许字面量, 不允许使用变量或函数调用 'initSrc' (请先声明后赋值)
+caught bad expr: 声明初始化仅允许字面量表达式, 不允许使用变量或函数调用 'initSrc' (请先声明后赋值)
+after init var checks
+caught add bool mix: 运算符 + 两侧类型不一致: number 与 boolean 不能相加 (数字加法需两侧同为数字, 字符串拼接需两侧同为字符串, 需转换请用 int()/float()/str())
+caught add str mix: 运算符 + 两侧类型不一致: string 与 number 不能相加 (数字加法需两侧同为数字, 字符串拼接需两侧同为字符串, 需转换请用 int()/float()/str())
+8
+ab
+caught unpos: 一元运算符 + 要求操作数是数字类型
+caught unnot: 一元运算符 ! 要求操作数是布尔类型
+false
+[ERROR 2] [行 171] 类型错误: 不能将值 '42' 赋值给变量 'strBad', 类型为 'string'
+42
+caught str bool: 函数 str 不支持布尔参数 (bool 类型不提供转换, 字符串 "true"/"false" 与布尔 true/false 是两种不同的类型)
+caught math abs str: 函数 Math.abs 参数 1 需要 number 类型, 实际是 string
+caught take src: 函数 String.take 参数 1 需要 string 类型, 实际是 number
+caught bit and str: 函数 Bit.and 参数 1 需要 number 类型, 实际是 string
+after implicit ban
+rhs len ok
+rhs str ok
+skip random ok
+rhs executed
+caught rhs input: && 右侧禁止使用 input() (input 有副作用, 短路求值时可能被跳过; 请改用 if 块显式判断后再输入)
+[ERROR 2] [行 234] 类型错误: 条件表达式必须返回布尔值, 但实际返回了 number 类型
+after while
+[ERROR 2] [行 239] 类型错误: 条件表达式必须返回布尔值, 但实际返回了 number 类型
+after for
+[ERROR 2] [行 244] 类型错误: 条件表达式必须返回布尔值, 但实际返回了 number 类型
+after assert
+jump start
+[ERROR 2] [行 250] 类型错误: 条件表达式必须返回布尔值, 但实际返回了 number 类型
+bad jump
+jump ok

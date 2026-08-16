@@ -1,0 +1,12 @@
+Tip: Run with --lang en for English messages.
+0
+0
+[]
+false
+caught oob read: 数组索引越界: 索引 99 超出数组 'aInt' 的范围 [0, 2] 位置 4
+caught oob write: 范围错误: 数组索引 99 超出范围, 数组长度为 3
+caught elem type: 数组元素类型错误: 期望 int 类型, 实际 string
+caught const arr: 数组 ca 是常量数组, 不能被赋值
+10
+[ERROR 3] [行 51] 引用错误: 名称 'dup' 已被定义
+1

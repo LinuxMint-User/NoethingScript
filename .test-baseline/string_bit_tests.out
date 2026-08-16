@@ -1,0 +1,49 @@
+Tip: Run with --lang en for English messages.
+11
+Hello
+World
+6
+false
+7
+7
+false
+true
+false
+Hello NS
+a+b-c
+a+b+c
+HELLO WORLD
+hello world
+padded
+no pad
+6
+48
+255
+240
+-1
+256
+15
+-2147483648
+-4
+15
+8
+19
+caught take arg: String.take 需要 3 个参数
+caught replace arg: String.replace 需要 3 或 4 个参数
+caught findFirst arg: String.findFirst 需要 2 或 3 个参数
+caught bit arg: Bit.and 需要 2 个参数
+caught abs str: 函数 Math.abs 参数 1 需要 number 类型, 实际是 string
+caught pow str: 函数 Math.pow 参数 1 需要 number 类型, 实际是 string
+caught max str: 函数 Math.max 参数 1 需要 number 类型, 实际是 string
+caught take src: 函数 String.take 参数 1 需要 string 类型, 实际是 number
+caught take start: 函数 String.take 参数 2 需要 number 类型, 实际是 string
+caught has tgt: 函数 String.has 参数 2 需要 string 类型, 实际是 number
+caught findFirst from: 函数 String.findFirst 参数 3 需要 number 类型, 实际是 string
+caught replace tgt: 函数 String.replace 参数 3 需要 string 类型, 实际是 number
+caught and str: 函数 Bit.and 参数 1 需要 number 类型, 实际是 string
+caught shl str: 函数 Bit.shl 参数 2 需要 number 类型, 实际是 string
+caught take start: 字符串越界: String.take start=3 count=1 超出长度 3
+caught take count: 字符串越界: String.take start=1 count=3 超出长度 3
+caught take neg: 字符串越界: String.take start=-1 count=1 超出长度 3
+[]
+caught replace alltype: 函数 String.replace 参数 4 类型错误

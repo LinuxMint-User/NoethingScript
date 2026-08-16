@@ -1,0 +1,10 @@
+Tip: Run with --lang en for English messages.
+autoinit: help
+cmd=help
+verbose=false
+count=0
+ratio=1.5
+count+1=1
+ratio*2=3
+[ERROR 2] [行 28] 类型错误: 不能将常量 'cmd' 赋值
+done

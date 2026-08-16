@@ -1,0 +1,27 @@
+// modules/main/stack/stack/stack.ns — 定长栈模块 (元数据槽模式, 设计稿 §8)
+// 栈数组由调用方声明传入: st[0] 存栈顶下标 (空栈=0), 数据从 st[1] 起
+:newStack (mut st[]:int) -> :void
+st[0] = 0
+:end
+
+:push (mut st[]:int, v:int) -> :void
+assert (st[0] < len(st) - 1)
+"栈已满: 容量 " + (len(st) - 1)
+endasrt
+st[0] = st[0] + 1
+st[st[0]] = v
+:end
+
+:pop (mut st[]:int) -> v:int
+assert (st[0] > 0)
+"栈为空"
+endasrt
+v = st[st[0]]
+st[0] = st[0] - 1
+return v
+:end
+
+:size (st[]:int) -> n:int
+n = st[0]
+return n
+:end

@@ -1,0 +1,67 @@
+Tip: Run with --lang en for English messages.
+caught readonly: 数组 arr 是只读引用, 不能被赋值
+60
+10
+77
+77
+77
+5
+7
+3
+[ERROR 2] [行 67] 类型错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字
+after mismatch1
+[ERROR 2] [行 72] 类型错误: 形参 arr 为只读引用, 实参不能使用 mut 关键字
+after mismatch2
+15
+10
+2
+4
+6
+5
+99
+99
+77
+77
+5
+7
+3
+3
+y
+true
+4
+[ERROR 2] [行 203] 类型错误: 形参 arr 声明为 mut 可变引用, 实参必须使用 mut 关键字
+after mut literal
+[ERROR 2] [行 209] 类型错误: return 只能返回函数 badRet 声明的返回变量 out, 不能返回 arr
+[ERROR 2] [行 210] 类型错误: 函数 badRet 期望返回 array 类型的值, 但最终执行到函数结束标记
+after badRet
+1
+5
+1
+99
+3
+77
+6
+555
+77
+5
+33
+33
+readonly preserved: 数组 rrl 是只读引用, 不能被赋值
+77
+local readonly: 数组 la 是只读引用, 不能被赋值
+77
+tier int<-int ok
+tier float<-float ok
+[WARN] [行 307] 警告: 数组元素类型 int 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+tier num<-int ok
+[WARN] [行 309] 警告: 数组元素类型 float 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+tier num<-float ok
+tier num<-num ok
+[ERROR 2] [行 314] 类型错误: 数组类型不匹配: 期望 float 数组, 实际是 int 数组
+tier after float<-int err
+[ERROR 2] [行 317] 类型错误: 数组类型不匹配: 期望 int 数组, 实际是 float 数组
+tier after int<-float err
+[ERROR 2] [行 320] 类型错误: 数组类型不匹配: 期望 float 数组, 实际是 int 数组
+tier after float<-litint err
+[WARN] [行 323] 警告: 数组元素类型 int 装入 number 数组 (number 兼容 int/float, 建议明确声明为 int 或 float)
+tier num<-litint ok
