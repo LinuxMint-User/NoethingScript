@@ -83,7 +83,7 @@ node dist/noethingScript-Interpreter.js script.ns -- --cmd build -v -n 42
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`、`setCmdargs(args)`（脚本参数区，对应命令行 `--` 之后的部分）、`setModuleLoader(loader)`/`setModuleDir(dir)`/`setCurrentFilePath(path)`（模块加载能力注入），以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。交互执行完整示例见 `examples/2048_web.html`（脚本与命令行版 `examples/2048.ns` 同构、自持主循环）。
+`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`、`setCmdargs(args)`（脚本参数区，对应命令行 `--` 之后的部分）、`setModuleLoader(loader)`/`setModuleDir(dir)`/`setCurrentFilePath(path)`（模块加载能力注入）、`registerGlobal(name, obj)`（宿主 JS 对象注入，NS 中以 `名字.函数()` 点分调用，返回值限 `number`/`string`/`boolean`/`Array`，见 doc.md "JS 能力注入"），以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。交互执行完整示例见 `examples/2048_web.html`（脚本与命令行版 `examples/2048.ns` 同构、自持主循环）。
 
 ## 示例
 

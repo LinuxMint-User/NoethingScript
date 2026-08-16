@@ -142,6 +142,7 @@ interface ModuleNamespace {
     slotIndex: { [frameKey: string]: { [slot: number]: Variable } }; // 模块运行时槽位索引
     autoinitRange: { start: number; end: number } | null;   // autoinit 块行范围 (模块源码内, 行解释器执行区间)
     globalLines: number[];                             // 模块内 global 声明行 (加载期执行建立私有全局)
+    jsObj?: any;                                       // JS 注入对象 (registerGlobal, §6): 非空 = 注入命名空间 (无模块上下文)
 }
 
 // cmdargs param 声明定义 (设计稿 §5.2.3): param 名:类型 = 默认值 [as "短名"]
@@ -167,6 +168,8 @@ var MODULE_LOADER: ((name: string) => string | null) | null = null;
 var MODULE_DIR: string = 'modules';                              // 唯一可配置模块目录 (设计稿 §7.3)
 var MODULE_REGISTRY: { [key: string]: ModuleNamespace } = {};    // 已加载模块实例 (key = source/pkg/module, 跨文件幂等 §2.2)
 var PROGRAM_MODULE_OBJS: { [objName: string]: ModuleNamespace } = {};  // 主程序 use 的对象名表
+var JS_GLOBAL_OBJS: { [objName: string]: ModuleNamespace } = {};       // JS 注入对象表 (registerGlobal, §6; 宿主级配置, 跨 run 保留)
+const JS_ARG_EVAL_FAILED = Symbol('jsArgEvalFailed');                  // evalArgForJS 求值失败哨兵
 var CURRENT_MODULE: ModuleNamespace | null = null;               // 当前执行上下文所在模块 (null = 主程序; 模块函数/autoinit 执行期间非空)
 var SKIP_LINES: Set<number> = new Set();                         // 模块被 use 时跳过的顶层行 (仅 autoinit 区间执行; 主程序为空集)
 var HEADER_BLOCKS: HeaderBlocks = {                              // 当前文件头部块解析结果 (M2 起, loadProgram 时建立)
@@ -497,7 +500,9 @@ interface FunctionInfo {
     returnVarName?: string;
     returnArrayElementType?: DataType;  // 数组返回值元素类型 (-> st[]:int 中的 int)
     // hasReturnStatement: boolean; // 目前弃用的属性
-
+    // JS 注入函数 (设计稿 §6 registerGlobal): 无 NS 函数体, 调用直接执行宿主 JS 函数;
+    // 实参宽松求值 (不按 NS 形参类型转换), 返回值限四类 (number/string/boolean/Array)
+    isJS?: boolean;
 }
 
 // 异常类型定义
@@ -622,6 +627,11 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_unclosed_at_eof: '函数定义错误: 程序结束时仍有未结束的函数',
         unsupported_data_type: '不支持的数据类型: {type}',
         func_undefined: '函数 \'{name}\' 未定义',
+        js_global_call_error: 'JS 注入函数调用失败 {name}: {error}',
+        js_global_bad_return: 'JS 注入函数 {name} 返回非法值 (仅接受 number/string/boolean/Array)',
+        js_global_arg_error: 'JS 注入函数实参无法求值: {arg}',
+        js_global_bad_name: 'registerGlobal: 非法注入名 \'{name}\' (须为标识符)',
+        js_global_bad_obj: 'registerGlobal: 注入对象须为包含函数成员的对象',
         func_result_var_missing: '函数 {name} 有返回值, 但未指定结果变量',
         func_result_var_unexpected: '函数 {name} 无返回值, 但指定了结果变量',
         func_arg_count_insufficient: '传入函数 {name} 的参数数量过少: 期望 {expected}, 实际 {actual}',
@@ -1041,6 +1051,11 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         func_unclosed_at_eof: 'Function definition error: an unclosed function remains at the end of the program',
         unsupported_data_type: 'Unsupported data type: {type}',
         func_undefined: 'Function \'{name}\' is not defined',
+        js_global_call_error: 'JS-injected function call failed {name}: {error}',
+        js_global_bad_return: 'JS-injected function {name} returned an invalid value (only number/string/boolean/Array are accepted)',
+        js_global_arg_error: 'Cannot evaluate argument for JS-injected function: {arg}',
+        js_global_bad_name: 'registerGlobal: invalid injection name \'{name}\' (must be an identifier)',
+        js_global_bad_obj: 'registerGlobal: injected object must be an object with function members',
         func_result_var_missing: 'Function {name} has a return value but no result variable was specified',
         func_result_var_unexpected: 'Function {name} has no return value but a result variable was specified',
         func_arg_count_insufficient: 'Too few arguments passed to function {name}: expected {expected}, got {actual}',
@@ -3851,9 +3866,176 @@ class Interpreter {
         const member = funcName.substring(dotIdx + 1);
         const objTable = CURRENT_MODULE ? CURRENT_MODULE.uses : PROGRAM_MODULE_OBJS;
         const ns = objTable[objName];
-        if (!ns) return null;
-        const fi = ns.funcs[member];
-        return fi ? { funcInfo: fi, ns } : null;
+        if (ns) {
+            const fi = ns.funcs[member];
+            return fi ? { funcInfo: fi, ns } : null;
+        }
+        // JS 注入对象 fallback (设计稿 §6): NS 模块对象优先, 注入对象同形 (`名字.函数()`);
+        // ns 返回 null (无模块上下文, 调用走 JS 分支), 由 funcInfo.isJS 区分
+        const jsNs = JS_GLOBAL_OBJS[objName];
+        if (jsNs) {
+            const fi = jsNs.funcs[member];
+            return fi ? { funcInfo: fi, ns: null } : null;
+        }
+        return null;
+    }
+
+    // ===== JS 注入函数 (设计稿 §6 registerGlobal) =====
+    // 实参拆分 (与 executeCall 局部 splitCallArguments 同逻辑: 忽略数组字面量/字符串内部逗号); JS 注入函数路径复用
+    static splitCallArguments(s: string): string[] {
+        const parts: string[] = [];
+        let depth = 0;
+        let cur = '';
+        let inString = false;
+        let delimiter = '';
+        for (let i = 0; i < s.length; i++) {
+            const c = s[i];
+            if (!inString && (c === '"' || c === "'")) { inString = true; delimiter = c; cur += c; }
+            else if (inString && c === delimiter) { inString = false; cur += c; }
+            else if (!inString && c === '[') { depth++; cur += c; }
+            else if (!inString && c === ']') { depth--; cur += c; }
+            else if (!inString && c === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; }
+            else cur += c;
+        }
+        if (cur.trim()) parts.push(cur.trim());
+        return parts;
+    }
+
+    // 实参宽松求值 (JS 值直传, 不按 NS 形参类型转换; 与 NS 函数调用体验一致: 字面量/变量/数组/表达式)
+    static evalArgForJS(argStr: string, lineNo: number): any {
+        const s = argStr.trim();
+        if (s.length >= 2 && s.charAt(0) === '"' && s.charAt(s.length - 1) === '"') {
+            return s.slice(1, -1); // 字符串字面量
+        }
+        if (s === 'true') return true;
+        if (s === 'false') return false;
+        if (s.length >= 2 && s.charAt(0) === '[' && s.charAt(s.length - 1) === ']') {
+            // 数组字面量: 逐元素宽松求值
+            const elementStrs = Interpreter.splitArrayElements(s.slice(1, -1));
+            const arr: any[] = [];
+            for (const es of elementStrs) {
+                const v = Interpreter.evalArgForJS(es, lineNo);
+                if (v === JS_ARG_EVAL_FAILED) return JS_ARG_EVAL_FAILED;
+                arr.push(v);
+            }
+            return arr;
+        }
+        // 标识符 / global. 前缀: 查变量 (数组 → JS Array 值数组)
+        const forceGlobal = s.startsWith('global.');
+        const name = forceGlobal ? s.slice(7) : s;
+        if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+            const v = ScopeManager.getVariable(name, lineNo, true, forceGlobal);
+            if (v) {
+                if (v.type === DataType.ARRAY && v.arrayElements) {
+                    return v.arrayElements.map((e: ArrayElement) => e.value);
+                }
+                return v.value;
+            }
+        }
+        // 数字字面量 (含进制)
+        try {
+            const num = Interpreter.parseValue(s, DataType.NUMBER);
+            if (typeof num === 'number' && isFinite(num)) return num;
+        } catch (e) { /* 非数字, 落表达式兜底 */ }
+        // 表达式兜底 (如 data[0] / a + 1 / Math.abs(-3))
+        try {
+            return Interpreter.evaluateExpression(s);
+        } catch (e) {
+            if (isInputSuspend(e)) throw e;
+            reportError(ExceptionType.TYPE_ERROR, t('js_global_arg_error', { arg: s }));
+            return JS_ARG_EVAL_FAILED;
+        }
+    }
+
+    // 返回值四类校验 (number/string/boolean/Array; NaN/Infinity 拒收, 与语言数字规则一致)
+    static isValidJSReturn(value: any): boolean {
+        if (typeof value === 'number') return isFinite(value);
+        if (typeof value === 'string') return true;
+        if (typeof value === 'boolean') return true;
+        if (Array.isArray(value)) return true;
+        return false;
+    }
+
+    // JS 值 → NS 类型推断 (数组元素类型/未声明结果变量类型用; 与 inferLiteralElement 一致: 整数→INT 小数→FLOAT)
+    static inferJsValueType(value: any): DataType {
+        if (typeof value === 'number') return Number.isInteger(value) ? DataType.INT : DataType.FLOAT;
+        if (typeof value === 'string') return DataType.STRING;
+        if (typeof value === 'boolean') return DataType.BOOL;
+        return DataType.NUMBER; // 不应发生 (已四类校验)
+    }
+
+    // 结果变量赋值: 已声明 → 类型检查更新 (数组返回 → 结构替换); 未声明 → 按 JS 值类型新建局部变量
+    static assignJsResult(resultVar: string, value: any, lineNo: number, funcName: string): void {
+        const forceGlobal = resultVar.startsWith('global.');
+        const name = forceGlobal ? resultVar.slice(7) : resultVar;
+        const existing = ScopeManager.getVariableInfo(name, lineNo, forceGlobal);
+        if (existing) {
+            if (Array.isArray(value)) {
+                if (existing.type !== DataType.ARRAY) {
+                    reportError(ExceptionType.TYPE_ERROR, t('result_var_not_array', { name: resultVar }));
+                    return;
+                }
+                existing.arrayElements = value.map((v: any) => ({ value: v, type: Interpreter.inferJsValueType(v) }));
+                existing.arrayLength = value.length;
+                existing.arrayElementType = existing.arrayElements.length > 0 ? existing.arrayElements[0].type : DataType.NUMBER;
+                existing.isReadonlyArray = false;
+                return;
+            }
+            ScopeManager.setVariable(resultVar, value, lineNo, forceGlobal);
+            return;
+        }
+        // 未声明: 按 JS 值类型新建局部变量 (作用域从当前行到程序结束)
+        if (Array.isArray(value)) {
+            const elements = value.map((v: any) => ({ value: v, type: Interpreter.inferJsValueType(v) }));
+            const newVar: Variable = {
+                name, value: "请使用arrayElements属性访问数组元素", type: DataType.ARRAY,
+                isGlobal: false, isConst: false, startLine: lineNo, endLine: -1,
+                arrayLength: elements.length,
+                arrayElementType: elements.length > 0 ? elements[0].type : DataType.NUMBER,
+                arrayElements: elements, isReadonlyArray: false
+            };
+            LOCAL_VARS.push(newVar);
+            indexSlotVar(newVar);
+            return;
+        }
+        const vt = Interpreter.inferJsValueType(value);
+        const rvIdx = LOCAL_VARS.length;
+        ScopeManager.addVariable(resultVar, value, vt, lineNo, -1, false);
+        if (LOCAL_VARS.length > rvIdx) indexSlotVar(LOCAL_VARS[rvIdx]);
+    }
+
+    // 统一入口: 调宿主 JS 函数 (this = 注入对象) → 四类校验 → 结果赋值; 行解释器与 NSVM 共用
+    static executeJSFunctionCall(funcName: string, funcInfo: FunctionInfo, argExprs: string[], resultVar: string | undefined): void {
+        const dotIdx = funcName.indexOf('.');
+        const objName = dotIdx === -1 ? funcName : funcName.substring(0, dotIdx);
+        const jsNs = JS_GLOBAL_OBJS[objName];
+        const fn = jsNs && jsNs.jsObj ? (jsNs.jsObj as any)[funcInfo.name] : undefined;
+        if (!jsNs || !jsNs.jsObj || typeof fn !== 'function') {
+            throw { type: ExceptionType.REFERENCE_ERROR, message: t('func_undefined', { name: funcName }), lineNumber: currentLinePointer } as Exception;
+        }
+        // 实参宽松求值 (失败已 reportError, 调用方继续执行)
+        const args: any[] = [];
+        for (let i = 0; i < argExprs.length; i++) {
+            const v = Interpreter.evalArgForJS(argExprs[i], currentLinePointer);
+            if (v === JS_ARG_EVAL_FAILED) return;
+            args.push(v);
+        }
+        let result: any;
+        try {
+            result = fn.apply(jsNs.jsObj, args);
+        } catch (e) {
+            // JS 宿主异常 → TypeError 抛出 (可被 NS try-catch 捕获), 消息带注入对象名;
+            // 跨 realm (vm/浏览器) 时 instanceof 不可靠, 按 message 属性提取
+            const msg = (e !== null && typeof e === 'object' && 'message' in (e as any)) ? String((e as any).message) : String(e);
+            throw { type: ExceptionType.TYPE_ERROR, message: t('js_global_call_error', { name: funcName, error: msg }), lineNumber: currentLinePointer } as Exception;
+        }
+        if (!Interpreter.isValidJSReturn(result)) {
+            reportError(ExceptionType.TYPE_ERROR, t('js_global_bad_return', { name: funcName }));
+            return;
+        }
+        if (resultVar !== undefined) {
+            Interpreter.assignJsResult(resultVar, result, currentLinePointer, funcName);
+        }
     }
 
     static executeCall(params: string): void {
@@ -3900,6 +4082,13 @@ class Interpreter {
 
         const funcInfo = resolved.funcInfo;
         debugLog(2, () => t('dbg_func_info'), funcInfo);
+
+        // JS 注入函数 (设计稿 §6 registerGlobal): 无 NS 函数体/形参, 不走 NS 参数解析与函数帧;
+        // 宽松求值实参 → 调宿主 JS → 四类校验 → 结果赋值 (函数名非法/宿主异常抛错可被 try-catch 捕获)
+        if (funcInfo.isJS) {
+            Interpreter.executeJSFunctionCall(funcName, funcInfo, Interpreter.splitCallArguments(argsStr), resultVar);
+            return;
+        }
 
         // 检查返回值变量
         if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) {
@@ -8884,6 +9073,16 @@ class NSVMCompiler {
                     const resolved = Interpreter.resolveFunction(funcName);
                     if (!resolved) return null;
                     const funcInfo = resolved.funcInfo;
+                    // JS 注入函数 (设计稿 §6 registerGlobal): 无 NS 形参声明 — 跳过形参个数/模式/返回值规则
+                    // 校验 (运行期宽松处理), 编译进 NSVM 由执行器 executeCallCompiled JS 分支调用, 不整体回退
+                    if (funcInfo.isJS) {
+                        const jsArgValues = this.splitCallArgs(argsStr);
+                        const fnK = this.constIndex(funcName);
+                        const modesK = this.constIndex(Int32Array.from(jsArgValues.map(() => 0)));
+                        const metaK = this.constIndex({ funcName, callParams: p, content: LINE_INFO[line].content, argExprs: jsArgValues, resultVar, bodyStartLine: 0 } as NSVMCallMeta);
+                        this.emit(NSVMOp.CALLFUNC, fnK, modesK, metaK);
+                        break;
+                    }
                     if (resultVar === undefined && funcInfo.returnType !== DataType.UNDEFINED) return null; // func_result_var_missing → 回退
                     if (resultVar !== undefined && funcInfo.returnType === DataType.UNDEFINED) return null; // func_result_var_unexpected → 回退
                     // 实参拆分 + 个数校验 (不足报错 func_arg_count_insufficient / 多余警告 func_extra_args_ignored, 均为运行期行为 → 不匹配即回退)
@@ -9862,6 +10061,13 @@ class NSVMExecutor {
             throw { type: ExceptionType.REFERENCE_ERROR, message: t('func_undefined', { name: fnK }), lineNumber: currentLinePointer } as Exception;
         }
         const funcInfo = resolvedFn.funcInfo;
+        // JS 注入函数 (设计稿 §6 registerGlobal): 不走 NS 实参解析/函数帧/模块上下文 —
+        // 宽松求值实参 → 调宿主 JS → 四类校验 → 结果赋值, 调用方帧 pc++ 继续
+        if (funcInfo.isJS) {
+            Interpreter.executeJSFunctionCall(fnK, funcInfo, meta.argExprs, meta.resultVar);
+            frame.pc++;
+            return null;
+        }
         const oldPc = frame.pc;
         // 复刻 executeCommand CALL 分发 → executeCall 入口调试输出 (先 debug 2 执行指令, 后 debug 1 开始执行函数调用)
         // 惰性化: DEBUG_LEVEL 不足时短路, 免闭包创建 (热路径: 每调用 ~20 个 debugLog 闭包)
@@ -10144,6 +10350,56 @@ function nsiSetCurrentFilePath(filePath: string): void {
     CURRENT_FILE_PATH = filePath;
 }
 
+// 浏览器入口 (设计稿 §6 JS 能力分层): 注入宿主 JS 对象 — NS 代码中以 `名字.函数()` 点分调用,
+// 与 NS 模块同形 (脚本作者无感知)。注入对象成员为函数 → 收录为 JS 注入函数 (isJS 标记,
+// 调用走宽松实参求值 + 返回值四类校验 number/string/boolean/Array); 非函数成员忽略。
+// 同名覆盖注册; 点分解析顺序: NS 模块对象优先, 注入对象次之。
+// Node/CLI 场景: 本能力由宿主经 NSI 注入 (模块管理器 M7 将经此注入 fs/http, 见 design.md §9.1)。
+function nsiRegisterGlobal(name: string, obj: any): void {
+    if (typeof name !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+        console.error(t('js_global_bad_name', { name: String(name) }));
+        return;
+    }
+    if (obj === null || typeof obj !== 'object') {
+        console.error(t('js_global_bad_obj'));
+        return;
+    }
+    const funcs: { [member: string]: FunctionInfo } = {};
+    for (const member of Object.keys(obj)) {
+        const fn = (obj as any)[member];
+        if (typeof fn === 'function') {
+            funcs[member] = {
+                name: member,
+                params: [],
+                returnType: DataType.UNDEFINED, // JS 注入函数无 NS 类型声明; 返回值校验由运行期四类检查负责
+                startLine: 0,
+                endLine: 0,
+                isJS: true
+            };
+        }
+    }
+    JS_GLOBAL_OBJS[name] = {
+        source: 'js',
+        pkg: '',
+        module: '',
+        objName: name,
+        funcs,
+        funcBlocks: new Map(),
+        globals: {},
+        uses: {},
+        returnValues: {},
+        sourceLines: [],
+        lineInfo: [],
+        tags: {},
+        slotDecls: [],
+        slotByName: new Map(),
+        slotIndex: {},
+        autoinitRange: null,
+        globalLines: [],
+        jsObj: obj
+    };
+}
+
 // 浏览器入口: 切换输出语言 ('zh' | 'en')
 function nsiSetLanguage(lang: 'zh' | 'en'): void {
     if (lang === 'en' || lang === 'zh') {
@@ -10198,6 +10454,7 @@ if (typeof window !== 'undefined') {
         setModuleLoader: nsiSetModuleLoader,
         setModuleDir: nsiSetModuleDir,
         setCurrentFilePath: nsiSetCurrentFilePath,
+        registerGlobal: nsiRegisterGlobal,
         Interpreter: Interpreter,
         ExpressionEvaluator: ExpressionEvaluator,
         ScopeManager: ScopeManager,

@@ -663,6 +663,24 @@ call stack.pop(mut st) -> v
 
 浏览器需注入模块加载能力（嵌入式刚需）：`NSI.setModuleLoader(name => 源码字符串)`（同步原语，`name` 为模块定位名，不存在返回 `null`）、`NSI.setModuleDir(dir)`（配置模块目录，默认 `modules`）、`NSI.setCurrentFilePath(path)`（设置当前文件定位标识，供 `use inner` 定位包根）。
 
+### JS 能力注入 (registerGlobal)
+
+宿主可注入 JS 对象（`NSI.registerGlobal(name, obj)`，Node/CLI 场景由宿主注入，模块管理器将经此获得 fs/http 能力），NS 代码中以 `名字.函数()` 点分调用，与 NS 模块**同形**（脚本作者无感知）：
+
+- 注入对象成员为函数 → 收录为可调用成员；非函数成员忽略；同名注册覆盖
+- 实参**宽松求值**：数字/字符串/布尔/数组字面量、变量、数组、表达式均可直接传入，JS 侧收到原生 JS 值（NS 值底层即 JS 值）
+- 返回值**限四类**：`number`/`string`/`boolean`/`Array`；返回对象/函数等视为非法值报错，`NaN`/`Infinity` 同样拒收；结果变量未声明时按 JS 值类型自动建变量
+- 宿主函数抛异常 → `TypeError`（消息带注入对象名，可 `try-catch`）；调用未定义成员 → `ReferenceError`（可捕获）
+- 点分解析顺序：NS 模块对象优先，注入对象次之；注入对象对模块函数同样可见（模块上下文内可调用）
+
+```ns
+// 宿主先执行: NSI.registerGlobal('jm', { add: (a, b) => a + b, isPos: (n) => n > 0 })
+call jm.add(2, 3) -> r
+print r           // 5
+call jm.isPos(-1) -> b
+print b           // false
+```
+
 ## 关键字列表
 ```ns
 global, local, number, int, float, string, bool, array, 

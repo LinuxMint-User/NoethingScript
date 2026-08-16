@@ -18,6 +18,7 @@
 | 7 | 模块调用性能实测 | 验证结果（非偏差） | — |
 | 8 | M7 模块管理器未实现 | 待办（非偏差） | 等用户决定 |
 | 9 | input() 不支持 cast 类型（普通变量无 cast 类型） | 设计未实现（§5.2.5） | 保持（doc.md 已按实现修正） |
+| 10 | registerGlobal JS 能力注入（§6） | 已实现（M7 前置, 2026-08-16） | 完成 |
 
 ---
 
@@ -82,3 +83,16 @@
 - **实现**: `cast.int`/`cast.float` **仅存在于 cmdargs param 定义**（`CmdargParamDef.type`）；普通变量声明不支持 cast 类型——`global ratio:cast.float = 1.5` 直接报语法错误（声明格式错误），`input()` 返回 string，需 `int()`/`float()` 显式转换。
 - **验证**: 实测 `global ratio:cast.float` 报 `[ERROR 1] 语法错误: 全局变量声明格式应为 "global [const] 变量名:类型 = 值"`。
 - **影响**: doc.md 原「`cast.类型`（两条输入通道共用的…接收类型）」为设计稿回声、与实际不符，已按实现修正为「cast 仅限 cmdargs 的 param」。
+
+## 10. registerGlobal JS 能力注入（已实现，§6，M7 前置）
+
+- **设计**: JS 能力分层（§6）——宿主 `registerGlobal(name, obj)` 注入 JS 对象，NS 代码中与 NS 模块**同形**（`名字.函数()` 点分调用），值互通零转换，注入对象返回值限四类（number/string/boolean/Array），返回对象/函数等视为非法值报错。
+- **实现**（2026-08-16）:
+  1. `NSI.registerGlobal(name, obj)` 挂载（浏览器）；注入对象包装为伪 `ModuleNamespace`（`source='js'`、`jsObj` 存原始对象），函数成员收录为 `FunctionInfo.isJS` 标记；**非函数成员忽略、同名注册覆盖**（设计未明示）。
+  2. 调用路径：`resolveFunction` 点分分支加 JS 注入 fallback（**NS 模块对象优先**，注入对象次之，设计未明示的解析顺序）；行解释器与 NSVM 双路径经统一入口 `executeJSFunctionCall`（NSVM 编译期跳过形参个数/模式/返回值规则校验，不整体回退）；模块上下文（模块函数内）同样可见注入对象。
+  3. 实参**宽松求值**（`evalArgForJS`）：数字/字符串/布尔/数组字面量、变量、数组（转 JS Array 值数组）、表达式兜底；**实参个数不校验**（JS 函数 arity 运行期自然处理，设计未明示，与宽松语义一致）。
+  4. 返回值校验：四类 + **`NaN`/`Infinity` 拒收**（与语言非有限值规则一致）；结果变量未声明时按 JS 值类型自动建变量（整数→INT 小数→FLOAT，数组→数组变量），已声明走现有 `setVariable` 类型检查。
+  5. 错误语义：宿主函数抛异常 → `TypeError`（消息带注入对象名，可 `try-catch`）；调用未定义成员 → `ReferenceError`（可捕获）；非法返回值 → `reportError` 不中断。
+- **设计未明示处决策**: ① 非函数成员忽略/同名覆盖；② 模块对象优先的解析顺序；③ 实参个数不校验；④ **Node/CLI 场景暂无可注入入口**（浏览器经 `NSI.registerGlobal`，Node 宿主注入留给 M7——模块管理器将经此获得 fs/http）。
+- **实现注意**: 跨 realm（vm/浏览器）宿主 `Error` 的 `instanceof` 不可靠，异常消息按 `message` 属性提取（`Error: boom` vs `boom`）。
+- **验证**: `tests/js_global_tests.js`（14 项：四类返回值/数组实参与返回/表达式实参/跨作用域/模块共存/模块内调用/宿主异常与未定义成员可捕获/非法返回值/注册校验），全过；26 项回归逐字节一致。
