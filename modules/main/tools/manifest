@@ -1,7 +1,7 @@
 {
   "package": "tools",
   "version": "0.1.0",
-  "ns": "2.7",
+  "ns": "2.8",
   "source": "main",
   "description": "通用工具函数集合 (依赖 stack)",
   "modules": [

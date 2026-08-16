@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.7.4";
+const NSIVersion: string = "2.8.0";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -165,7 +165,7 @@ interface HeaderBlocks {
 // 模块加载器 (设计稿 §7.1): NSI.setModuleLoader 注入; Node 默认 fs 读 modules/, 浏览器宿主预取后同步查 map。
 // 同步原语: (name => 源码字符串 | null), 返回 null = 模块不存在 (加载器报"模块不存在").
 var MODULE_LOADER: ((name: string) => string | null) | null = null;
-var MODULE_DIR: string = 'modules';                              // 唯一可配置模块目录 (设计稿 §7.3)
+var MODULE_DIR: string = 'modules';                              // 唯一可配置模块目录 (设计稿 §7.3); Node 默认 = 解释器文件同目录 modules/, 浏览器由 setModuleDir 配置
 var MODULE_REGISTRY: { [key: string]: ModuleNamespace } = {};    // 已加载模块实例 (key = source/pkg/module, 跨文件幂等 §2.2)
 var PROGRAM_MODULE_OBJS: { [objName: string]: ModuleNamespace } = {};  // 主程序 use 的对象名表
 var JS_GLOBAL_OBJS: { [objName: string]: ModuleNamespace } = {};       // JS 注入对象表 (registerGlobal, §6; 宿主级配置, 跨 run 保留)
@@ -5047,6 +5047,8 @@ class Interpreter {
 
                 // 弹出函数帧（必须先弹出，防止后续遍历到残留的旧函数帧）
                 CONTROL_FLOW_STACK.pop();
+                // 清理本函数范围内残留的 try/catch 标记 (try/catch 块内提前 return 未走到 endtry, 见 cleanupFunctionLeakFrames)
+                Interpreter.cleanupFunctionLeakFrames(block.startLine, block.endLine);
                 // 清理本帧局部变量: 帧变量按 LIFO 连续位于 LOCAL_VARS 尾部, 截断到调用时位置即可 (O(1), 替代 O(n) filter)
                 // 注意: 无需重建槽位索引 — 函数帧ID单调递增不复用, 被清理帧的陈旧槽位条目不可达 (readSlot 仅经活动控制流栈查找)
                 LOCAL_VARS.length = block.frameVarStart;
@@ -5811,6 +5813,30 @@ class Interpreter {
         }
     }
 
+    // 函数返回/结束清理: 本函数内 try/catch 块提前 return (catch 捕获后 return 或 try 无异常直接 return)
+    // 未走到 endtry 时, EXCEPTION_STACK 残留 TRY_BLOCK/CATCH_BLOCK 标记、CONTROL_FLOW_STACK 残留 try 帧。
+    // 残留后果: 外层调用者正常流程执行到自己的 catch 行 (跳过 catch 块体) 时,
+    // executeCatch 情况二检查栈顶 == TRY_BLOCK 失败 (栈顶是残留的 CATCH_BLOCK), 误报"catch语句没有匹配的try块"。
+    static cleanupFunctionLeakFrames(startLine: number, endLine: number): void {
+        while (EXCEPTION_STACK.length > 0) {
+            const top = EXCEPTION_STACK[EXCEPTION_STACK.length - 1];
+            if ((top.type === ExceptionType.TRY_BLOCK || top.type === ExceptionType.CATCH_BLOCK) &&
+                top.lineNumber >= startLine && top.lineNumber <= endLine) {
+                EXCEPTION_STACK.pop();
+            } else {
+                break;
+            }
+        }
+        while (CONTROL_FLOW_STACK.length > 0) {
+            const top = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+            if (top.type === 'try' && top.start >= startLine && top.start <= endLine) {
+                CONTROL_FLOW_STACK.pop();
+            } else {
+                break;
+            }
+        }
+    }
+
     // 执行endtry语句
     static executeEndTry(): void {
         // 清理本 try-catch 块内声明的局部变量 (含 catch 异常变量), 防止重复执行时同名冲突
@@ -6520,6 +6546,8 @@ class Interpreter {
                 // 回收该帧的槽位索引条目, 防止 SLOT_INDEX 随调用次数无限增长
                 delete SLOT_INDEX[String(block.frameId)];
                 CONTROL_FLOW_STACK.pop();
+                // 清理本函数范围内残留的 try/catch 标记 (见 cleanupFunctionLeakFrames)
+                Interpreter.cleanupFunctionLeakFrames(block.startLine, block.endLine);
                 // 模块函数: 弹出帧后恢复调用方执行上下文
                 if (block.savedCtx) {
                     popModuleContext(block.savedCtx);
@@ -8580,6 +8608,13 @@ function buildFsCapability(): any {
             fs.writeFileSync(String(p), JSON.stringify({ packages: arr }, null, 2) + '\n');
             return true;
         },
+        // M7 模块管理器: 生成并写入仓库镜像配置文件 {MOD}/.nsm-mirrors.json — 结构固定 {mirrors:[url,...]},
+        // 与 readJsonArray 读写对称; JSON 组装无法在 NS 侧完成 (字符串字面量不转义), 由本能力代做; nsm -- init 用
+        writeMirrorsConfig(p: string, mirrors: string[], n: number): boolean {
+            const cnt = Math.max(0, Math.floor(n));
+            fs.writeFileSync(String(p), JSON.stringify({ mirrors: mirrors.slice(0, cnt).map(String) }, null, 2) + '\n');
+            return true;
+        },
         // M7 模块管理器: 当前时间 (epoch 毫秒, DNF 式缓存 TTL 判断用)
         now(): number { return Date.now(); },
         // M7 模块管理器: 当前模块目录 (命令行 --modules 配置值; nsm 安装目标基准)
@@ -8948,9 +8983,12 @@ function main() {
             }
         }
 
-        // 模块目录设置 (设计稿 §7.3): 命令行 --modules 配置唯一模块目录 (默认 'modules')
+        // 模块目录设置 (设计稿 §7.3): 默认 = 解释器文件同目录的 modules/ ("解释器同目录", 跟随解释器而非 cwd);
+        // --modules 可指定绝对路径或相对 cwd 的相对路径, 统一解析为绝对路径保存 (fs.moduleDir()/nsm 等拿绝对路径)
         if (modulesArg !== undefined) {
-            MODULE_DIR = modulesArg;
+            MODULE_DIR = path.isAbsolute(modulesArg) ? path.normalize(modulesArg) : path.resolve(process.cwd(), modulesArg);
+        } else {
+            MODULE_DIR = path.join(path.dirname(process.argv[1]), 'modules');
         }
 
         // --help / --version: 独立参数, 显示后直接退出 (不读取脚本); 仅检查分隔符 `--` 前的解释器参数, 脚本参数区内同名串不算

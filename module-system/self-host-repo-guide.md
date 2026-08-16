@@ -25,8 +25,8 @@ NSModules/                        ← 仓库根（基址指向此处）
 │   ├── main.manifest.json        ← main 来源清单（必选）
 │   └── extra.manifest.json       ← extra 来源清单（可选）
 └── packages/
-    ├── greet@0.1.0-v2.7.zip
-    ├── hello@0.1.0-v2.7.zip
+    ├── greet@0.1.0-v2.8.zip
+    ├── hello@0.1.0-v2.8.zip
     └── ...
 ```
 
@@ -44,14 +44,14 @@ NSModules/                        ← 仓库根（基址指向此处）
     {
       "package": "greet",
       "version": "0.1.0",
-      "ns": "2.7",
-      "zip": "greet@0.1.0-v2.7.zip"
+      "ns": "2.8",
+      "zip": "greet@0.1.0-v2.8.zip"
     },
     {
       "package": "hello",
       "version": "0.1.0",
-      "ns": "2.7",
-      "zip": "hello@0.1.0-v2.7.zip"
+      "ns": "2.8",
+      "zip": "hello@0.1.0-v2.8.zip"
     }
   ]
 }
@@ -61,14 +61,14 @@ NSModules/                        ← 仓库根（基址指向此处）
 |---|---|---|
 | `package` | 是 | 包名，必须与压缩包内 `manifest.package` 一致（nsm 安装时校验） |
 | `version` | 是 | 包版本号 `x.y.z`（nsm 用 `cmpVer` 做升级比较；`update` 安全更新 / `upgrade` 跨适配段升级据此判定） |
-| `ns` | 是 | **适配段**，如 `"2.7"`——该包要求解释器版本不低于此段（`verMatches`：适配 ≤ 解释器版本才允许安装；不匹配报"适配不匹配"，`--force` 跳过） |
+| `ns` | 是 | **适配段**，如 `"2.8"`——该包要求解释器版本不低于此段（`verMatches`：适配 ≤ 解释器版本才允许安装；不匹配报"适配不匹配"，`--force` 跳过） |
 | `zip` | 是 | 压缩包**文件名**（nsm 直接拼 `packages/` + 此值；文件名惯例见 §4，但以清单为准） |
 
 维护约定：
 
 - 同一 `package` 只保留一个条目即可——nsm 认为清单即"当前可用版本"（没有多版本共存机制）；
 - 升级包时：更新清单 `version`/`zip` 指向新压缩包；nsm 检测到已装版本 < 清单版本即可 `update`；
-- **跨适配段**（如 `ns` 从 `2.7` 升到 `3.0`）：`update` 安全更新会跳过，须用 `upgrade`（含确认，`--force`/`-y` 跳过）；
+- **跨适配段**（如 `ns` 从 `2.8` 升到 `3.0`）：`update` 安全更新会跳过，须用 `upgrade`（含确认，`--force`/`-y` 跳过）；
 - 删除包：从清单移除条目即可（nsm 不主动清理，`remove` 由用户本地执行）。
 
 ---
@@ -78,7 +78,7 @@ NSModules/                        ← 仓库根（基址指向此处）
 ### 4.1 命名惯例
 
 ```
-{包名}@{版本}-v{适配}.zip     例: greet@0.1.0-v2.7.zip
+{包名}@{版本}-v{适配}.zip     例: greet@0.1.0-v2.8.zip
 ```
 
 这是 `nsmp -- pack` 的默认产物命名。**nsm 实际以清单 `zip` 字段为准**，不解析文件名——只要清单写的文件名与实际文件一致，随意命名也能工作（但请遵守惯例，便于人工核对）。
@@ -86,7 +86,7 @@ NSModules/                        ← 仓库根（基址指向此处）
 ### 4.2 zip 内部结构
 
 ```
-greet@0.1.0-v2.7.zip
+greet@0.1.0-v2.8.zip
 └── greet/                    ← 顶层目录名 = 包名（关键！nsm 定位 {解压目录}/{包名}/manifest）
     ├── manifest              ← 包清单（JSON，无扩展名）
     ├── greet/
@@ -106,7 +106,7 @@ greet@0.1.0-v2.7.zip
 {
   "package": "greet",
   "version": "0.1.0",
-  "ns": "2.7",
+  "ns": "2.8",
   "source": "main",
   "description": "...",
   "modules": ["greet"],
@@ -183,11 +183,28 @@ node dist/noethingScript-Interpreter.js nsm -- install hello
     ]
   }
   ```
-  上限 4 个，顺序即回退顺序。文件缺失/解析失败/数组为空 → 回退内置默认并打提示。**NS 无法写 JSON**（字符串字面量不转义、引号字符无法表达），配置文件由你手动编辑，nsm 只读；
+  上限 4 个，顺序即回退顺序。文件缺失/解析失败/数组为空 → 回退内置默认并打提示。**不必手写**——`nsm -- init` 一键生成（见 §6.3）；
 - **命令行 `--repo`**：临时覆盖，优先级最高；逗号分隔多镜像按序回退，单基址只用它；
 - **内置默认**：`https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`（主）+ `https://gitee.com/epix-xhan/NoethingScriptModules/raw/main`（镜像）——**官方模块仓库 GitHub + Gitee 双镜像均已建立**（2026-08-16，6 个包：nsm/nsmp/stack/tools/queue/set，按序回退）。Gitee 镜像经"从 GitHub 导入/同步"保持与 GitHub 一致。
 
-### 6.2 查看生效镜像
+### 6.2 生成镜像配置文件 (init)
+
+`nsm -- init` 自动生成 `{模块目录}/.nsm-mirrors.json`（**避免手写 JSON**——NS 无法写 JSON：字符串字面量不转义、引号字符无法表达，故由 fs 注入能力 `writeMirrorsConfig` 代写，nsm 读侧 `readJsonArray` 对称）：
+
+```bash
+# 生成内置默认配置 (GitHub 主 + Gitee 镜像)
+node dist/noethingScript-Interpreter.js nsm -- init
+
+# 生成自定义镜像列表 (逗号分隔, 上限 4, 顺序即回退顺序)
+node dist/noethingScript-Interpreter.js nsm -- init https://my-host.com/nsrepo
+
+# 覆盖已有配置需确认; --force/-y 跳过确认
+node dist/noethingScript-Interpreter.js nsm -- init --force
+```
+
+写入后立即生效并打印生效列表；之后想改镜像就重跑 `init` 换地址，无需再手改 JSON。
+
+### 6.3 查看生效镜像
 
 ```bash
 node dist/noethingScript-Interpreter.js nsm -- repos
@@ -248,7 +265,7 @@ node dist/noethingScript-Interpreter.js nsm -- refresh main --repo http://127.0.
 | `[错误] 压缩包内无包根 {包}/manifest` | zip 内顶层目录名 ≠ 包名（须为 `{包}/manifest`），用 `unzip -l` 检查 |
 | `[错误] 包名不一致` | zip 内 `manifest.package` ≠ 请求的包名 |
 | `[错误] 已阻止安装 (来源不匹配)` | zip 内 `manifest.source` ≠ 拉取来源（如清单是 main 但包声明 extra） |
-| `[错误] 适配不匹配: xxx 需要 NS 2.7+, 当前解释器 2.7.4` | 清单 `ns` 段高于解释器版本；升级解释器或降适配段 |
+| `[错误] 适配不匹配: xxx 需要 NS 3.0+, 当前解释器 2.8.x` | 清单 `ns` 段高于解释器版本；升级解释器或降适配段 |
 | `update` 提示已是最新但清单改了 | 清单缓存 TTL 7 天；`check-update` / `check-upgrade` 默认强制刷新，或 `refresh` 手动刷新 |
 
 ---

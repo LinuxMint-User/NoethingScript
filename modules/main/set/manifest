@@ -1,7 +1,7 @@
 {
   "package": "set",
   "version": "0.1.0",
-  "ns": "2.7",
+  "ns": "2.8",
   "source": "main",
   "description": "整数集合模块 (元数据槽模式实现 add/remove/contains/size, 元素不重复)",
   "modules": [

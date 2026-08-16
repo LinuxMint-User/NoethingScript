@@ -2,7 +2,7 @@
 // 运行: node dist/noethingScript-Interpreter.js nsm -- <子命令> [参数] [--force|-y] [--repo <基址[,基址...]>]
 //   (解释器把命令别名 nsm 解析为主模块路径 modules/main/nsm/nsm/nsm.ns, 并自动注入 fs/http 能力)
 // 功能: install (远程清单/本地 zip) / update / upgrade / check-update / check-upgrade /
-//       refresh / list / search / remove; 仓库清单缓存 TTL 7 天 (DNF 式); 依赖自动递归安装。
+//       refresh / list / search / remove / repos / init (生成镜像配置文件); 仓库清单缓存 TTL 7 天 (DNF 式); 依赖自动递归安装。
 // 确认: 交互式 [y/N]; --force 跳过安全检查; -y/--yes 对所有确认自动答 y (自动化友好)。
 // 约束: 全部数据操作经 fs/http 注入能力 (返回值限四类); 无字典 → 键值用平行数组 + 线性查找。
 
@@ -49,12 +49,17 @@ if (repo != "")
 else
     call loadMirrorConfig() -> b
     if (!b)
-        MIRROR[0] = "https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main"
-        MIRROR[1] = "https://gitee.com/epix-xhan/NoethingScriptModules/raw/main"
-        MIRR_CNT = 2
+        call setDefaultMirrors()
     endif
 endif
 REPO = MIRROR[0]
+:end
+
+// 设置内置默认镜像 (GitHub 主 + Gitee 镜像) → MIRROR[] (init 命令与配置缺失回退共用)
+:setDefaultMirrors () -> :void
+MIRROR[0] = "https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main"
+MIRROR[1] = "https://gitee.com/epix-xhan/NoethingScriptModules/raw/main"
+MIRR_CNT = 2
 :end
 
 // 从配置文件 {MOD}/.nsm-mirrors.json 读镜像列表 → MIRROR[] (格式: {"mirrors": ["url1", "url2"]}, 上限 4 截断;
@@ -66,7 +71,7 @@ call fs.join(MOD, ".nsm-mirrors.json") -> cf
 local b:bool = false
 call fs.exists(cf) -> b
 if (!b)
-    print "[提示] 未配置仓库镜像, 使用内置默认 (" + cf + " 可配置镜像列表, nsm -- repos 查看)"
+    print "[提示] 未配置仓库镜像, 使用内置默认 (nsm -- init 可生成配置文件, nsm -- repos 查看)"
     return ok
 endif
 local array ms[4]:string = arrfill
@@ -100,6 +105,35 @@ while (i < MIRR_CNT)
     i = i + 1
 endwhl
 print "[信息] 生效镜像 " + str(MIRR_CNT) + " 个 (顺序即回退顺序; --repo 临时覆盖; " + MOD + "/.nsm-mirrors.json 持久配置)"
+return ok
+:end
+
+// init [镜像列表]: 初始化仓库镜像配置文件 {MOD}/.nsm-mirrors.json (持久配置, 避免手写 JSON).
+// 参数 s (逗号分隔, 上限 4) 缺省写内置默认 (GitHub 主 + Gitee 镜像); 已存在文件覆盖需确认 (--force/-y 跳过);
+// 写入后立即生效 (MIRROR[] 同步) 并打印生效列表
+:cmdInit (s:string) -> ok:bool
+ok = true
+local cf:string = ""
+local msg:string = ""
+local b:bool = false
+call fs.join(MOD, ".nsm-mirrors.json") -> cf
+call fs.exists(cf) -> b
+if (b)
+    msg = "覆盖已有镜像配置 " + cf + " ?"
+    call confirm(msg, force) -> b
+    if (!b)
+        print "[提示] 已取消, 配置未改动"
+        return ok
+    endif
+endif
+if (s != "")
+    call splitMirrors(s)
+else
+    call setDefaultMirrors()
+endif
+call fs.writeMirrorsConfig(cf, MIRROR, MIRR_CNT) -> b
+print "[信息] 已写入镜像配置: " + cf
+call cmdRepos() -> b
 return ok
 :end
 
@@ -1216,6 +1250,7 @@ print "  list                            列出已安装模块 (含孤立标记)
 print "  search <关键词>                 搜索仓库包"
 print "  remove <包名> [来源]            卸载模块"
 print "  repos                          显示当前生效的仓库镜像列表 (顺序即回退顺序)"
+print "  init [镜像列表]               生成仓库镜像配置文件 (逗号分隔, 缺省内置默认 GitHub 主 + Gitee 镜像)"
 print "  help                           显示本帮助"
 print "  --force / -y                     --force 跳过安全检查/适配检查; -y (--yes) 对所有确认自动答 y"
 print "  --repo <基址[,基址...]>          覆盖仓库镜像列表, 逗号分隔多镜像按序回退"
@@ -1247,6 +1282,8 @@ try
         call cmdRemove(p1, p2, force) -> r
     else if (cmd == "repos")
         call cmdRepos() -> r
+    else if (cmd == "init")
+        call cmdInit(p1) -> r
     else if (cmd == "help")
         call cmdHelp()
     else

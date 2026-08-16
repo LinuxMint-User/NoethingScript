@@ -171,7 +171,7 @@ else
         call fs.readJsonField(mf, "ns") -> nsv
     else
         call fs.interpVersion() -> nsv
-        // 前两段: 取到第二个点之前 (如 "2.7.4" → "2.7"); 无第二点 (如 "2.7") 保持整串
+        // 前两段: 取到第二个点之前 (如 "2.8.0" → "2.8"); 无第二点 (如 "2.8") 保持整串
         local dot:int = 0
         dot = String.findFirst(nsv, ".")
         if (dot >= 0)

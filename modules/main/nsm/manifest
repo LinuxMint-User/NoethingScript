@@ -1,9 +1,9 @@
 {
   "package": "nsm",
-  "version": "0.1.0",
-  "ns": "2.7",
+  "version": "0.1.1",
+  "ns": "2.8",
   "source": "main",
-  "description": "NoethingScript 模块管理器 (install/update/upgrade/check/refresh/list/search/remove/repos, GitHub 主/Gitee 镜像回退, 依赖递归安装)",
+  "description": "NoethingScript 模块管理器 (install/update/upgrade/check/refresh/list/search/remove/repos/init, GitHub 主/Gitee 镜像回退, 依赖递归安装)",
   "modules": [
     "nsm"
   ],

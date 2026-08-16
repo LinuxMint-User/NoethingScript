@@ -1,7 +1,7 @@
 {
   "package": "stack",
   "version": "0.1.0",
-  "ns": "2.7",
+  "ns": "2.8",
   "source": "main",
   "description": "栈容器模块 (定长数组 + 元数据槽实现 push/pop/peek/isEmpty 等)",
   "modules": [

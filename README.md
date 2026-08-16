@@ -14,7 +14,7 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 - **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/max/min/random）、`len`/`str`/`int`/`float`/`copy`/`input`（运行时输入，命令行读 stdin、浏览器默认 prompt 弹窗且可自定义绑定；浏览器交互模式支持挂起/恢复，供脚本自持主循环）
 - **进制字面量**：二进制 `0b`、八进制 `0o`、十六进制 `0x`
 - **调试控制**：`debug` 级别调节输出详细程度
-- **模块系统**：`use` 声明式激活跨文件模块（`modules ... endmodules` 头部块、三分类来源目录、`call 对象.函数()` 点分调用、模块私有命名空间与来源标识、`autoinit` 初始化、加载期错误不可捕获）；自带**模块管理器 nsm**（`install`/`update`/`upgrade`/`check-update`/`check-upgrade`/`refresh`/`list`/`search`/`remove`，仓库清单缓存 TTL 7 天、依赖递归安装、镜像自动回退（官方模块仓库 GitHub `LinuxMint-User/NoethingScriptModules` 已建立，内置默认镜像指向其 raw 主镜像，Gitee 镜像待建可在 `.nsm-mirrors.json` 追加）与**打包工具 nsmp**（`pack <包目录>` 扫描自动生成 manifest 并打 zip、`gen-catalog <packages目录>` 自动汇总生成仓库清单）；**解释器自更新**：`--check-upgrade` 检查官方仓库新版本、`--upgrade` 自动拉取源码重新编译（GitHub 主/Gitee 镜像写死按序回退，失败自动恢复备份回滚）；完整设计见 [module-system/design.md](module-system/design.md)
+- **模块系统**：`use` 声明式激活跨文件模块（`modules ... endmodules` 头部块、三分类来源目录、`call 对象.函数()` 点分调用、模块私有命名空间与来源标识、`autoinit` 初始化、加载期错误不可捕获）；自带**模块管理器 nsm**（`install`/`update`/`upgrade`/`check-update`/`check-upgrade`/`refresh`/`list`/`search`/`remove`，仓库清单缓存 TTL 7 天、依赖递归安装、镜像自动回退——官方模块仓库已建立（GitHub `LinuxMint-User/NoethingScriptModules` 主 + Gitee `epix-xhan/NoethingScriptModules` 镜像），内置默认双镜像按序回退，`--repo` 临时覆盖、`nsm -- init` 一键生成 `.nsm-mirrors.json` 持久配置）与**打包工具 nsmp**（`pack <包目录>` 扫描自动生成 manifest 并打 zip、`gen-catalog <packages目录>` 自动汇总生成仓库清单）；**解释器自更新**：`--check-upgrade` 检查官方仓库新版本、`--upgrade` 自动拉取源码重新编译（GitHub 主/Gitee 镜像写死按序回退，失败自动恢复备份回滚）；完整设计见 [module-system/design.md](module-system/design.md)
 - **运行前参数 (cmdargs)**：声明式接收启动参数——`cmdargs` 块 + `param 名:类型 = 默认值 [as "短名"]`，命令行 `--` 分隔符后的参数区按声明匹配（`--名字 值`/`-短名 值`/匿名按序/bool 开关/cast 类型转换），绑定为只读全局、先于 autoinit 与正文执行；浏览器等价入口 `NSI.setCmdargs(args)`
 - **国际化**：`--lang en|zh` 切换输出语言（默认中文），错误/警告/调试信息全部模板化，语言包可扩展（l10n 友好）
 - **统一错误报告**：`[ERROR N] [行 X] 类型: 消息`、`[WARN]` 警告、`[内部错误]`（解释器缺陷）、CLI `[错误]` 四层隔离，互不混淆
@@ -196,9 +196,9 @@ NoethingScript/
 
 ## 版本历史
 
-当前版本 **2.7.4**。
+当前版本 **2.8.0**。
 
-> **不稳定期标记**：2.7.x 为不稳定版本系列——patch 版本可携带破坏性变更（类型系统收紧、语法调整等，攒批发布）。升级时请关注 [CHANGELOG.md](CHANGELOG.md) 中每个版本的破坏性变更说明；自 2.8 起恢复"破坏性变更只在 minor 升级时发布"。
+> **版本策略**：2.7.x 为不稳定版本系列（patch 版本可携带破坏性变更，攒批发布），2.8.0 起模块系统全量上线，恢复"破坏性变更只在 minor 升级时发布"的稳定策略。升级时请关注 [CHANGELOG.md](CHANGELOG.md) 中每个版本的变更说明。
 
 完整变更记录见 [CHANGELOG.md](CHANGELOG.md)。
 

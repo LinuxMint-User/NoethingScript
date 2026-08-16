@@ -1,7 +1,7 @@
 # 实现与设计偏差记录 (Implementation vs Design)
 
 > 关联设计: `module-system/design.md`（v0.10, M1–M8 全量落地）
-> 关联实现: `noethingScript-Interpreter.ts`（2.7.4 + 模块系统 M1–M8 全部完成，含模块管理器 nsm/打包工具 nsmp/解释器自更新/示例库 stack+queue+set/官方模块仓库）
+> 关联实现: `noethingScript-Interpreter.ts`（2.8.0 + 模块系统全量上线，含模块管理器 nsm/打包工具 nsmp/解释器自更新/示例库 stack+queue+set/官方模块仓库 GitHub+Gitee 双镜像）
 > 用途: 专门记录解释器实现过程中**与设计稿的实际偏差**、**设计未明示处的实现决策**、以及**已达成确认/待办**的状态核对。
 > 维护规则: 每完成一个新里程碑或设计稿修订，回到本文档增补/更新对应条目；已达成项标注状态，不删除（保留决策历史）。
 
@@ -85,7 +85,7 @@
 - **实现**（2026-08-16，`modules/main/nsm/nsm/nsm.ns`）: 单入口 + cmdargs 子命令全量实现（见 CHANGELOG 2.7.4）；**§9.1 细节规格已补齐**——本地压缩包带来源/@版本报错、`update` 无参=全部安全更新、`upgrade` 跨适配段含确认（--force 跳过）、check 系列默认强制刷新清单、search 清单缓存过期自动重拉（详见 #12）；实跑验证：网络命令正确走 404 预期路径（NSModules 仓库未建）、本地命令全流程通过（含交互确认 y/n、--force、custom 安装与卸载）。
 - **未做（设计稿明确的独立项）**: 解释器本体自更（`ns --check-upgrade`，Node 原生网络，管理器不管解释器）。
 - **已做（原"未做"清单项，2026-08-16）**: 打包工具 `nsmp` 独立包已完成（扫描包目录自动生成 manifest/打包，见 #15）。
-- **连带待办**: 浏览器端模块加载注入 API（`setModuleLoader`/`setModuleDir`/`setCurrentFilePath`）已实现但无真实浏览器模块示例验证；模块示例库仅 tools/stack 两个，队列/集合示例未写（M8）。
+- **连带待办（均已完结，2026-08-16）**: 浏览器端模块加载注入 API（`setModuleLoader`/`setModuleDir`/`setCurrentFilePath`）已实现但无真实浏览器模块示例验证；模块示例库 queue/set 示例已补（见 #18，官方仓库 6 包含 queue/set），M8 无剩余。
 
 ## 9. input() 不支持 cast 类型（设计未实现，§5.2.5）
 
@@ -166,10 +166,25 @@
 
 ## 18. 官方模块仓库建立（§9.1 "官方仓库建立" 未完成项做掉，2026-08-16）
 
-设计稿 §9.1 遗留的"官方仓库建立"（M1–M7 完成后剩 3 项未完成之一）已完成: GitHub 建官方模块仓库 `LinuxMint-User/NoethingScriptModules`（main 分支，用户提供），初始 4 个包（nsm/nsmp/stack/tools），随后补发 **queue/set 示例模块**（设计稿 §8 元数据槽模式，M8 剩余项做掉）至 6 包。仓库结构遵循 [self-host-repo-guide.md](self-host-repo-guide.md): `catalog/main.manifest.json`（nsmp gen-catalog 自动生成，6 条目按包名排序）+ `packages/` 6 个 zip（nsmp pack 生成，zip 内顶层目录=包名含 manifest）。**nsm 内置默认镜像同步从占位 `NoethingScript/NSModules` 改为真实 `https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`**（initConfig 内置默认分支 MIRR_CNT=1；Gitee 镜像待建，建成后在 `.nsm-mirrors.json` 追加，机制不变）。**偏差/实现说明**:
+设计稿 §9.1 遗留的"官方仓库建立"（M1–M7 完成后剩 3 项未完成之一）已完成: GitHub 建官方模块仓库 `LinuxMint-User/NoethingScriptModules`（main 分支，用户提供），初始 4 个包（nsm/nsmp/stack/tools），随后补发 **queue/set 示例模块**（设计稿 §8 元数据槽模式，M8 剩余项做掉）至 6 包。仓库结构遵循 [self-host-repo-guide.md](self-host-repo-guide.md): `catalog/main.manifest.json`（nsmp gen-catalog 自动生成，6 条目按包名排序）+ `packages/` 6 个 zip（nsmp pack 生成，zip 内顶层目录=包名含 manifest）。**nsm 内置默认镜像同步从占位 `NoethingScript/NSModules` 改为真实双镜像**（initConfig 内置默认分支 GitHub 主 `https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main` + Gitee 镜像 `https://gitee.com/epix-xhan/NoethingScriptModules/raw/main`，`MIRR_CNT=2`，见下第 6 点）。**偏差/实现说明**:
 1. 仓库目录独立于解释器项目：因沙箱限制父目录不可写，模块仓库放在项目下 `NoethingScriptModules/`（独立 git 仓库，解释器 `.gitignore` 排除）；
 2. `--out` 相对路径与 zip 打包 `cwd`（打包目录父目录）错位 → nsmp pack 的 `--out` 用绝对路径（zip 写入以打包目录为基准的相对路径所致）；这是 `--out` 相对路径下的已知行为，未改代码（用绝对路径即可）；
 3. 本地打包时 nsmp 会重写 `modules/main/*/manifest` 的 description（参数 `--desc` 优先，无参数复用已有）——本次顺手完善了 4 个包的 description，便于 search 展示；
 4. 实测链路：本地 http.server 模拟仓库 → refresh/install/依赖递归（tools→stack）全部正常；推 GitHub 后真实 remote 验证：`nsm -- repos` 显示生效镜像为 GitHub raw 主镜像，`refresh main`/`install stack`/`install tools` 从 GitHub raw 真实拉取成功。**用户当前 `git push` 网络不稳**，本次推送用 `timeout 120 + GIT_HTTP_LOW_SPEED_LIMIT/TIME` 包装成功。
 5. queue/set 示例模块（设计稿 §8，M8 剩余项）实现要点：queue 用 `q[0]=队头`/`q[1]=队尾` 双元数据槽（数据自 q[2] 起，容量 `len(q)-2`，出队后空间不回收——定长容器简单语义）；set 用 `s[0]=元素个数` 单槽（数据自 s[1] 起，add 前 contains 去重、满 assert、remove 用末元素填补保持紧凑）；均按元数据槽规范"越界 assert 显式报错不静默"。**发现一个语言文档陷阱**：NS 循环结束关键字是 `endwhl`（非 `endwhile`）——写错会被当表达式解析报"未定义的变量 endwhile"（经最小复现确认为我的示例写法笔误，非解释器 bug；nsm.ns 全程用 `endwhl`）。模块经 `use` 实际运行验证全通过（queue 出入队/队头/空判断，set 去重/contains/remove）。
 6. Gitee 镜像建立后 nsm 内置默认补齐双镜像：`initConfig` 内置默认分支从单 GitHub 改为 GitHub 主 + Gitee 镜像（`MIRR_CNT=2`），符合设计稿 §9.1"GitHub 主 / Gitee 镜像: 网络失败可切换"。**镜像来源机制澄清**（回应用户"是不是还是内置了 github 链接而不是单纯走配置文件解析了"）：模块源**不是**强制内置——优先级恒为 `--repo 命令行 > .nsm-mirrors.json 配置文件 > 内置默认`；有配置文件时完全走配置，内置默认只是**兜底**（全新环境/无配置文件时保证可用，且含双镜像可回退）。这与解释器自更新的"写死"（用户明确要求）不同——nsm 模块源始终可配置。真实 remote 实测：`repos` 显示双镜像、单 Gitee 镜像 refresh 成功、内置默认 refresh 走 GitHub 主成功；Gitee 推送因沙箱无凭据失败，改由用户经 Gitee 网页"从 GitHub 导入/同步"保持同步。
+
+## 19. nsm `init` 命令生成镜像配置文件（§9.1 未明示的易用性补充）
+
+- **设计**: §9.1 规定镜像列表可持久配置于 `{模块目录}/.nsm-mirrors.json`（JSON `mirrors` 数组），但**未规定配置文件的生成方式**——用户手写 JSON 门槛高（NS 字符串字面量不转义、引号字符无法表达，且 JSON 结构易错），用户反馈"手写可能还是比较麻烦"。
+- **实现**: 新增 `nsm -- init [镜像列表]` 命令——`init` 无参写内置默认（GitHub 主 + Gitee 镜像），`init <地址1>,<地址2>` 写自定义镜像列表（逗号分隔、上限 4、顺序即回退顺序）；已存在文件覆盖需确认（`--force`/`-y` 跳过）；写入后立即生效（MIRROR[] 同步）并打印生效列表。fs 注入新增 `writeMirrorsConfig(p, mirrors, n)` 能力（TS 侧 `JSON.stringify` 组装 `{mirrors:[...]}`，与读侧 `readJsonArray` 读写对称——与 `writeManifest`/`writeCatalog` 同类，JSON 组装无法在 NS 侧完成）；内置默认字面量抽为 `setDefaultMirrors()` 共用助手（init 与配置缺失回退同源，消除双份字面量）；`loadMirrorConfig` 缺失提示与 help/文件头同步指向 init。
+- **易用性文档**: 模块源设置在面向用户的 `doc.md` 模块系统章节新增"模块源设置"小节（三层优先级、init 一键生成、repos 查看、缺失/坏配置回退）与 README 特性行补 `nsm -- init`——此前只存在于 `self-host-repo-guide.md`（仓库维护者视角），对新手不友好。
+- **版本影响**: 纯新增命令 + 新注入能力（无语法/语义变更），随 2.8.0 全量上线一并发布；nsm 包版本 0.1.0→0.1.1（`nsm@0.1.1-v2.8.zip`，供 `nsm update nsm` 感知新命令），catalog 重新汇总。
+- **验证**: `init` 三种形态实测（无参默认双镜像 / 自定义逗号分隔 / 已存在 `echo n` 取消且配置未改动）+ `repos` 从配置文件正确读取；26 项 .ns 基线 + 14 项 js_global + 7 项 node_inject 全过。
+
+## 20. 模块目录默认基准修正——"解释器同目录"兑现（§7.3 设计要求，此前实现误为 cwd 基准）
+
+- **设计**: §7.3 明确"默认 `modules/`（**解释器同目录**）"，但此前实现 `MODULE_DIR='modules'`（相对路径字面量）+ 默认 loader `path.resolve(MODULE_DIR, name)` 按 **进程 cwd** 解析——从任意目录运行解释器会找/装错模块目录，与设计不符（全新使用场景实测暴露：clone 后在解释器目录外的 cwd 运行，模块落点/查找全部错位）。
+- **实现**: Node 侧默认模块目录改为 `path.join(path.dirname(process.argv[1]), 'modules')`（**解释器文件同目录**，跟随解释器而非 cwd——任意 cwd 运行都固定找到同一套模块）；`--modules` 支持绝对路径或相对 cwd 的相对路径，统一解析为**绝对路径**保存（`fs.moduleDir()`/nsm 等拿绝对路径，后续所有 `path.join`/`path.resolve` 语义一致）；浏览器 `setModuleDir` 语义不变（宿主直传字符串）。**构建同步**: `npm run build` 在 tsc 后自动把源码 `modules/` 同步到 `dist/modules/`（新增 `scripts/sync-modules.js`，`fs.cpSync` 递归覆盖）——发布形态 = **整个 dist/**（解释器 JS + 模块整体可移动，挪到任何位置模块跟随）。
+- **影响**: **破坏性变更**（模块目录位置语义变化：此前按 cwd 装的模块目录不再被默认解析，需随解释器移动或经 `--modules` 指定），随 2.8.0 全量上线一并发布；nsm/nsmp 经 `fs.moduleDir()` 拿绝对路径后其相对拼接待校验（实测 install/use/remove 全链路正常）。
+- **验证**: `npm run build` 同步后 `node dist/noethingScript-Interpreter.js` 在任意 cwd 运行 `use` 均正确命中 `dist/modules/`；`--modules` 相对/绝对路径均生效；nsm install/use/remove/repos/init 全链路实测通过。
