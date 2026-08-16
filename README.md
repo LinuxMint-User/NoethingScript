@@ -180,6 +180,7 @@ NoethingScript/
 ├── package.json                    # npm 脚本 (build/bench/bench:2048/bench:module) 与依赖
 ├── package-lock.json               # npm 依赖锁定 (npm install 生成)
 ├── CHANGELOG.md                    # 版本历史 (按版本倒序)
+├── roadmap.md                      # 发展计划 (路线图/里程碑, 语言锁定期内的方向决策记录)
 ├── tsconfig.json
 └── LICENSE
 ```
