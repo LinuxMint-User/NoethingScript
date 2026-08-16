@@ -54,6 +54,9 @@ node dist/noethingScript-Interpreter.js --version
 
 # 脚本参数区: -- 之后的参数归脚本, 由入口文件 cmdargs 声明接收 (见 doc.md "运行前参数")
 node dist/noethingScript-Interpreter.js script.ns -- --cmd build -v -n 42
+
+# 注入 Node 内置能力 (fs/http), 脚本中可 名字.函数() 点分调用 (见 doc.md "Node/CLI 注入入口")
+node dist/noethingScript-Interpreter.js --inject fs,http script.ns
 ```
 
 > 注：不支持短参数（如 `-h`）；以 `-` 开头的未知参数会提示"未知参数"而非被当作文件名。
@@ -83,7 +86,7 @@ node dist/noethingScript-Interpreter.js script.ns -- --cmd build -v -n 42
 </script>
 ```
 
-`window.NSI` 提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`、`setCmdargs(args)`（脚本参数区，对应命令行 `--` 之后的部分）、`setModuleLoader(loader)`/`setModuleDir(dir)`/`setCurrentFilePath(path)`（模块加载能力注入）、`registerGlobal(name, obj)`（宿主 JS 对象注入，NS 中以 `名字.函数()` 点分调用，返回值限 `number`/`string`/`boolean`/`Array`，见 doc.md "JS 能力注入"），以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。在 Node 环境中加载本文件不会挂载 `NSI`，命令行行为不受影响。交互执行完整示例见 `examples/2048_web.html`（脚本与命令行版 `examples/2048.ns` 同构、自持主循环）。
+`window.NSI`（即 `globalThis.NSI`）提供：`version`、`run(code)`、`runInteractive(code, onInput?)`、`resumeInput(value)`、`setLanguage(lang)`、`getLanguage()`、`setInput(handler)`、`setCmdargs(args)`（脚本参数区，对应命令行 `--` 之后的部分）、`setModuleLoader(loader)`/`setModuleDir(dir)`/`setCurrentFilePath(path)`（模块加载能力注入）、`registerGlobal(name, obj)`（宿主 JS 对象注入，NS 中以 `名字.函数()` 点分调用，返回值限 `number`/`string`/`boolean`/`Array`，见 doc.md "JS 能力注入"），以及底层类 `Interpreter`/`ExpressionEvaluator`/`ScopeManager` 和语言包 `LANG_PACKS`。Node 环境同样挂载 `globalThis.NSI`，且 `require('./dist/noethingScript-Interpreter.js')` 直接返回 NSI 对象（不触发 CLI 入口）；命令行注入内置能力用 `--inject fs,http`（见 doc.md "Node/CLI 注入入口"）。交互执行完整示例见 `examples/2048_web.html`（脚本与命令行版 `examples/2048.ns` 同构、自持主循环）。
 
 ## 示例
 

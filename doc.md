@@ -665,7 +665,7 @@ call stack.pop(mut st) -> v
 
 ### JS 能力注入 (registerGlobal)
 
-宿主可注入 JS 对象（`NSI.registerGlobal(name, obj)`，Node/CLI 场景由宿主注入，模块管理器将经此获得 fs/http 能力），NS 代码中以 `名字.函数()` 点分调用，与 NS 模块**同形**（脚本作者无感知）：
+宿主可注入 JS 对象（`NSI.registerGlobal(name, obj)`），NS 代码中以 `名字.函数()` 点分调用，与 NS 模块**同形**（脚本作者无感知）：
 
 - 注入对象成员为函数 → 收录为可调用成员；非函数成员忽略；同名注册覆盖
 - 实参**宽松求值**：数字/字符串/布尔/数组字面量、变量、数组、表达式均可直接传入，JS 侧收到原生 JS 值（NS 值底层即 JS 值）
@@ -679,6 +679,38 @@ call jm.add(2, 3) -> r
 print r           // 5
 call jm.isPos(-1) -> b
 print b           // false
+```
+
+#### Node/CLI 注入入口
+
+Node/CLI 下有两个注入通道（模块管理器 M7 将经 `--inject fs,http` 获得文件与网络能力）：
+
+1. **命令行 `--inject <能力名[,能力名...]>`**（解释器参数，位于 `--` 分隔符之前）：运行脚本前自动注入内置能力对象，未知能力名报错退出（显式性，不静默忽略）。当前内置能力：
+
+| 能力 | 成员 | 说明 |
+|---|---|---|
+| `fs` | `readFile(path)`→string、`writeFile(path, content)`→bool、`exists(path)`→bool、`isDir(path)`→bool、`listDir(path)`→Array、`mkdir(path)`→bool（递归）、`remove(path)`→bool（递归）、`rename(from,to)`→bool、`copyFile(from,to)`→bool、`cwd()`→string、`join(...parts)`→string | 同步文件系统操作；失败抛异常（NS 可 `try-catch`）；void 操作返回 `true` 表示成功 |
+| `http` | `download(url, dest)`→bool | 同步下载（`spawnSync` 调用 `curl`，NS 无异步）；失败抛异常（可 `try-catch`） |
+
+```bash
+node dist/noethingScript-Interpreter.js --inject fs,http script.ns -- <脚本参数区>
+```
+
+```ns
+// --inject fs 后:
+call fs.writeFile("/tmp/out.txt", "hello")
+call fs.exists("/tmp/out.txt") -> e
+print e           // true
+call fs.readFile("/tmp/out.txt") -> c
+print c           // hello
+```
+
+2. **Node `require`**：`require('noethingScript-Interpreter.js')` 直接返回 NSI 对象（`globalThis.NSI` 同引用；此时不触发 CLI 入口），宿主可先 `registerGlobal` 注入自定义对象再 `run(code)` 执行：
+
+```js
+const NSI = require('./dist/noethingScript-Interpreter.js');
+NSI.registerGlobal('host', { greet: (s) => 'hi ' + s });
+NSI.run('call host.greet("x") -> r\nprint r');   // hi x
 ```
 
 ## 关键字列表

@@ -573,7 +573,8 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: '用法: node noethingScript-Interpreter.js <文件名>',
         cli_no_debug_level: '未指定调试参数等级, 初始化默认为 0',
         cli_invalid_lang: '无效的语言参数, 仅支持 en 或 zh, 已保持默认中文',
-        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--modules/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
+        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--modules/--inject/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
+        cli_inject_unknown: '未知的注入能力: {name} (--inject 支持: {caps})',
         cli_cannot_read: '[错误] 无法读取文件 \'{filename}\': {error}',
         cli_node_required: '[错误] 此脚本需要在Node.js环境中运行以支持文件读取',
         internal_error: '[内部错误] [行 {line}] 解释器内部发生错误: {message}',
@@ -997,7 +998,8 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: 'Usage: node noethingScript-Interpreter.js <filename>',
         cli_no_debug_level: 'Debug level not specified, defaulting to 0',
         cli_invalid_lang: 'Invalid language, only en or zh are supported, keeping default zh',
-        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--modules/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
+        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--modules/--inject/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
+        cli_inject_unknown: 'Unknown injection capability: {name} (--inject supports: {caps})',
         cli_cannot_read: '[Error] Cannot read file \'{filename}\': {error}',
         cli_node_required: '[Error] This script needs a Node.js environment to support file reading',
         internal_error: '[Internal Error] [Line {line}] Interpreter internal error: {message}',
@@ -8331,6 +8333,56 @@ if (typeof require !== 'undefined') {
     var path = require('path');
 }
 
+// ===== Node/CLI 注入入口 (设计稿 §6 registerGlobal 的 Node 侧能力, M7 模块管理器经此获取 fs/http) =====
+// CLI 用法: `--inject fs,http` 在运行脚本前注入内置能力对象, 与浏览器 registerGlobal 同形 (名字.函数() 点分调用)。
+// 能力对象约束与 registerGlobal 一致: 成员为函数 → 收录为 JS 注入函数; 返回类型限四类
+// (number/string/boolean/Array, 见 isValidJSReturn); void 操作返回 true 表示成功; 失败抛异常 (NS 可 try-catch)。
+function buildFsCapability(): any {
+    return {
+        readFile(p: string): string { return fs.readFileSync(String(p), 'utf8'); },
+        writeFile(p: string, c: string): boolean { fs.writeFileSync(String(p), String(c)); return true; },
+        exists(p: string): boolean { return fs.existsSync(String(p)); },
+        isDir(p: string): boolean { try { return fs.statSync(String(p)).isDirectory(); } catch (e) { return false; } },
+        listDir(p: string): string[] { return fs.readdirSync(String(p)).map((f: string) => String(f)); },
+        mkdir(p: string): boolean { fs.mkdirSync(String(p), { recursive: true }); return true; },
+        remove(p: string): boolean { fs.rmSync(String(p), { recursive: true, force: true }); return true; },
+        rename(from: string, to: string): boolean { fs.renameSync(String(from), String(to)); return true; },
+        copyFile(from: string, to: string): boolean { fs.copyFileSync(String(from), String(to)); return true; },
+        cwd(): string { return process.cwd(); },
+        join(...parts: string[]): string { return path.join(...parts.map(String)); }
+    };
+}
+function buildHttpCapability(): any {
+    // NS 无异步: 同步下载 (spawnSync curl, 广泛可用); 失败抛异常 (NS 可 try-catch 捕获)
+    const cp = require('child_process');
+    return {
+        download(url: string, dest: string): boolean {
+            const r = cp.spawnSync('curl', ['-fsSL', '-o', String(dest), String(url)], { encoding: 'utf8', timeout: 120000 });
+            if (r.error || r.status !== 0) {
+                throw new Error('下载失败: ' + String(url) + (r.status !== null ? ' (curl 退出码 ' + r.status + ')' : ''));
+            }
+            return true;
+        }
+    };
+}
+const NODE_INJECT_CAPS: { [name: string]: () => any } = {
+    fs: buildFsCapability,
+    http: buildHttpCapability
+};
+
+// --inject 注入执行: 逐个查表构建并注入; 未知能力名 → 报错返回 false (调用方退出)
+function injectNodeCapabilities(names: string[]): boolean {
+    for (const name of names) {
+        const factory = NODE_INJECT_CAPS[name];
+        if (!factory) {
+            console.error(t('cli_inject_unknown', { name, caps: Object.keys(NODE_INJECT_CAPS).join(', ') }));
+            return false;
+        }
+        nsiRegisterGlobal(name, factory());
+    }
+    return true;
+}
+
 // 打印使用帮助 (双语, 跟随当前输出语言)
 function printHelp(): void {
     if (LANG === 'en') {
@@ -8343,6 +8395,7 @@ function printHelp(): void {
         console.log('  --debug N       Set debug level 0-3 (default 0)');
         console.log('  --lang en|zh    Set output language (default zh)');
         console.log('  --modules DIR   Set module directory (default: modules)');
+        console.log('  --inject LIST   Inject Node built-in capabilities via registerGlobal (comma separated, e.g. fs,http)');
         console.log('  --help          Show this help message');
         console.log('  --version       Show version number');
     } else {
@@ -8355,6 +8408,7 @@ function printHelp(): void {
         console.log('  --debug N       设置调试级别 0-3 (默认 0)');
         console.log('  --lang en|zh    设置输出语言 (默认 zh)');
         console.log('  --modules DIR   设置模块目录 (默认: modules)');
+        console.log('  --inject LIST   经 registerGlobal 注入 Node 内置能力 (逗号分隔, 如 fs,http; 脚本中可 名字.函数() 点分调用)');
         console.log('  --              分隔符: 之后的参数全部归脚本 (入口文件 cmdargs 按声明接收)');
         console.log('  --help          显示本帮助');
         console.log('  --version       显示版本号');
@@ -8367,12 +8421,13 @@ function main() {
     if (typeof process !== 'undefined' && process.argv) {
         // 获取命令行参数 (从 Node.js 进程的命令行参数中提取除前两个参数之外的所有参数)
         const args = process.argv.slice(2);
-        // 通用可选参数解析: 支持 --debug N 与 --lang en|zh 与 --modules DIR, 顺序任意, 文件名必须是第一个非可选参数;
+        // 通用可选参数解析: 支持 --debug N 与 --lang en|zh 与 --modules DIR 与 --inject LIST, 顺序任意, 文件名必须是第一个非可选参数;
         // 独立记号 `--` 是分隔符 (设计稿 §5.2.6): 从这里开始后面全部归脚本 (脚本参数区, 入口文件 cmdargs 消费)
         let filename: string | undefined;
         let debugValue: string | undefined;
         let langArg: string | undefined;
         let modulesArg: string | undefined;
+        const injectList: string[] = [];
         const unknownArgs: string[] = [];
         const scriptArgs: string[] = [];
         let scriptArgsStart = false;
@@ -8393,6 +8448,13 @@ function main() {
                 i++;
             } else if (args[i] === '--modules') {
                 modulesArg = args[i + 1];
+                i++;
+            } else if (args[i] === '--inject') {
+                // 注入能力列表 (逗号分隔, 可多次指定); 未知能力名在运行前报错 (显式性)
+                for (const c of String(args[i + 1]).split(',')) {
+                    const cap = c.trim();
+                    if (cap) injectList.push(cap);
+                }
                 i++;
             } else if (args[i].startsWith('-') && args[i] !== '--help' && args[i] !== '--version') {
                 // 未知可选参数兜底: 以 - 开头的未知参数 (含短参数如 -h) 记入列表, 不当作文件名处理
@@ -8445,6 +8507,12 @@ function main() {
         // 检查是否有参数
         if (filename === undefined) {
             console.error(t('cli_usage'));
+            process.exit(1);
+        }
+
+        // --inject 注入 Node 内置能力 (设计稿 §6): 运行脚本前注册, 脚本中可 名字.函数() 点分调用;
+        // 未知能力名 → 报错退出 (显式性, 不静默忽略)
+        if (injectList.length > 0 && !injectNodeCapabilities(injectList)) {
             process.exit(1);
         }
 
@@ -10318,8 +10386,9 @@ class NSVMExecutor {
     }
 }
 
-// 如果在Node.js环境中运行, 则调用main函数
-if (typeof process !== 'undefined' && process.argv) {
+// 仅在以 CLI 直接运行时调用 main 函数 (node noethingScript-Interpreter.js <文件>);
+// require 加载场景 (require.main !== module) 不触发 CLI, 宿主经 module.exports 拿到 NSI 后自行注入/运行。
+if (typeof process !== 'undefined' && process.argv && typeof require !== 'undefined' && require.main === module) {
     main();
 }
 
@@ -10440,24 +10509,35 @@ function nsiResumeInput(value: string): string {
     return INPUT_SUSPENDED ? 'suspended' : 'finished';
 }
 
-// 浏览器全局暴露: 仅在浏览器环境 (存在 window) 时挂载, 不影响 Node 运行
+// NSI 公开接口对象 (浏览器 + Node/CLI 共用):
+// - 浏览器: window.NSI (或 globalThis.NSI)
+// - Node/CLI: globalThis.NSI, 且 require 本文件直接返回 NSI (宿主可 registerGlobal 注入后自行运行, M7 前置)
+// - CLI --inject 内置能力注入走同一 registerGlobal 路径 (见 injectNodeCapabilities)
+const NSI_PUBLIC: any = {
+    version: NSIVersion,
+    run: nsiRun,
+    runInteractive: nsiRunInteractive,
+    resumeInput: nsiResumeInput,
+    setLanguage: nsiSetLanguage,
+    getLanguage: (): 'zh' | 'en' => LANG,
+    setInput: nsiSetInput,
+    setCmdargs: nsiSetCmdargs,
+    setModuleLoader: nsiSetModuleLoader,
+    setModuleDir: nsiSetModuleDir,
+    setCurrentFilePath: nsiSetCurrentFilePath,
+    registerGlobal: nsiRegisterGlobal,
+    Interpreter: Interpreter,
+    ExpressionEvaluator: ExpressionEvaluator,
+    ScopeManager: ScopeManager,
+    LANG_PACKS: LANG_PACKS
+};
 if (typeof window !== 'undefined') {
-    (window as any).NSI = {
-        version: NSIVersion,
-        run: nsiRun,
-        runInteractive: nsiRunInteractive,
-        resumeInput: nsiResumeInput,
-        setLanguage: nsiSetLanguage,
-        getLanguage: (): 'zh' | 'en' => LANG,
-        setInput: nsiSetInput,
-        setCmdargs: nsiSetCmdargs,
-        setModuleLoader: nsiSetModuleLoader,
-        setModuleDir: nsiSetModuleDir,
-        setCurrentFilePath: nsiSetCurrentFilePath,
-        registerGlobal: nsiRegisterGlobal,
-        Interpreter: Interpreter,
-        ExpressionEvaluator: ExpressionEvaluator,
-        ScopeManager: ScopeManager,
-        LANG_PACKS: LANG_PACKS
-    };
+    (window as any).NSI = NSI_PUBLIC;
+}
+if (typeof globalThis !== 'undefined') {
+    (globalThis as any).NSI = NSI_PUBLIC;
+}
+// Node require 场景: require('noethingScript-Interpreter.js') 返回 NSI (main 不执行, 见文件末尾入口守卫)
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = NSI_PUBLIC;
 }

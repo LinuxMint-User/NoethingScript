@@ -19,6 +19,7 @@
 | 8 | M7 模块管理器未实现 | 待办（非偏差） | 等用户决定 |
 | 9 | input() 不支持 cast 类型（普通变量无 cast 类型） | 设计未实现（§5.2.5） | 保持（doc.md 已按实现修正） |
 | 10 | registerGlobal JS 能力注入（§6） | 已实现（M7 前置, 2026-08-16） | 完成 |
+| 11 | Node/CLI 注入入口（`--inject` + require NSI） | 已实现（M7 前置, 2026-08-16） | 完成 |
 
 ---
 
@@ -74,7 +75,7 @@
 ## 8. M7 模块管理器未实现（待办，非偏差）
 
 - **设计**: §6 JS 能力分层 + §9.1 模块管理器（已完整定稿）：NS 逻辑 + `registerGlobal` 注入 fs/http + cmdargs 接收子命令（install/update/upgrade/check-update/check-upgrade/refresh/list/search/remove）、仓库 manifest 清单、http 按路径压缩包拉取、DNF 式缓存（TTL 7 天）、包内 manifest 读取 + 本地压缩包安装、命令包装；打包工具 `nsmp` 为独立包。
-- **实现**: 未开始（解释器侧所有前置 M1–M6 + cmdargs 已完成，等用户决定后开工）。
+- **实现**: 未开始（解释器侧所有前置 M1–M6 + cmdargs + registerGlobal（§6）及 Node/CLI 注入入口（--inject/require）已全部完成，等用户决定后开工）。
 - **连带待办**: 浏览器端模块加载注入 API（`setModuleLoader`/`setModuleDir`/`setCurrentFilePath`）已实现但无真实浏览器模块示例验证；模块示例库仅 tools/stack 两个，队列/集合示例未写。
 
 ## 9. input() 不支持 cast 类型（设计未实现，§5.2.5）
@@ -93,6 +94,19 @@
   3. 实参**宽松求值**（`evalArgForJS`）：数字/字符串/布尔/数组字面量、变量、数组（转 JS Array 值数组）、表达式兜底；**实参个数不校验**（JS 函数 arity 运行期自然处理，设计未明示，与宽松语义一致）。
   4. 返回值校验：四类 + **`NaN`/`Infinity` 拒收**（与语言非有限值规则一致）；结果变量未声明时按 JS 值类型自动建变量（整数→INT 小数→FLOAT，数组→数组变量），已声明走现有 `setVariable` 类型检查。
   5. 错误语义：宿主函数抛异常 → `TypeError`（消息带注入对象名，可 `try-catch`）；调用未定义成员 → `ReferenceError`（可捕获）；非法返回值 → `reportError` 不中断。
-- **设计未明示处决策**: ① 非函数成员忽略/同名覆盖；② 模块对象优先的解析顺序；③ 实参个数不校验；④ **Node/CLI 场景暂无可注入入口**（浏览器经 `NSI.registerGlobal`，Node 宿主注入留给 M7——模块管理器将经此获得 fs/http）。
+- **设计未明示处决策**: ① 非函数成员忽略/同名覆盖；② 模块对象优先的解析顺序；③ 实参个数不校验；④ **Node/CLI 注入入口**（浏览器经 `NSI.registerGlobal`，Node 侧最初无注入点——2026-08-16 已补，见 #11）。
 - **实现注意**: 跨 realm（vm/浏览器）宿主 `Error` 的 `instanceof` 不可靠，异常消息按 `message` 属性提取（`Error: boom` vs `boom`）。
 - **验证**: `tests/js_global_tests.js`（14 项：四类返回值/数组实参与返回/表达式实参/跨作用域/模块共存/模块内调用/宿主异常与未定义成员可捕获/非法返回值/注册校验），全过；26 项回归逐字节一致。
+
+## 11. Node/CLI 注入入口（已实现，§6，M7 前置）
+
+- **设计**: §9.1 模块管理器运行环境为 Node/CLI 专用，**依赖 registerGlobal 注入的 fs/http 能力**；但设计未规定 Node/CLI 侧由谁、以何种机制完成注入（浏览器侧 `window.NSI.registerGlobal` 明确，Node 侧留白）。
+- **实现**（2026-08-16，两条通道，均复用 #10 的 `nsiRegisterGlobal` 与 JS 注入执行路径）:
+  1. **命令行 `--inject <能力名[,能力名...]>`**（解释器参数，位于 `--` 分隔符之前）：运行脚本前注入**内置能力对象**，未知能力名报错退出（exit 1，显式性不静默忽略）。能力对象成员为函数，返回类型限四类（`fs` 的 void 操作返回 `true` 表示成功——四类校验不接受 `undefined`）；失败抛异常（NS 可 `try-catch`）。
+  2. **Node `require` 与 `globalThis.NSI`**：NSI 公开对象改为单一 `NSI_PUBLIC` 常量，浏览器挂 `window.NSI`、Node 挂 `globalThis.NSI`，且 `module.exports = NSI_PUBLIC`——`require` 直接返回 NSI（宿主可 `registerGlobal` 注入自定义对象后 `run(code)`）。
+- **设计未明示处决策**:
+  - 注入机制选 CLI 参数（而非自动/隐式注入）：与"显式性保证"（§5.2.9）一致；管理器命令包装（§9.1 command 别名）在 M7 解析命令时按需携带 `--inject fs,http`。
+  - 内置能力对象**精选包装**而非裸导 Node 模块（裸 `fs.readFileSync` 返回 Buffer 不属四类；包装统一转 string/bool/Array）。
+  - `http` 能力用 `spawnSync` 调用 `curl` 实现**同步下载**（NS 无异步、Node 无同步 http 标准库）；curl 缺失或网络失败抛异常可捕获。
+- **入口守卫调整**: main() 执行条件从「存在 `process.argv`」收紧为「`require.main === module`」——require 加载场景不再误触发 CLI（此前 `require` 会报"用法"错误退出），浏览器（无 require）不受影响。
+- **验证**: `tests/node_inject_tests.js`（7 项：require 返回 NSI/globalThis 同引用/不触发 CLI、require 链路注入+run、`--inject fs` 全链路（写/读/查/列目录/join/cwd/异常捕获）、不含 http 正常、未知能力报错退出、与 cmdargs `--` 分隔符互不干扰），全过；14 项 js_global_tests（vm 沙箱）+ 26 项回归 + module-test 均一致。
