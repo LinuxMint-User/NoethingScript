@@ -1,0 +1,56 @@
+// modules/main/set/set/set.ns — 定长整数集合模块 (元数据槽模式, 设计稿 §8)
+// 集合数组由调用方声明传入: s[0] 存元素个数, 数据从 s[1] 起, 容量 = len(s) - 1;
+// 元素不重复 (add 前先 contains 检查, 已存在则忽略); 满时 assert 显式报错不静默
+:newSet (mut s[]:int) -> :void
+s[0] = 0
+:end
+
+// 是否包含 v (线性扫描)
+:contains (s[]:int, v:int) -> b:bool
+b = false
+local i:int = 1
+while (i <= s[0])
+    if (s[i] == v)
+        b = true
+        i = s[0] + 1
+    endif
+    i = i + 1
+endwhl
+return b
+:end
+
+// 添加 v (已存在忽略; 满时 assert)
+:add (mut s[]:int, v:int) -> :void
+local b:bool = false
+call contains(s, v) -> b
+if (!b)
+    assert (s[0] < len(s) - 1)
+    "集合已满: 容量 " + (len(s) - 1)
+    endasrt
+    s[0] = s[0] + 1
+    s[s[0]] = v
+endif
+:end
+
+// 删除 v (不存在忽略; 用末元素填补被删位保持紧凑)
+:remove (mut s[]:int, v:int) -> :void
+local i:int = 1
+local found:bool = false
+while (i <= s[0] && !found)
+    if (s[i] == v)
+        found = true
+    else
+        i = i + 1
+    endif
+endwhl
+if (found)
+    s[i] = s[s[0]]
+    s[0] = s[0] - 1
+endif
+:end
+
+// 元素个数
+:size (s[]:int) -> n:int
+n = s[0]
+return n
+:end

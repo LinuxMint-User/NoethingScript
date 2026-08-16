@@ -1,0 +1,47 @@
+// modules/main/queue/queue/queue.ns — 定长队列模块 (元数据槽模式, 设计稿 §8)
+// 队列数组由调用方声明传入: q[0] 存队头下标 (读取位置), q[1] 存队尾下标 (写入位置, 下一个空位),
+// 数据从 q[2] 起, 容量 = len(q) - 2; 队头 < 队尾 即有数据; 越界用 assert 显式报错不静默
+:newQueue (mut q[]:int) -> :void
+q[0] = 2
+q[1] = 2
+:end
+
+// 入队: 队尾写值后后移 (满时 assert)
+:enqueue (mut q[]:int, v:int) -> :void
+assert (q[1] < len(q) - 1)
+"队列已满: 容量 " + (len(q) - 2)
+endasrt
+q[q[1]] = v
+q[1] = q[1] + 1
+:end
+
+// 出队: 取队头值并前移队头 (空时 assert)
+:dequeue (mut q[]:int) -> v:int
+assert (q[0] < q[1])
+"队列为空"
+endasrt
+v = q[q[0]]
+q[0] = q[0] + 1
+return v
+:end
+
+// 读取队头 (不出队)
+:front (q[]:int) -> v:int
+assert (q[0] < q[1])
+"队列为空"
+endasrt
+v = q[q[0]]
+return v
+:end
+
+// 是否为空
+:isEmpty (q[]:int) -> b:bool
+b = (q[0] >= q[1])
+return b
+:end
+
+// 队列长度
+:size (q[]:int) -> n:int
+n = q[1] - q[0]
+return n
+:end

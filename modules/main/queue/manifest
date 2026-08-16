@@ -1,0 +1,10 @@
+{
+  "package": "queue",
+  "version": "0.1.0",
+  "ns": "2.7",
+  "source": "main",
+  "description": "队列容器模块 (元数据槽模式实现 enqueue/dequeue/front/isEmpty/size)",
+  "modules": [
+    "queue"
+  ]
+}
