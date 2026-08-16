@@ -194,6 +194,8 @@ NoethingScript/
 
 模块系统完整设计见 [module-system/design.md](module-system/design.md)，专项验证见 `module-test/`（`main.ns` 主入口，基线 `module-test/baseline/main.out`）。
 
+**官方模块仓库**：[GitHub LinuxMint-User/NoethingScriptModules](https://github.com/LinuxMint-User/NoethingScriptModules)（主）+ [Gitee epix-xhan/NoethingScriptModules](https://gitee.com/epix-xhan/NoethingScriptModules)（镜像，按序回退）——`nsm -- install <包名>` 安装官方模块（解释器已内置默认双镜像，无需任何配置），包列表与维护流程见该仓库 README。
+
 ## 版本历史
 
 当前版本 **2.8.0**。
