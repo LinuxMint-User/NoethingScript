@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "ns": "2.7",
   "source": "main",
-  "description": "NoethingScript 模块打包工具 (设计稿 §9.1, M7 独立包)",
+  "description": "NoethingScript 模块打包工具 (pack 扫描自动生成 manifest + 打 zip, gen-catalog 汇总生成仓库清单)",
   "modules": [
     "nsmp"
   ],

@@ -9,3 +9,6 @@ dist/
 
 # 扩展打包产物
 *.vsix
+
+# 模块仓库 (独立 git 仓库, 官方模块仓库镜像到 GitHub NoethingScriptModules)
+NoethingScriptModules/
