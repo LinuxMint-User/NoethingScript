@@ -185,7 +185,7 @@ node dist/noethingScript-Interpreter.js nsm -- install hello
   ```
   上限 4 个，顺序即回退顺序。文件缺失/解析失败/数组为空 → 回退内置默认并打提示。**NS 无法写 JSON**（字符串字面量不转义、引号字符无法表达），配置文件由你手动编辑，nsm 只读；
 - **命令行 `--repo`**：临时覆盖，优先级最高；逗号分隔多镜像按序回退，单基址只用它；
-- **内置默认**：`https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`——**官方模块仓库已建立**（GitHub `LinuxMint-User/NoethingScriptModules`，2026-08-16 初始化 6 个包：nsm/nsmp/stack/tools/queue/set，remote 可用）。Gitee 镜像待建（可在上面配置文件里追加，机制不变）。
+- **内置默认**：`https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`（主）+ `https://gitee.com/epix-xhan/NoethingScriptModules/raw/main`（镜像）——**官方模块仓库 GitHub + Gitee 双镜像均已建立**（2026-08-16，6 个包：nsm/nsmp/stack/tools/queue/set，按序回退）。Gitee 镜像经"从 GitHub 导入/同步"保持与 GitHub 一致。
 
 ### 6.2 查看生效镜像
 

@@ -23,8 +23,8 @@ endautoinit
 
 // ===== 配置 =====
 // MOD: 模块目录 (fs.moduleDir())
-// REPO: 默认主镜像基址 (help 展示用); MIRROR[]: 镜像基址列表 (默认 GitHub 官方模块仓库 NoethingScriptModules 主镜像,
-//   Gitee 镜像待建可在 .nsm-mirrors.json 追加; 设计稿 §9.1 "GitHub 主 / Gitee 镜像: 网络失败可切换";
+// REPO: 默认主镜像基址 (help 展示用); MIRROR[]: 镜像基址列表 (内置默认 = GitHub 官方模块仓库 NoethingScriptModules 主 + Gitee 镜像,
+//   符合设计稿 §9.1 "GitHub 主 / Gitee 镜像: 网络失败可切换"; 可用 .nsm-mirrors.json 覆盖持久配置;
 //   --repo 覆盖: 支持逗号分隔多基址, 拉取失败按序回退; 单基址则只用它)
 // TTL: 清单缓存有效期 7 天 (毫秒, DNF 式); MAX_DEPTH: 依赖递归深度上限; CAT_MAX: 清单表容量上限
 global MOD:string = ""
@@ -38,8 +38,7 @@ global const MAX_DEPTH:int = 10
 global const CAT_MAX:int = 256
 
 // 初始化配置 (autoinit 调用; 也可作模块被 use 时保持初始化)
-// 镜像加载顺序: --repo 命令行 > 配置文件 {MOD}/.nsm-mirrors.json > 内置默认 (GitHub 官方模块仓库 NoethingScriptModules 主镜像;
-//   Gitee 镜像待建, 建成后在 .nsm-mirrors.json 追加即可, 机制不变)
+// 镜像加载顺序: --repo 命令行 > 配置文件 {MOD}/.nsm-mirrors.json > 内置默认 (GitHub 主 + Gitee 镜像, 均真实存在可回退)
 :initConfig () -> :void
 local mdir:string = ""
 call fs.moduleDir() -> mdir
@@ -51,7 +50,8 @@ else
     call loadMirrorConfig() -> b
     if (!b)
         MIRROR[0] = "https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main"
-        MIRR_CNT = 1
+        MIRROR[1] = "https://gitee.com/epix-xhan/NoethingScriptModules/raw/main"
+        MIRR_CNT = 2
     endif
 endif
 REPO = MIRROR[0]
