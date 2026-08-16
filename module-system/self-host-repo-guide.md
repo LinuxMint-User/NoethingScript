@@ -143,8 +143,8 @@ greet@0.1.0-v2.7.zip
 
 | 托管 | 基址写法 |
 |---|---|
-| GitHub | `https://raw.githubusercontent.com/<owner>/<repo>/<branch>`（如 `.../NoethingScript/NSModules/main`） |
-| Gitee | `https://gitee.com/<owner>/<repo>/raw/<branch>`（如 `.../NoethingScript/NSModules/raw/main`） |
+| GitHub | `https://raw.githubusercontent.com/<owner>/<repo>/<branch>`（如 `.../LinuxMint-User/NoethingScriptModules/main`） |
+| Gitee | `https://gitee.com/<owner>/<repo>/raw/<branch>`（如 `.../epix-xhan/NoethingScriptModules/raw/main`） |
 | 任意 HTTP 服务器 | `http://主机:端口/静态目录`（如本地测试 `http://127.0.0.1:8765`） |
 
 ### 5.2 命令用法
@@ -154,7 +154,7 @@ greet@0.1.0-v2.7.zip
 node dist/noethingScript-Interpreter.js nsm -- install hello --repo http://127.0.0.1:8765
 
 # 多镜像：逗号分隔，按序尝试，失败自动回退下一个
-node dist/noethingScript-Interpreter.js nsm -- install hello --repo https://raw.githubusercontent.com/NoethingScript/NSModules/main,https://gitee.com/NoethingScript/NSModules/raw/main
+node dist/noethingScript-Interpreter.js nsm -- install hello --repo https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main,https://gitee.com/epix-xhan/NoethingScriptModules/raw/main
 
 # 不带 --repo：使用默认镜像列表（见 §6）
 node dist/noethingScript-Interpreter.js nsm -- install hello
@@ -178,14 +178,14 @@ node dist/noethingScript-Interpreter.js nsm -- install hello
   ```json
   {
     "mirrors": [
-      "https://raw.githubusercontent.com/NoethingScript/NSModules/main",
-      "https://gitee.com/NoethingScript/NSModules/raw/main"
+      "https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main",
+      "https://gitee.com/epix-xhan/NoethingScriptModules/raw/main"
     ]
   }
   ```
   上限 4 个，顺序即回退顺序。文件缺失/解析失败/数组为空 → 回退内置默认并打提示。**NS 无法写 JSON**（字符串字面量不转义、引号字符无法表达），配置文件由你手动编辑，nsm 只读；
 - **命令行 `--repo`**：临时覆盖，优先级最高；逗号分隔多镜像按序回退，单基址只用它；
-- **内置默认**（占位）：`https://raw.githubusercontent.com/NoethingScript/NSModules/main` + `https://gitee.com/NoethingScript/NSModules/raw/main`——**`NoethingScript/NSModules` 仓库尚未建立**，当前所有远程命令走 404 预期路径。
+- **内置默认**：`https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`——**官方模块仓库已建立**（GitHub `LinuxMint-User/NoethingScriptModules`，2026-08-16 初始化 4 个包：nsm/nsmp/stack/tools，remote 可用）。Gitee 镜像待建（可在上面配置文件里追加，机制不变）。
 
 ### 6.2 查看生效镜像
 
@@ -199,7 +199,7 @@ node dist/noethingScript-Interpreter.js nsm -- repos
 
 ## 7. 建立官方仓库步骤
 
-1. **建仓库**：GitHub 创建 `NoethingScript/NSModules`（建议 `main` 分支），建好 `catalog/` 与 `packages/` 目录；Gitee 镜像仓库同名，用 Gitee 的"从 GitHub 导入"或手动推送同步；
+1. **建仓库**：GitHub 创建模块仓库（当前官方仓库为 `LinuxMint-User/NoethingScriptModules`，main 分支），建好 `catalog/` 与 `packages/` 目录；Gitee 镜像仓库同名，用 Gitee 的"从 GitHub 导入"或手动推送同步；
 2. **打包**：把每个包目录用 `nsmp` 打包（自动生成 manifest + 打出 `{包}@{版本}-v{适配}.zip`）：
    ```bash
    node dist/noethingScript-Interpreter.js nsmp -- pack ./greet --out ./packages --desc "..."

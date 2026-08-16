@@ -26,6 +26,7 @@
 | 15 | 打包工具 nsmp（§9.1 M7 独立包） | 已实现（2026-08-16） | 完成 |
 | 16 | 解释器自更新（§9.1 "解释器本体自己负责更新"） | 已实现（2026-08-16） | 完成 |
 | 17 | 自更新镜像写死 + `--upgrade-repo` 本次覆盖 | 设计未明示处的实现决策（2026-08-16） | 保持 |
+| 18 | 官方模块仓库建立（GitHub `LinuxMint-User/NoethingScriptModules`）+ nsm 内置默认镜像指向真实仓库 | 实现补齐（2026-08-16） | 完成 |
 
 ---
 
@@ -162,3 +163,11 @@
 - **实现**: 用户明确"不要可配置了吧？直接写死吧"——默认镜像写死 TS 常量 `DEFAULT_UPGRADE_MIRRORS`（GitHub 主 + Gitee 镜像），**但保留可选 `--upgrade-repo <基址[,基址...]>` 覆盖（仅本次运行，不持久化）**，兼顾"写死"与"测试/换仓"两类需求。
 - **依据**: 与 nsm 的持久配置 `.nsm-mirrors.json` 形成对比——模块仓库需要用户自托管（持久配置合理），解释器官方仓库固定（写死合理）；`--upgrade-repo` 仅本次是"写死 + 逃生口"的平衡，不引入配置文件，不污染模块目录。
 - **验证**: 本地 http.server 模拟仓库 + `--upgrade-repo http://127.0.0.1:8765` 全链路实测通过（见 #16）。
+
+## 18. 官方模块仓库建立（§9.1 "官方仓库建立" 未完成项做掉，2026-08-16）
+
+设计稿 §9.1 遗留的"官方仓库建立"（M1–M7 完成后剩 3 项未完成之一）已完成: GitHub 建官方模块仓库 `LinuxMint-User/NoethingScriptModules`（main 分支，用户提供），初始 4 个包——`nsm`/`nsmp`/`stack`/`tools`（`modules/main/` 现有包全量；queue/set 示例模块为 M8 剩余项，待补后再打包发布）。仓库结构遵循 [self-host-repo-guide.md](self-host-repo-guide.md): `catalog/main.manifest.json`（nsmp gen-catalog 自动生成，4 条目按包名排序）+ `packages/` 4 个 zip（nsmp pack 生成，zip 内顶层目录=包名含 manifest）。**nsm 内置默认镜像同步从占位 `NoethingScript/NSModules` 改为真实 `https://raw.githubusercontent.com/LinuxMint-User/NoethingScriptModules/main`**（initConfig 内置默认分支 MIRR_CNT=1；Gitee 镜像待建，建成后在 `.nsm-mirrors.json` 追加，机制不变）。**偏差/实现说明**:
+1. 仓库目录独立于解释器项目：因沙箱限制父目录不可写，模块仓库放在项目下 `NoethingScriptModules/`（独立 git 仓库，解释器 `.gitignore` 排除）；
+2. `--out` 相对路径与 zip 打包 `cwd`（打包目录父目录）错位 → nsmp pack 的 `--out` 用绝对路径（zip 写入以打包目录为基准的相对路径所致）；这是 `--out` 相对路径下的已知行为，未改代码（用绝对路径即可）；
+3. 本地打包时 nsmp 会重写 `modules/main/*/manifest` 的 description（参数 `--desc` 优先，无参数复用已有）——本次顺手完善了 4 个包的 description，便于 search 展示；
+4. 实测链路：本地 http.server 模拟仓库 → refresh/install/依赖递归（tools→stack）全部正常；推 GitHub 后真实 remote 验证：`nsm -- repos` 显示生效镜像为 GitHub raw 主镜像，`refresh main`/`install stack`/`install tools` 从 GitHub raw 真实拉取成功。**用户当前 `git push` 网络不稳**，本次推送用 `timeout 120 + GIT_HTTP_LOW_SPEED_LIMIT/TIME` 包装成功。
