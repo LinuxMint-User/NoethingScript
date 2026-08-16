@@ -822,6 +822,21 @@ node dist/noethingScript-Interpreter.js --version   # 显示版本号后退出
 
 `--help`/`--version` 为独立参数，不需要提供文件名，且优先于其他检查。
 
+#### 解释器自更新
+
+解释器本体自己负责更新（设计稿 §9.1，独立于模块管理器 nsm）：
+
+```bash
+node dist/noethingScript-Interpreter.js --check-upgrade   # 只检查并报告, 无副作用
+node dist/noethingScript-Interpreter.js --upgrade         # 拉取最新源码并重新编译 (需确认)
+node dist/noethingScript-Interpreter.js --upgrade --force # 跳过覆盖确认
+```
+
+- 官方仓库镜像**写死**（GitHub 主 + Gitee 镜像，按序回退）；可用 `--upgrade-repo <基址[,基址...]>` 覆盖（仅本次，测试/换仓用）
+- 流程：检查远程版本 → 确认（`--force` 跳过）→ 备份本地 `noethingScript-Interpreter.ts` 为 `.upgrade-bak` → 下载最新 `noethingScript-Interpreter.ts` 与 `package.json` → `npx tsc` 重新编译 → 验证产物版本
+- 任一步失败（镜像不可达/编译失败）自动恢复备份回滚，不影响本地现状
+- 需在项目根目录运行（须存在 `noethingScript-Interpreter.ts` 与 `package.json`）；升级成功后备份保留，验证后自行删除并建议 git 提交
+
 #### 模块目录
 
 ```bash
@@ -841,7 +856,7 @@ node dist/noethingScript-Interpreter.js 脚本文件名.ns -- arg1 arg2 ...
 #### 参数约定
 
 - 可选参数与文件名**顺序任意**，文件名必须是第一个**非 `-` 开头**的参数
-- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--modules`/`--help`/`--version`；`--` 是脚本参数区分隔符
+- 以 `-` 开头的参数仅支持 `--debug`/`--lang`/`--modules`/`--inject`/`--check-upgrade`/`--upgrade`/`--upgrade-repo`/`--force`/`--help`/`--version`；`--` 是脚本参数区分隔符
 - **不支持短参数**（如 `-h`/`-v`）；未知参数（含短参数）会提示"未知参数"并退出，不会被当作文件名
 - 脚本参数区内不存在"未知可选参数"概念：`--` 之后的一切（含 `-h` 这类横杠串）都按 cmdargs 规则交给脚本解析
 
@@ -932,4 +947,4 @@ A：字符串字面量只接受英文双引号（`"..."`），单引号不是字
 
 **Q：为什么 `-h` 会提示"未知参数"而不是运行脚本？**
 
-A：不支持短参数；以 `-` 开头的参数仅接受 `--debug`/`--lang`/`--help`/`--version`（详见"运行方式 → 参数约定"）。
+A：不支持短参数；以 `-` 开头的参数仅接受 `--debug`/`--lang`/`--modules`/`--inject`/`--check-upgrade`/`--upgrade`/`--upgrade-repo`/`--force`/`--help`/`--version`（详见"运行方式 → 参数约定"）。

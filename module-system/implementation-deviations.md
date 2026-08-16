@@ -24,6 +24,8 @@
 | 13 | 本地模拟远程仓库实测 + NSVM/解析器 4 处潜伏 bug 修复 | 修复/验证（2026-08-16） | 完成 |
 | 14 | 镜像自动回退（§9.1 "GitHub 主 / Gitee 镜像: 网络失败可切换"） | 实现补齐（2026-08-16） | 完成 |
 | 15 | 打包工具 nsmp（§9.1 M7 独立包） | 已实现（2026-08-16） | 完成 |
+| 16 | 解释器自更新（§9.1 "解释器本体自己负责更新"） | 已实现（2026-08-16） | 完成 |
+| 17 | 自更新镜像写死 + `--upgrade-repo` 本次覆盖 | 设计未明示处的实现决策（2026-08-16） | 保持 |
 
 ---
 
@@ -149,3 +151,14 @@
 ## 15. 打包工具 nsmp（已实现，§9.1 M7 独立包，2026-08-16）
 
 `modules/main/nsmp/`（manifest 声明命令 `nsmp`，命令别名经解释器解析并自动注入 fs）。`nsmp -- pack <包目录> [--version/--source/--ns/--command/--desc/--out] [--force|-y]`：包名=目录名（`baseName` 手写）；modules=扫 `{子目录}/{子目录}.ns` 集合；version/source/command/description/ns 参数优先 → 复用已有 manifest → 默认值（version 0.1.0 / source main / ns 解释器版本前两段）；打 zip `{包名}@{版本}-v{适配}.zip`（fs 注入补 `zip`——spawnSync zip 同步打包目录自身，zip 内顶层=目录 basename，兼容 nsm install 的 `{tmp}/{pkg}/manifest` 定位，与 unzip 对称）。**偏差说明（重要）**: 设计稿"扫描自动生成 manifest"在实现上 JSON 组装无法在 NS 侧完成——**NS 字符串字面量不转义、引号字符（`"`）无法用任何字面量表达**（`"\"` 实际是反斜杠字符，`String.replace` 也无法生成引号，NS 值模型下含引号的字符串仅能来自外部注入如 fs 能力返回值/命令行参数），故 fs 注入补专用能力 `writeManifest(p, pkg, ver, nsv, src, dsc, mods, nMods, cmds, nCmds)`（TS 侧 `JSON.stringify` 组装固定结构 manifest，description/command 空则省略字段），NS 侧直接调用（与 readJsonField 同类的专用能力先例）。实测闭环：nsmp 打包 nsm/nsmp 自身 → nsm 安装产物（--force 过来源校验，source=main 按 custom 装）→ 命令别名可用；`--modules /tmp/modtest` 验证产物结构/命令别名兼容；25 项回归全过。**扩展（同日）**: `nsmp -- gen-catalog <packages目录> [--source 源] [--out 目录]`——扫描目录下全部 `*.zip`，逐个解压读包内 manifest（`package`/`version`/`ns`/`source`，zip 内顶层目录=包名，解压到 `.cat-tmp` 后清理）汇总生成 `catalog/{源}.manifest.json`；JSON 组装同样由能力代做（fs 注入补 `writeCatalog(p, pkgs, vers, nss, zips, n)`，按包名字典序排序保证清单稳定 diff）；`--source` 缺省 `main`；包内 `manifest.source` 与目标源不一致告警（nsm 安装校验将拒绝）；覆盖输出文件需确认（-y 跳过）。实测：3 个 main 包 + 1 个 extra 包混合目录 → main 清单警告 1 项、extra 清单警告 3 项均正确；生成的 main 清单经本地 http.server 验证 refresh/install/search 全链路可用。
+
+## 16. 解释器自更新（已实现，§9.1 "解释器本体自己负责更新"，2026-08-16）
+
+设计稿 §9.1: 解释器本体自己负责更新（`ns --check-upgrade` / `--upgrade`），管理器不管解释器、upgrade 只管模块。实现（[自更新函数族](file:///run/media/echan/DATA/项目/JavaScript Projects/NoethingScript/noethingScript-Interpreter.ts#L8682-8859)）: CLI 新增 `--check-upgrade`（只检查报告、无副作用）与 `--upgrade`（完整更新: 检查远程版本 → 确认（`--force` 跳过）→ 备份本地 ts 为 `.upgrade-bak` → 镜像回退下载最新 `noethingScript-Interpreter.ts` + `package.json` → `npx tsc` 重编译 → 验证产物版本）。任一步失败（全部镜像不可达/下载失败/编译失败）自动恢复备份回滚；需在项目根目录运行（须存在 ts 与 package.json），不在根目录报错退出；升级成功提示保留备份供验证后删除并建议 git 提交；文件级 require 补 `cpUpgrade`（`child_process`，curl/npx/tsc 子进程调用）。**偏差说明**: 官方仓库镜像写死为 `DEFAULT_UPGRADE_MIRRORS`（GitHub raw 主 + Gitee raw 镜像按序回退，对应官方仓库 `LinuxMint-User/NoethingScript` / `epix-xhan/NoethingScript` 的 raw 基址；与 nsm 的镜像列表不同——nsm 走持久配置 `.nsm-mirrors.json`，自更新按用户要求直接写死）；保留可选 `--upgrade-repo <基址[,基址...]>` 覆盖默认镜像（仅本次，测试/换仓用）。**验证**: 本地 HTTP 仓库模拟实测全链路——check 发现新版本、upgrade 确认 y 成功升级（2.7.4→2.8.0 产物版本验证 + 备份生成）、取消 n 不动、`--force` 跳过确认、坏基址+好基址镜像回退成功、全镜像不可达报错退出 1、已是最新提示无需更新、坏源码编译失败自动恢复备份回滚、非项目根目录报错。
+
+## 17. 自更新镜像写死 + `--upgrade-repo` 本次覆盖（设计未明示处的实现决策，2026-08-16）
+
+- **设计**: §9.1 仅规定"解释器本体自己负责更新"，未明示更新源的配置方式。
+- **实现**: 用户明确"不要可配置了吧？直接写死吧"——默认镜像写死 TS 常量 `DEFAULT_UPGRADE_MIRRORS`（GitHub 主 + Gitee 镜像），**但保留可选 `--upgrade-repo <基址[,基址...]>` 覆盖（仅本次运行，不持久化）**，兼顾"写死"与"测试/换仓"两类需求。
+- **依据**: 与 nsm 的持久配置 `.nsm-mirrors.json` 形成对比——模块仓库需要用户自托管（持久配置合理），解释器官方仓库固定（写死合理）；`--upgrade-repo` 仅本次是"写死 + 逃生口"的平衡，不引入配置文件，不污染模块目录。
+- **验证**: 本地 http.server 模拟仓库 + `--upgrade-repo http://127.0.0.1:8765` 全链路实测通过（见 #16）。

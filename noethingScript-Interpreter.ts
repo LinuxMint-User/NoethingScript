@@ -579,7 +579,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: '用法: node noethingScript-Interpreter.js <文件名>',
         cli_no_debug_level: '未指定调试参数等级, 初始化默认为 0',
         cli_invalid_lang: '无效的语言参数, 仅支持 en 或 zh, 已保持默认中文',
-        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--modules/--inject/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
+        cli_unknown_args: '未知参数: {args} (以 - 开头的参数仅支持 --debug/--lang/--modules/--inject/--check-upgrade/--upgrade/--upgrade-repo/--force/--help/--version, 不支持短参数 (如 -h), 使用 --help 查看用法)',
         cli_inject_unknown: '未知的注入能力: {name} (--inject 支持: {caps})',
         cli_cannot_read: '[错误] 无法读取文件 \'{filename}\': {error}',
         cli_node_required: '[错误] 此脚本需要在Node.js环境中运行以支持文件读取',
@@ -1006,7 +1006,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         cli_usage: 'Usage: node noethingScript-Interpreter.js <filename>',
         cli_no_debug_level: 'Debug level not specified, defaulting to 0',
         cli_invalid_lang: 'Invalid language, only en or zh are supported, keeping default zh',
-        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--modules/--inject/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
+        cli_unknown_args: 'Unknown arguments: {args} (arguments starting with - only support --debug/--lang/--modules/--inject/--check-upgrade/--upgrade/--upgrade-repo/--force/--help/--version; short options (e.g. -h) are NOT supported, use --help for usage)',
         cli_inject_unknown: 'Unknown injection capability: {name} (--inject supports: {caps})',
         cli_cannot_read: '[Error] Cannot read file \'{filename}\': {error}',
         cli_node_required: '[Error] This script needs a Node.js environment to support file reading',
@@ -8491,9 +8491,11 @@ class ExpressionEvaluator {
 }
 
 // 添加Node.js环境下的文件系统模块导入 (模块默认 loader 用 fs/path 读 modules/, 设计稿 §7.1)
+// cpUpgrade: 解释器自更新 (--check-upgrade/--upgrade) 的子进程调用 (curl/npx/tsc), 与注入能力 buildFsCapability 局部 require 同源
 if (typeof require !== 'undefined') {
     var fs = require('fs');
     var path = require('path');
+    var cpUpgrade = require('child_process');
 }
 
 // ===== Node/CLI 注入入口 (设计稿 §6 registerGlobal 的 Node 侧能力, M7 模块管理器经此获取 fs/http) =====
@@ -8654,6 +8656,11 @@ function printHelp(): void {
         console.log('  --lang en|zh    Set output language (default zh)');
         console.log('  --modules DIR   Set module directory (default: modules)');
         console.log('  --inject LIST   Inject Node built-in capabilities via registerGlobal (comma separated, e.g. fs,http)');
+        console.log('  --              Separator: everything after goes to the script (received by entry cmdargs)');
+        console.log('  --check-upgrade Check interpreter updates (official repos GitHub primary + Gitee mirror, report only, no side effects)');
+        console.log('  --upgrade       Update interpreter: fetch latest source & package.json and recompile (confirm; --force skips)');
+        console.log('  --upgrade-repo  Upgrade mirror bases, comma separated, fallback in order (default official repos, override this run only)');
+        console.log('  --force         Skip --upgrade overwrite confirmation (uncommitted changes will be lost)');
         console.log('  --help          Show this help message');
         console.log('  --version       Show version number');
     } else {
@@ -8668,9 +8675,192 @@ function printHelp(): void {
         console.log('  --modules DIR   设置模块目录 (默认: modules)');
         console.log('  --inject LIST   经 registerGlobal 注入 Node 内置能力 (逗号分隔, 如 fs,http; 脚本中可 名字.函数() 点分调用)');
         console.log('  --              分隔符: 之后的参数全部归脚本 (入口文件 cmdargs 按声明接收)');
+        console.log('  --check-upgrade 检查解释器更新 (官方仓库 GitHub 主 + Gitee 镜像, 只报告无副作用)');
+        console.log('  --upgrade       更新解释器: 拉取最新源码与 package.json 并重新编译 (确认; --force 跳过)');
+        console.log('  --upgrade-repo  升级用镜像基址, 逗号分隔多镜像按序回退 (默认官方仓库, 覆盖仅本次)');
+        console.log('  --force         跳过 --upgrade 的覆盖确认 (未提交改动会丢失)');
         console.log('  --help          显示本帮助');
         console.log('  --version       显示版本号');
     }
+}
+
+// ===== 解释器自更新 (设计稿 §9.1 "解释器本体自己负责更新", 独立于模块管理器 nsm) =====
+// 官方仓库镜像写死 (与 nsm 镜像列表同构: 主 + 镜像按序回退); 可选 --upgrade-repo 覆盖 (测试/换仓, 仅本次)
+const DEFAULT_UPGRADE_MIRRORS: string[] = [
+    'https://raw.githubusercontent.com/LinuxMint-User/NoethingScript/main',
+    'https://gitee.com/epix-xhan/NoethingScript/raw/main'
+];
+
+// 版本比较: a<b → -1, a>b → 1, 相等 → 0 (x.y.z 逐位数字比较, 缺段按 0)
+function cmpVersion(a: string, b: string): number {
+    const pa = String(a).split('.').map((x) => parseInt(x, 10) || 0);
+    const pb = String(b).split('.').map((x) => parseInt(x, 10) || 0);
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const da = pa[i] || 0;
+        const db = pb[i] || 0;
+        if (da !== db) return da > db ? 1 : -1;
+    }
+    return 0;
+}
+
+// 同步下载 (spawnSync curl, 与注入能力 http.download 同款; 失败抛异常)
+function cliDownload(url: string, dest: string): void {
+    const r = cpUpgrade.spawnSync('curl', ['-fsSL', '-o', dest, url], { encoding: 'utf8', timeout: 120000 });
+    if (r.error || r.status !== 0) {
+        throw new Error('下载失败: ' + url + (r.status !== null ? ' (curl 退出码 ' + r.status + ')' : ''));
+    }
+}
+
+// 按镜像顺序拉取文件到 dest (临时文件 → rename 覆盖, 避免半写): 失败切下一镜像, 全失败返回 false
+function downloadWithMirror(mirrors: string[], rel: string, dest: string): boolean {
+    const tmp = dest + '.upgrade-tmp';
+    for (const base of mirrors) {
+        const url = base + '/' + rel;
+        try {
+            cliDownload(url, tmp);
+            fs.renameSync(tmp, dest);
+            if (LANG === 'en') console.log('Downloaded from ' + url);
+            else console.log('已从 ' + url + ' 下载');
+            return true;
+        } catch (e) {
+            try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+            if (LANG === 'en') console.log('Mirror unreachable, trying next: ' + url + ' (' + (e as Error).message + ')');
+            else console.log('[提示] 镜像不可达, 尝试下一个: ' + url + ' (' + (e as Error).message + ')');
+        }
+    }
+    return false;
+}
+
+// 拉取远程版本 (第一个可用镜像的 package.json version)
+function fetchRemoteVersion(mirrors: string[]): { ver: string; base: string } | null {
+    const tmp = path.join(process.cwd(), '.upgrade-pkg.tmp');
+    for (const base of mirrors) {
+        const url = base + '/package.json';
+        try {
+            cliDownload(url, tmp);
+            const pkg = JSON.parse(fs.readFileSync(tmp, 'utf8'));
+            fs.unlinkSync(tmp);
+            if (typeof pkg.version === 'string' && pkg.version) return { ver: pkg.version, base };
+        } catch {
+            try { fs.unlinkSync(tmp); } catch { /* ignore */ }
+            if (LANG === 'en') console.log('Mirror unreachable, trying next: ' + url);
+            else console.log('[提示] 镜像不可达, 尝试下一个: ' + url);
+        }
+    }
+    return null;
+}
+
+// 交互确认 (同步读 stdin 一个字节; stdin 不可用 → false, 安全默认拒绝)
+function confirmUpgrade(prompt: string): boolean {
+    process.stdout.write(prompt + ' [y/N] ');
+    const buf = Buffer.alloc(1);
+    try {
+        fs.readSync(0, buf, 0, 1, null);
+    } catch {
+        return false;
+    }
+    return buf.toString('utf8').toLowerCase() === 'y';
+}
+
+// 更新失败回滚: 恢复备份并重新编译恢复原状
+function restoreUpgrade(tsPath: string, bakPath: string): void {
+    try { fs.copyFileSync(bakPath, tsPath); } catch { /* ignore */ }
+    try { fs.unlinkSync(bakPath); } catch { /* ignore */ }
+    try { cpUpgrade.spawnSync('npx', ['tsc'], { cwd: process.cwd(), encoding: 'utf8', timeout: 120000 }); } catch { /* ignore */ }
+}
+
+// --check-upgrade: 仅检查报告 (无副作用)
+function checkUpgrade(mirrors: string[]): number {
+    const remote = fetchRemoteVersion(mirrors);
+    if (remote === null) {
+        if (LANG === 'en') console.error('Failed to check upgrade (all mirrors unreachable).');
+        else console.error('[错误] 检查更新失败 (全部镜像不可达)');
+        return 1;
+    }
+    if (cmpVersion(remote.ver, NSIVersion) <= 0) {
+        if (LANG === 'en') console.log('NoethingScript is up to date (v' + NSIVersion + ').');
+        else console.log('已是最新版本: v' + NSIVersion);
+        return 0;
+    }
+    if (LANG === 'en') console.log('New version available: v' + remote.ver + ' (current v' + NSIVersion + '), run with --upgrade to update.');
+    else console.log('发现新版本: v' + remote.ver + ' (当前 v' + NSIVersion + '), 运行 --upgrade 更新');
+    return 0;
+}
+
+// --upgrade: 检查 → 确认 → 备份 → 下载 (镜像回退) → 重编译 → 验证
+function runUpgrade(mirrors: string[], force: boolean): number {
+    const cwd = process.cwd();
+    const tsPath = path.join(cwd, 'noethingScript-Interpreter.ts');
+    const pkgPath = path.join(cwd, 'package.json');
+    if (!fs.existsSync(tsPath) || !fs.existsSync(pkgPath)) {
+        if (LANG === 'en') console.error('Self-upgrade requires running in the project root (noethingScript-Interpreter.ts / package.json not found).');
+        else console.error('[错误] 自更新需在项目根目录运行 (未找到 noethingScript-Interpreter.ts / package.json)');
+        return 1;
+    }
+    const remote = fetchRemoteVersion(mirrors);
+    if (remote === null) {
+        if (LANG === 'en') console.error('Failed to check upgrade (all mirrors unreachable).');
+        else console.error('[错误] 检查更新失败 (全部镜像不可达)');
+        return 1;
+    }
+    if (cmpVersion(remote.ver, NSIVersion) <= 0) {
+        if (LANG === 'en') console.log('Already up to date (v' + NSIVersion + ').');
+        else console.log('已是最新版本: v' + NSIVersion + ', 无需更新');
+        return 0;
+    }
+    if (LANG === 'en') console.log('Upgrading v' + NSIVersion + ' -> v' + remote.ver + ' (source: ' + remote.base + ')');
+    else console.log('升级 v' + NSIVersion + ' -> v' + remote.ver + ' (来源: ' + remote.base + ')');
+    if (!force) {
+        const ok = confirmUpgrade(LANG === 'en'
+            ? 'This will overwrite local noethingScript-Interpreter.ts and package.json (uncommitted changes will be lost). Continue?'
+            : '将覆盖本地 noethingScript-Interpreter.ts 与 package.json (未提交改动会丢失), 继续?');
+        if (!ok) {
+            if (LANG === 'en') console.log('Cancelled.');
+            else console.log('已取消');
+            return 0;
+        }
+    }
+    const bakPath = tsPath + '.upgrade-bak';
+    try {
+        fs.copyFileSync(tsPath, bakPath);
+    } catch (e) {
+        if (LANG === 'en') console.error('Backup failed: ' + (e as Error).message);
+        else console.error('[错误] 备份失败: ' + (e as Error).message);
+        return 1;
+    }
+    // 下载 ts + package.json (临时文件 → rename 覆盖, 避免半写)
+    if (!downloadWithMirror(mirrors, 'noethingScript-Interpreter.ts', tsPath)) {
+        restoreUpgrade(tsPath, bakPath);
+        if (LANG === 'en') console.error('Failed to download source (all mirrors unreachable), restored backup.');
+        else console.error('[错误] 下载源码失败 (全部镜像不可达), 已恢复备份');
+        return 1;
+    }
+    if (!downloadWithMirror(mirrors, 'package.json', pkgPath)) {
+        restoreUpgrade(tsPath, bakPath);
+        if (LANG === 'en') console.error('Failed to download package.json (all mirrors unreachable), restored backup.');
+        else console.error('[错误] 下载 package.json 失败 (全部镜像不可达), 已恢复备份');
+        return 1;
+    }
+    // 重编译
+    if (LANG === 'en') console.log('Recompiling (npx tsc)...');
+    else console.log('重新编译 (npx tsc)...');
+    const r = cpUpgrade.spawnSync('npx', ['tsc'], { cwd, encoding: 'utf8', timeout: 120000 });
+    if (r.status !== 0) {
+        restoreUpgrade(tsPath, bakPath);
+        if (LANG === 'en') console.error('Compile failed, restored backup. Details:\n' + (r.stderr || r.stdout || ''));
+        else console.error('[错误] 编译失败, 已恢复备份。详情:\n' + (r.stderr || r.stdout || ''));
+        return 1;
+    }
+    // 验证
+    const v = cpUpgrade.spawnSync(process.execPath, [path.join(cwd, 'dist', 'noethingScript-Interpreter.js'), '--version'], { encoding: 'utf8', timeout: 30000 });
+    if (LANG === 'en') {
+        console.log('Upgrade complete: v' + NSIVersion + ' -> v' + remote.ver + '.');
+        console.log('  Backup kept at ' + bakPath + ' — delete after verification; suggest git commit (run npm install if deps changed).');
+    } else {
+        console.log('更新完成: v' + NSIVersion + ' -> v' + remote.ver + '.');
+        console.log('  备份保留于 ' + bakPath + ' — 验证后可删除; 建议 git 提交本次更新 (依赖有变化则 npm install)。');
+    }
+    return 0;
 }
 
 // 主函数, 用于处理命令行参数并执行程序
@@ -8689,6 +8879,11 @@ function main() {
         const unknownArgs: string[] = [];
         const scriptArgs: string[] = [];
         let scriptArgsStart = false;
+        // 解释器自更新参数 (设计稿 §9.1 解释器本体自更): --check-upgrade / --upgrade [--upgrade-repo <基址[,基址...]>] [--force]
+        let upgradeCheckArg = false;
+        let upgradeRunArg = false;
+        let upgradeForceArg = false;
+        const upgradeRepoArg: string[] = [];
         for (let i = 0; i < args.length; i++) {
             if (scriptArgsStart) {
                 scriptArgs.push(args[i]);
@@ -8714,6 +8909,19 @@ function main() {
                     if (cap) injectList.push(cap);
                 }
                 i++;
+            } else if (args[i] === '--check-upgrade') {
+                upgradeCheckArg = true;
+            } else if (args[i] === '--upgrade') {
+                upgradeRunArg = true;
+            } else if (args[i] === '--upgrade-repo') {
+                // 升级用镜像基址 (逗号分隔, 可多次指定); 覆盖默认官方镜像, 仅本次
+                for (const m of String(args[i + 1]).split(',')) {
+                    const base = m.trim();
+                    if (base) upgradeRepoArg.push(base);
+                }
+                i++;
+            } else if (args[i] === '--force') {
+                upgradeForceArg = true;
             } else if (args[i].startsWith('-') && args[i] !== '--help' && args[i] !== '--version') {
                 // 未知可选参数兜底: 以 - 开头的未知参数 (含短参数如 -h) 记入列表, 不当作文件名处理
                 unknownArgs.push(args[i]);
@@ -8754,6 +8962,16 @@ function main() {
         if (interpreterArgs.includes('--version')) {
             console.log(`NoethingScript Interpreter v${NSIVersion}`);
             process.exit(0);
+        }
+
+        // 解释器自更新 (设计稿 §9.1): --check-upgrade/--upgrade 独立参数, 优先于脚本执行;
+        // --upgrade-repo 覆盖默认官方镜像 (仅本次), 未指定时用写死的官方镜像 (GitHub 主 + Gitee 镜像)
+        const upgradeMirrors = upgradeRepoArg.length > 0 ? upgradeRepoArg : DEFAULT_UPGRADE_MIRRORS;
+        if (upgradeRunArg) {
+            process.exit(runUpgrade(upgradeMirrors, upgradeForceArg));
+        }
+        if (upgradeCheckArg) {
+            process.exit(checkUpgrade(upgradeMirrors));
         }
 
         // 未知可选参数兜底: 提示后退出, 避免被误当作文件名导致"无法读取文件"
