@@ -1,0 +1,454 @@
+// modules/main/nsmp/nsmp/nsmp.ns — NoethingScript 模块打包工具 (设计稿 §9.1, M7 独立包)
+// 运行: node dist/noethingScript-Interpreter.js nsmp -- pack <包目录> [--version x.y.z] [--source 来源]
+//       [--ns x.y] [--command a,b] [--desc 文本] [--out 目录] [--force|-y]
+//   (解释器把命令别名 nsmp 解析为主模块路径 modules/main/nsmp/nsmp/nsmp.ns, 并自动注入 fs 能力; fs.zip 打包)
+// 功能: pack <包目录> — 扫描包目录自动生成 manifest (包名=目录名, modules=扫 {子目录}/{子目录}.ns 集合,
+//       version/source/command/description/ns 由参数提供, 缺省复用已有 manifest, 再缺省取默认值),
+//       打出 {包名}@{版本}-v{适配}.zip (zip 内顶层 = 包目录名, 兼容 nsm install 的 {tmp}/{pkg}/manifest 定位)。
+//       gen-catalog <packages目录> — 扫描目录下所有 *.zip, 逐个解压读包内 manifest (package/version/ns/source),
+//       汇总生成 catalog/{源}.manifest.json (--source 指定源, 默认 main; 覆盖确认; 来源不匹配告警; 按包名排序)。
+// 打包只管产物 (zip 上传/清单生成由 gen-catalog 代做, 推送 git 手动, 设计稿 §9.1)。
+// 约束: 全部数据操作经 fs 注入能力 (返回值限四类); 无字典 → 键值用平行数组 + 线性查找; JSON 手拼。
+
+cmdargs
+param cmd:string = "help"
+param p1:string = ""
+param p2:string = ""
+param version:string = ""
+param source:string = ""
+param command:string = ""
+param desc:string = ""
+param ns:string = ""
+param out:string = ""
+param force:bool = false as "f"
+param yes:bool = false as "y"
+endcmdargs
+
+// 初始化 (头部块; autoinit 无局部作用域, 初始化逻辑抽到正文函数 :initConfig)
+autoinit
+call initConfig()
+endautoinit
+
+// ===== 配置 =====
+// OUT: zip 输出目录 (--out 覆盖, 默认当前工作目录 fs.cwd())
+// MODS/CMDS: 模块集合/命令集合 (收集后供 manifest JSON 数组拼接)
+global OUT:string = ""
+global array MODS[64]:string = arrfill
+global MODS_CNT:int = 0
+global array CMDS[8]:string = arrfill
+global CMDS_CNT:int = 0
+// gen-catalog 收集表: 包名/版本/适配段/zip 文件名 (平行数组, 上限 256)
+global array CAT_PKG[256]:string = arrfill
+global array CAT_VER[256]:string = arrfill
+global array CAT_NS[256]:string = arrfill
+global array CAT_ZIP[256]:string = arrfill
+global CAT_CNT:int = 0
+
+:initConfig () -> :void
+if (out != "")
+    OUT = out
+else
+    call fs.cwd() -> OUT
+endif
+:end
+
+// ==================== 工具 ====================
+
+// basename: 最后 / 之后的部分 (NS 无内置, 手写; Linux 路径)
+:baseName (p:string) -> r:string
+r = p
+if (String.has(p, "/"))
+    local i:int = 0
+    i = String.findLast(p, "/")
+    r = String.take(p, i + 1, len(p) - i - 1)
+endif
+return r
+:end
+
+// 拆分逗号分隔 command 列表 → CMDS[] (上限 8, 超限截断)
+:splitCmds (s:string) -> :void
+CMDS_CNT = 0
+local rest:string = ""
+rest = s
+local seg:string = ""
+local idx:int = 0
+while (CMDS_CNT < 8)
+    if (rest == "")
+        break
+    endif
+    if (String.has(rest, ","))
+        idx = String.findFirst(rest, ",")
+        seg = String.take(rest, 0, idx)
+        CMDS[CMDS_CNT] = seg
+        CMDS_CNT = CMDS_CNT + 1
+        rest = String.take(rest, idx + 1, len(rest) - idx - 1)
+    else
+        CMDS[CMDS_CNT] = rest
+        CMDS_CNT = CMDS_CNT + 1
+        break
+    endif
+endwhl
+:end
+
+// JSON 字符串转义 (NS 字符串字面量不转义, 引号字符无法用字面量表达 → JSON 组装由 fs.writeManifest 代做, 此处废弃)
+
+// 收集包目录下模块目录集合 → MODS[] ({子目录}/{子目录}.ns 存在即模块)
+:collectModules (dir:string) -> :void
+MODS_CNT = 0
+local array items[64]:string = arrfill
+local j:int = 0
+local b:bool = false
+local p:string = ""
+local mf:string = ""
+call fs.listDir(dir) -> items
+while (j < len(items))
+    call fs.join(dir, items[j]) -> p
+    call fs.isDir(p) -> b
+    if (b)
+        call fs.join(p, items[j] + ".ns") -> mf
+        call fs.exists(mf) -> b
+        if (b)
+            MODS[MODS_CNT] = items[j]
+            MODS_CNT = MODS_CNT + 1
+        endif
+    endif
+    j = j + 1
+endwhl
+:end
+
+// 确认 (--force/-y 跳过): 输出提示读 stdin, y/yes 确认
+:confirm (msg:string) -> ok:bool
+if (yes || force)
+    ok = true
+    return ok
+endif
+print msg + " [y/N]"
+local ans:string = ""
+call input() -> ans
+if (ans == "y" || ans == "Y" || ans == "yes")
+    ok = true
+else
+    ok = false
+endif
+return ok
+:end
+
+// ==================== pack 命令 ====================
+
+:cmdPack (dir:string) -> ok:bool
+ok = false
+// 1. 校验目录
+local b:bool = false
+call fs.isDir(dir) -> b
+if (!b)
+    print "[错误] 不是目录: " + dir
+    return ok
+endif
+// 2. 包名 = 目录名
+local pkg:string = ""
+call baseName(dir) -> pkg
+// 3. 已有 manifest 存在性
+local mf:string = ""
+call fs.join(dir, "manifest") -> mf
+call fs.exists(mf) -> b
+// 4. version: --version 参数 > 已有 manifest > 默认 0.1.0
+local ver:string = ""
+if (version != "")
+    ver = version
+else
+    if (b)
+        call fs.readJsonField(mf, "version") -> ver
+    else
+        ver = "0.1.0"
+    endif
+endif
+// 5. ns 适配版本: --ns 参数 > 已有 manifest > 解释器版本前两段
+local nsv:string = ""
+if (ns != "")
+    nsv = ns
+else
+    if (b)
+        call fs.readJsonField(mf, "ns") -> nsv
+    else
+        call fs.interpVersion() -> nsv
+        // 前两段: 取到第二个点之前 (如 "2.7.4" → "2.7"); 无第二点 (如 "2.7") 保持整串
+        local dot:int = 0
+        dot = String.findFirst(nsv, ".")
+        if (dot >= 0)
+            local rest:string = ""
+            rest = String.take(nsv, dot + 1, len(nsv) - dot - 1)
+            local dot2:int = 0
+            dot2 = String.findFirst(rest, ".")
+            if (dot2 >= 0)
+                nsv = String.take(nsv, 0, dot + dot2 + 1)
+            endif
+        endif
+    endif
+endif
+// 6. source: --source 参数 > 已有 manifest > 默认 main
+local src:string = ""
+if (source != "")
+    src = source
+else
+    if (b)
+        call fs.readJsonField(mf, "source") -> src
+    else
+        src = "main"
+    endif
+endif
+// 7. description: --desc 参数 > 已有 manifest (可缺省)
+local dsc:string = ""
+if (desc != "")
+    dsc = desc
+else
+    if (b)
+        try
+            call fs.readJsonField(mf, "description") -> dsc
+        catch (Exception e)
+            dsc = ""
+        endtry
+    endif
+endif
+// 8. command: --command 逗号分隔拆分; 为空则读已有 manifest command (可缺省)
+call splitCmds(command)
+if (CMDS_CNT == 0 && b)
+    local array cmds0[8]:string = arrfill
+    local ck:bool = false
+    try
+        call fs.readJsonArray(mf, "command") -> cmds0
+        ck = true
+    catch (Exception e)
+        ck = false
+    endtry
+    if (ck)
+        local k:int = 0
+        while (k < len(cmds0) && k < 8)
+            CMDS[k] = cmds0[k]
+            k = k + 1
+        endwhl
+        CMDS_CNT = k
+    endif
+endif
+// 9. 扫描模块目录集合 (无模块 → 报错)
+call collectModules(dir)
+if (MODS_CNT == 0)
+    print "[错误] 包目录下未找到模块: " + dir + " (需要 {子目录}/{子目录}.ns 结构)"
+    return ok
+endif
+// 10. 生成并写入 manifest JSON (fs.writeManifest 代做 — NS 字符串字面量不转义, 引号字符无法用字面量表达)
+call fs.writeManifest(mf, pkg, ver, nsv, src, dsc, MODS, MODS_CNT, CMDS, CMDS_CNT)
+print "[信息] 已生成 manifest: " + mf
+// 12. 打 zip (已存在 → 确认覆盖)
+local zname:string = ""
+zname = pkg + "@" + ver + "-v" + nsv + ".zip"
+local zipPath:string = ""
+call fs.join(OUT, zname) -> zipPath
+call fs.exists(zipPath) -> b
+if (b)
+    local ok:bool = false
+    local msg:string = ""
+    msg = "覆盖已存在的 " + zname + "?"
+    call confirm(msg) -> ok
+    if (!ok)
+        print "[信息] 已取消"
+        return ok
+    endif
+endif
+try
+    call fs.zip(dir, zipPath)
+catch (Exception e)
+    print "[错误] 打包失败: " + e
+    return ok
+endtry
+print "[信息] 打包完成: " + zipPath
+print "[信息]   package: " + pkg
+print "[信息]   version: " + ver
+print "[信息]   ns: " + nsv
+print "[信息]   source: " + src
+print "[信息]   modules: " + str(MODS_CNT) + " 个"
+if (CMDS_CNT > 0)
+    print "[信息]   command: " + str(CMDS_CNT) + " 个"
+endif
+ok = true
+return ok
+:end
+
+// ==================== gen-catalog 命令 ====================
+// 扫描 packages 目录所有 *.zip → 逐个解压读包内 manifest (package/version/ns/source) → 汇总生成
+// catalog/{源}.manifest.json (nsmp 打包命名 {包}@{版本}-v{适配}.zip, zip 内顶层目录名 = 包名;
+// 清单格式与 nsm 仓库布局一致: {packages:[{package,version,ns,zip}]}, 按包名排序由能力侧完成)
+
+:cmdGenCatalog (dir:string, src:string) -> ok:bool
+ok = false
+// 1. 校验目录
+local b:bool = false
+call fs.isDir(dir) -> b
+if (!b)
+    print "[错误] 不是目录: " + dir
+    return ok
+endif
+if (src == "")
+    src = "main"
+endif
+// 2. 列出 .zip 文件
+local array items[256]:string = arrfill
+call fs.listDir(dir) -> items
+local array znames[256]:string = arrfill
+local zcnt:int = 0
+local i:int = 0
+while (i < len(items))
+    if (String.has(items[i], ".zip"))
+        znames[zcnt] = items[i]
+        zcnt = zcnt + 1
+    endif
+    i = i + 1
+endwhl
+if (zcnt == 0)
+    print "[错误] 目录下无 .zip 文件: " + dir
+    return ok
+endif
+// 3. 逐个解压读 manifest
+local tmpBase:string = ""
+call fs.join(dir, ".cat-tmp") -> tmpBase
+call fs.remove(tmpBase)
+call fs.mkdir(tmpBase)
+CAT_CNT = 0
+local wcnt:int = 0
+local zi:int = 0
+local zipFull:string = ""
+local tz:string = ""
+local array top[64]:string = arrfill
+local mf:string = ""
+local pkg:string = ""
+local ver:string = ""
+local nsv:string = ""
+local psrc:string = ""
+local j:int = 0
+while (zi < zcnt)
+    call fs.join(dir, znames[zi]) -> zipFull
+    call fs.join(tmpBase, znames[zi]) -> tz
+    call fs.mkdir(tz)
+    try
+        call fs.unzip(zipFull, tz)
+    catch (Exception e)
+        print "[警告] 解压失败, 跳过: " + znames[zi] + " (" + e + ")"
+        call fs.remove(tz)
+        zi = zi + 1
+        continue
+    endtry
+    // 找顶层含 manifest 的目录 (zip 内顶层 = 包目录名)
+    mf = ""
+    call fs.listDir(tz) -> top
+    j = 0
+    while (j < len(top))
+        call fs.join(tz, top[j], "manifest") -> mf
+        call fs.exists(mf) -> b
+        if (b)
+            break
+        endif
+        mf = ""
+        j = j + 1
+    endwhl
+    if (mf == "")
+        print "[警告] 无 manifest, 跳过: " + znames[zi]
+        call fs.remove(tz)
+        zi = zi + 1
+        continue
+    endif
+    try
+        call fs.readJsonField(mf, "package") -> pkg
+        call fs.readJsonField(mf, "version") -> ver
+        call fs.readJsonField(mf, "ns") -> nsv
+        call fs.readJsonField(mf, "source") -> psrc
+    catch (Exception e)
+        print "[警告] manifest 字段缺失, 跳过: " + znames[zi] + " (" + e + ")"
+        call fs.remove(tz)
+        zi = zi + 1
+        continue
+    endtry
+    if (psrc != src)
+        print "[警告] 来源不匹配: " + pkg + " manifest.source=" + psrc + " != " + src + " (nsm 安装将拒绝)"
+        wcnt = wcnt + 1
+    endif
+    CAT_PKG[CAT_CNT] = pkg
+    CAT_VER[CAT_CNT] = ver
+    CAT_NS[CAT_CNT] = nsv
+    CAT_ZIP[CAT_CNT] = znames[zi]
+    CAT_CNT = CAT_CNT + 1
+    call fs.remove(tz)
+    zi = zi + 1
+endwhl
+call fs.remove(tmpBase)
+if (CAT_CNT == 0)
+    print "[错误] 无有效包可生成清单"
+    return ok
+endif
+// 4. 生成 catalog/{源}.manifest.json (已存在 → 确认覆盖; 排序由能力侧完成)
+local outFile:string = ""
+call fs.join(OUT, src + ".manifest.json") -> outFile
+call fs.exists(outFile) -> b
+if (b)
+    local cn:bool = false
+    local msg:string = ""
+    msg = "覆盖已存在的 " + src + ".manifest.json?"
+    call confirm(msg) -> cn
+    if (!cn)
+        print "[信息] 已取消"
+        return ok
+    endif
+endif
+try
+    call fs.writeCatalog(outFile, CAT_PKG, CAT_VER, CAT_NS, CAT_ZIP, CAT_CNT)
+catch (Exception e)
+    print "[错误] 生成清单失败: " + e
+    return ok
+endtry
+print "[信息] 已生成 " + outFile + " (" + str(CAT_CNT) + " 个包)"
+if (wcnt > 0)
+    print "[警告] " + str(wcnt) + " 个包 manifest.source 与 " + src + " 不一致 (nsm 安装将拒绝)"
+endif
+ok = true
+return ok
+:end
+
+// ==================== help ====================
+
+:cmdHelp () -> :void
+print "NoethingScript 模块打包工具 (设计稿 §9.1, M7 独立包)"
+print ""
+print "用法: node dist/noethingScript-Interpreter.js nsmp -- <命令> [参数] [--force|-y]"
+print ""
+print "  pack <包目录>                 扫描包目录生成 manifest 并打 zip (包名=目录名)"
+print "  gen-catalog <packages目录>    扫描 zip 汇总生成仓库清单 catalog/{源}.manifest.json (自动)"
+print "  help                          显示本帮助"
+print "  --version <x.y.z>             manifest version (默认复用已有 manifest, 无则 0.1.0)"
+print "  --source <main|extra|custom>  manifest source (默认复用已有 manifest, 无则 main)"
+print "  --ns <x.y>                    适配版本 (默认复用已有 manifest, 无则解释器前两段)"
+print "  --command <a,b,...>           command 命令别名, 逗号分隔 (默认复用已有 manifest)"
+print "  --desc <文本>                  description (默认复用已有 manifest)"
+print "  --out <目录>                   zip 输出目录 (默认当前工作目录)"
+print "  --force / -y                  跳过覆盖确认"
+:end
+
+// ==================== 入口 ====================
+
+:main () -> :void
+try
+    if (cmd == "pack")
+        local pr:bool = false
+        call cmdPack(p1) -> pr
+    else if (cmd == "gen-catalog")
+        local cr:bool = false
+        call cmdGenCatalog(p1, source) -> cr
+    else if (cmd == "help")
+        call cmdHelp()
+    else
+        print "[错误] 未知命令: " + cmd
+        call cmdHelp()
+    endif
+catch (Exception e)
+    print "[nsmp 错误] " + e
+endtry
+:end
+
+call main()

@@ -15,6 +15,16 @@ Tip: Run with --lang en for English messages.
 [DEBUG 2] [Line 44] 数组arr使用手动初始化
 [DEBUG 2] [Line 45] 执行指令 global array arr0[5]:int = [4, 3, 2, 1, 0]
 [DEBUG 3] [Line 45] 执行全局变量数组声明: arr0[5]:int = [4, 3, 2, 1, 0]
+[DEBUG 2] [Line 45] 解析表达式中: 5
+[DEBUG 2] [Line 45] 解析逻辑或运算中: 5
+[DEBUG 2] [Line 45] 解析逻辑与运算中: 5
+[DEBUG 2] [Line 45] 解析相等性运算中: 5
+[DEBUG 2] [Line 45] 解析关系运算中: 5
+[DEBUG 2] [Line 45] 解析加法和减法运算中: 5
+[DEBUG 2] [Line 45] 解析乘法、除法和取模运算中: 5
+[DEBUG 2] [Line 45] 解析幂运算中: 5
+[DEBUG 2] [Line 45] 解析一元运算符中: 5
+[DEBUG 2] [Line 45] 解析基本元素中: 5
 [DEBUG 2] [Line 45] 数组arr0使用手动初始化
 [DEBUG 2] [Line 48] 执行指令 print arr[arr0[0]]
 [DEBUG 2] [Line 48] 解析表达式中: arr,[,arr0,[,0,],]

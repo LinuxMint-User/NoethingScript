@@ -1,7 +1,7 @@
 {
   "package": "stack",
   "version": "0.1.0",
-  "ns": "2.7.2",
+  "ns": "2.7",
   "source": "main",
   "description": "M5 功能测试栈模块",
   "modules": ["stack"]

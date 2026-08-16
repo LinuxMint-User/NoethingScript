@@ -1,0 +1,13 @@
+{
+  "package": "nsmp",
+  "version": "0.1.0",
+  "ns": "2.7",
+  "source": "main",
+  "description": "NoethingScript 模块打包工具 (设计稿 §9.1, M7 独立包)",
+  "modules": [
+    "nsmp"
+  ],
+  "command": [
+    "nsmp"
+  ]
+}

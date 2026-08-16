@@ -1,0 +1,13 @@
+{
+  "package": "nsm",
+  "version": "0.1.0",
+  "ns": "2.7",
+  "source": "main",
+  "description": "NoethingScript 模块管理器 (设计稿 §9.1, M7)",
+  "modules": [
+    "nsm"
+  ],
+  "command": [
+    "nsm"
+  ]
+}

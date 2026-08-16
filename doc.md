@@ -466,10 +466,11 @@ print r1[0]   // 5
 | `Math.random()` | [0,1) 随机数 |
 
 #### String 字符串对象
-`String.` 前缀调用字符串操作函数（8 个）。与 `Math.*` 同源（解释器内置预置对象，所有脚本可用），但**命名按语言自身风格定，不沿用 JS 名字**——借用 JS 能力，不借命名：
+`String.` 前缀调用字符串操作函数（9 个）。与 `Math.*` 同源（解释器内置预置对象，所有脚本可用），但**命名按语言自身风格定，不沿用 JS 名字**——借用 JS 能力，不借命名：
 
 | 函数 | 说明 |
 |---|---|
+| `String.char(code)` | 码点 → 字符（映射 JS `String.fromCodePoint`）：`code` 为 `0..1114111` 的整数码点，返回对应字符，如 `String.char(10)` 即换行。越界抛 `RangeError`（可被 `try-catch` 捕获） |
 | `String.take(s, start, count)` | 取子串：从 `start` 起取 `count` 个字符。边界全显式（无隐式兜底）：`start`/`count` 非负、`start < len(s)`、`count <= len(s) - start`，越界抛 `RangeError`（可被 `try-catch` 捕获）；`count = 0` 返回空串。取到末尾请显式写 `String.take(s, start, len(s) - start)` |
 | `String.findFirst(s, target, from)` | `target` 首次出现的下标（`int`）；找不到返回 `false`。`from` 可省略（默认从 0 开始找） |
 | `String.findLast(s, target)` | `target` 末次出现的下标（`int`）；找不到返回 `false` |
@@ -480,6 +481,8 @@ print r1[0]   // 5
 | `String.trim(s)` | 去除首尾空白 |
 
 字符串长度用内置 `len(s)`（与数组长度同一函数），不再单设 `String.length`。
+
+字符串字面量不做转义：`"\n"` 就是反斜杠 + n 两个字符，不是换行符；需要换行/制表等控制字符时用 `String.char(10)` / `String.char(9)` 构造。
 
 返回规范（与语言整体一致）：**操作成功返回结果或 `true`，失败返回 `false`**——`findFirst`/`findLast` 找不到返回 `false`，`has` 不包含返回 `false`。NS 变量类型显式，"下标或 `false`"的混合返回无法直接绑定单一类型变量，判断存在性的标准写法是先 `has` 后取值：
 
@@ -659,6 +662,27 @@ call stack.pop(mut st) -> v
 - 模块上下文中的输出与未捕获错误强制带来源标识 `[模块 来源/包/模块]`，跨来源/跨包同名不混淆
 - 模块函数内错误与普通函数一致：主程序 `try-catch` 可捕获；**加载期错误**（use 失败/模块语法错误/依赖循环）由模块管理器与加载器负责，不可 `try-catch`，报错后整体终止
 
+### 模块管理器 (nsm)
+
+命令别名（`node dist/noethingScript-Interpreter.js nsm -- <子命令> [参数]`，解释器自动注入 fs/http；实现 `modules/main/nsm/`）。子命令：
+
+- `install <包名> [from 来源]` / `install <本地zip路径>`：安装（远程清单按来源/本地 zip 按包内 manifest 来源；依赖自动递归安装；本地 zip 带来源/@版本报错）
+- `update [包名]`：安全更新（无参 = 全部模块，仅适配段内升级）；`upgrade [包名]`：跨适配段升级（含确认，`--force`/`-y` 跳过）
+- `check-update` / `check-upgrade`：检查更新（默认强制刷新清单）
+- `refresh [来源]`：刷新仓库清单（缓存 TTL 7 天，DNF 式；超期自动重拉、失败回退旧缓存）
+- `list`：已装模块列表（含孤立检测）；`search <关键词>`：搜索仓库；`remove <包名>`：卸载（含确认）；`repos`：显示生效镜像列表
+- 通用参数：`--force`（跳过安全检查/适配检查）、`-y`/`--yes`（所有确认自动答 y）、`--repo <基址[,基址...]>`（临时覆盖仓库镜像列表，逗号分隔多镜像按序回退）；镜像持久配置于 `{模块目录}/.nsm-mirrors.json`（JSON 对象 `mirrors` 数组，上限 4，顺序即回退顺序；缺失/坏配置回退内置默认 GitHub 主 + Gitee 镜像）
+- 仓库布局：`{基址}/catalog/{来源}.manifest.json`（清单）+ `{基址}/packages/{包}@{版本}-v{适配}.zip`（压缩包）；两镜像 URL 相对路径结构一致
+
+### 打包工具 (nsmp)
+
+命令别名（`node dist/noethingScript-Interpreter.js nsmp -- pack <包目录> [参数]`，自动注入 fs；实现 `modules/main/nsmp/`）。扫描包目录自动生成 manifest 并打 zip：
+
+- 包名 = 目录名；modules = 扫 `{子目录}/{子目录}.ns` 集合；`version`/`source`/`command`（逗号分隔）/`description`/`ns` 由参数提供，缺省复用已有 manifest，再缺省取默认值（version `0.1.0` / source `main` / ns 解释器前两段）
+- 产物 `{包名}@{版本}-v{适配}.zip`（zip 内顶层 = 包目录名，兼容 nsm install 定位）；参数 `--version`/`--source`/`--ns`/`--command`/`--desc`/`--out`（默认当前目录）/`--force`/`-y`
+- `gen-catalog <packages目录>`：扫描目录下全部 `*.zip`，逐个解压读包内 manifest（`package`/`version`/`ns`/`source`）汇总生成 `catalog/{源}.manifest.json`（`--source` 指定源，默认 `main`；覆盖确认；包内 `manifest.source` 与目标源不一致告警——nsm 安装会校验拒绝；按包名排序；临时解压目录自动清理）。无需手写仓库清单，新增/升级包后重跑即更新
+- 打包只管产物——zip 上传 git 手动；仓库清单由 `gen-catalog` 自动生成（设计稿 §9.1）
+
 ### 浏览器中使用
 
 浏览器需注入模块加载能力（嵌入式刚需）：`NSI.setModuleLoader(name => 源码字符串)`（同步原语，`name` 为模块定位名，不存在返回 `null`）、`NSI.setModuleDir(dir)`（配置模块目录，默认 `modules`）、`NSI.setCurrentFilePath(path)`（设置当前文件定位标识，供 `use inner` 定位包根）。
@@ -683,13 +707,16 @@ print b           // false
 
 #### Node/CLI 注入入口
 
-Node/CLI 下有两个注入通道（模块管理器 M7 将经 `--inject fs,http` 获得文件与网络能力）：
+Node/CLI 下有两个注入通道（模块管理器 nsm / 打包工具 nsmp 经命令别名运行时由解释器自动注入 fs/http）：
 
 1. **命令行 `--inject <能力名[,能力名...]>`**（解释器参数，位于 `--` 分隔符之前）：运行脚本前自动注入内置能力对象，未知能力名报错退出（显式性，不静默忽略）。当前内置能力：
 
 | 能力 | 成员 | 说明 |
 |---|---|---|
 | `fs` | `readFile(path)`→string、`writeFile(path, content)`→bool、`exists(path)`→bool、`isDir(path)`→bool、`listDir(path)`→Array、`mkdir(path)`→bool（递归）、`remove(path)`→bool（递归）、`rename(from,to)`→bool、`copyFile(from,to)`→bool、`cwd()`→string、`join(...parts)`→string | 同步文件系统操作；失败抛异常（NS 可 `try-catch`）；void 操作返回 `true` 表示成功 |
+| `fs` | `unzip(zipPath, destDir)`→bool、`zip(packDir, zipPath)`→bool | 同步解压/打包（`spawnSync` 调系统 `unzip`/`zip`，nsm/nsmp 用）；`zip` 打包目录自身，zip 内顶层 = 目录名；失败抛异常（可 `try-catch`） |
+| `fs` | `readJsonField(path, key)`→string、`readJsonArray(path, key)`→Array、`readJsonTable(path, arrayKey, field)`→Array、`writeManifest(path, pkg, ver, ns, source, desc, mods, nMods, cmds, nCmds)`→bool、`writeCatalog(path, pkgs, vers, nss, zips, n)`→bool | JSON 结构化读写（NS 无 JSON 解析，manifest/清单字段由能力代取；字段缺失/非数组抛异常可捕获）；`writeManifest` 生成包 manifest、`writeCatalog` 生成仓库清单 `{packages:[{package,version,ns,zip}]}`——NS 字符串字面量不转义、引号字符无法用字面量表达，JSON 组装在能力侧完成；`writeManifest` 的 `desc` 空串/`nCmds` 为 0 时省略对应字段；`writeCatalog` 按包名字典序排序 |
+| `fs` | `now()`→number（epoch 毫秒）、`moduleDir()`→string、`interpVersion()`→string、`mtime(path)`→number（epoch 毫秒整数） | 环境/时间查询（nsm 用：缓存 TTL 判断、模块目录定位、适配版本比对、文件改动时间；`mtime` 取整与 `now()` 整数语义一致） |
 | `http` | `download(url, dest)`→bool | 同步下载（`spawnSync` 调用 `curl`，NS 无异步）；失败抛异常（可 `try-catch`） |
 
 ```bash

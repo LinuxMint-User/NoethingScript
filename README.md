@@ -14,7 +14,7 @@ A line-based, explicit-type scripting language, powered by the NSI interpreter (
 - **内置对象**：`Math`（sin/cos/tan/sqrt/abs/pow/floor/ceil/round/max/min/random）、`len`/`str`/`int`/`float`/`copy`/`input`（运行时输入，命令行读 stdin、浏览器默认 prompt 弹窗且可自定义绑定；浏览器交互模式支持挂起/恢复，供脚本自持主循环）
 - **进制字面量**：二进制 `0b`、八进制 `0o`、十六进制 `0x`
 - **调试控制**：`debug` 级别调节输出详细程度
-- **模块系统**：`use` 声明式激活跨文件模块（`modules ... endmodules` 头部块、三分类来源目录、`call 对象.函数()` 点分调用、模块私有命名空间与来源标识、`autoinit` 初始化、加载期错误不可捕获）；完整设计见 [module-system/design.md](module-system/design.md)
+- **模块系统**：`use` 声明式激活跨文件模块（`modules ... endmodules` 头部块、三分类来源目录、`call 对象.函数()` 点分调用、模块私有命名空间与来源标识、`autoinit` 初始化、加载期错误不可捕获）；自带**模块管理器 nsm**（`install`/`update`/`upgrade`/`check-update`/`check-upgrade`/`refresh`/`list`/`search`/`remove`，仓库清单缓存 TTL 7 天、依赖递归安装、GitHub 主/Gitee 镜像自动回退）与**打包工具 nsmp**（`pack <包目录>` 扫描自动生成 manifest 并打 zip）；完整设计见 [module-system/design.md](module-system/design.md)
 - **运行前参数 (cmdargs)**：声明式接收启动参数——`cmdargs` 块 + `param 名:类型 = 默认值 [as "短名"]`，命令行 `--` 分隔符后的参数区按声明匹配（`--名字 值`/`-短名 值`/匿名按序/bool 开关/cast 类型转换），绑定为只读全局、先于 autoinit 与正文执行；浏览器等价入口 `NSI.setCmdargs(args)`
 - **国际化**：`--lang en|zh` 切换输出语言（默认中文），错误/警告/调试信息全部模板化，语言包可扩展（l10n 友好）
 - **统一错误报告**：`[ERROR N] [行 X] 类型: 消息`、`[WARN]` 警告、`[内部错误]`（解释器缺陷）、CLI `[错误]` 四层隔离，互不混淆
@@ -57,6 +57,10 @@ node dist/noethingScript-Interpreter.js script.ns -- --cmd build -v -n 42
 
 # 注入 Node 内置能力 (fs/http), 脚本中可 名字.函数() 点分调用 (见 doc.md "Node/CLI 注入入口")
 node dist/noethingScript-Interpreter.js --inject fs,http script.ns
+
+# 模块管理器 nsm / 打包工具 nsmp (命令别名, 解释器自动注入 fs/http; 见 doc.md "模块管理器 nsm" 与 "打包工具 nsmp")
+node dist/noethingScript-Interpreter.js nsm -- list
+node dist/noethingScript-Interpreter.js nsmp -- pack modules/main/nsm --out /tmp
 ```
 
 > 注：不支持短参数（如 `-h`）；以 `-` 开头的未知参数会提示"未知参数"而非被当作文件名。
@@ -161,7 +165,7 @@ NoethingScript/
 ├── benchmarks/                     # 性能基准 (合成基准 + 2048 端到端 + 模块化差异, 支持基线对比; npm run bench*)
 ├── doc.md                          # 语言规范手册 (含运行前参数 cmdargs、模块系统章节)
 ├── bytecode-vm/                    # 字节码VM文档: design.md 设计蓝图 + guide.md 实现说明
-├── module-system/                  # 模块系统设计: design.md 完整设计 (定稿) + module-system-conclusions.md 讨论结论记录 + implementation-deviations.md 实现偏差记录
+├── module-system/                  # 模块系统设计: design.md 完整设计 (定稿) + module-system-conclusions.md 讨论结论记录 + implementation-deviations.md 实现偏差记录 + self-host-repo-guide.md 自托管模块仓库指南 (nsm/nsmp)
 ├── modules/                        # 模块目录 (三分类来源: main/extra/custom), use 语句按此定位
 ├── module-test/                    # 模块系统专项验证 (main.ns 主入口 + baseline 基线, min.ns 最小验证)
 ├── tests/                          # 功能测试用例 (.ns) 与目标清单 (tests_goals.md), 含 input 演示 (tests/input_demo.ns, tests/input_browser_demo.html)
@@ -188,7 +192,7 @@ NoethingScript/
 
 ## 版本历史
 
-当前版本 **2.7.3**。
+当前版本 **2.7.4**。
 
 > **不稳定期标记**：2.7.x 为不稳定版本系列——patch 版本可携带破坏性变更（类型系统收紧、语法调整等，攒批发布）。升级时请关注 [CHANGELOG.md](CHANGELOG.md) 中每个版本的破坏性变更说明；自 2.8 起恢复"破坏性变更只在 minor 升级时发布"。
 

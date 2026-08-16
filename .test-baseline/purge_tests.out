@@ -163,11 +163,33 @@ hello
 [DEBUG 1] [Line 13] 已清除所有局部变量
 [DEBUG 1] [Line 13] 已将排除的变量恢复, 当前局部变量有: var4
 [DEBUG 2] [Line 14] 执行指令 print var3
+[DEBUG 2] [Line 14] 解析表达式中: var3
+[DEBUG 2] [Line 14] 解析逻辑或运算中: var3
+[DEBUG 2] [Line 14] 解析逻辑与运算中: var3
+[DEBUG 2] [Line 14] 解析相等性运算中: var3
+[DEBUG 2] [Line 14] 解析关系运算中: var3
+[DEBUG 2] [Line 14] 解析加法和减法运算中: var3
+[DEBUG 2] [Line 14] 解析乘法、除法和取模运算中: var3
+[DEBUG 2] [Line 14] 解析幂运算中: var3
+[DEBUG 2] [Line 14] 解析一元运算符中: var3
+[DEBUG 2] [Line 14] 解析基本元素中: var3
+[DEBUG 2] [Line 14] 检查 var3 是否为变量或函数调用
 [DEBUG 2] [Line 14] 查找变量信息: var3 (行 14)
 [DEBUG 1] [Line 14] 获取变量信息 var3 (全局): 值=global var3, 类型=string, 作用域=4-末行, 行号=14
 [DEBUG 2] [Line 14] 直接返回变量值: var3 = global var3 在第14行
 global var3
 [DEBUG 2] [Line 15] 执行指令 print var4
+[DEBUG 2] [Line 15] 解析表达式中: var4
+[DEBUG 2] [Line 15] 解析逻辑或运算中: var4
+[DEBUG 2] [Line 15] 解析逻辑与运算中: var4
+[DEBUG 2] [Line 15] 解析相等性运算中: var4
+[DEBUG 2] [Line 15] 解析关系运算中: var4
+[DEBUG 2] [Line 15] 解析加法和减法运算中: var4
+[DEBUG 2] [Line 15] 解析乘法、除法和取模运算中: var4
+[DEBUG 2] [Line 15] 解析幂运算中: var4
+[DEBUG 2] [Line 15] 解析一元运算符中: var4
+[DEBUG 2] [Line 15] 解析基本元素中: var4
+[DEBUG 2] [Line 15] 检查 var4 是否为变量或函数调用
 hello
 [DEBUG 2] [Line 16] 执行指令 :end
 [DEBUG 2] [Line 16] 函数 func 结束标记后的局部变量表: []

@@ -1,6 +1,6 @@
 
 // 解释器版本
-const NSIVersion: string = "2.7.3";
+const NSIVersion: string = "2.7.4";
 // console.log("NSI Version: " + NSIVersion);
 
 // Debug级别变量
@@ -331,14 +331,17 @@ var FOR_UPDATE_VAR: string | null = null;
 // 流程控制栈 (用于if/for/while/switch等) 
 var CONTROL_FLOW_STACK: ({
     type: 'if';
+    cond?: boolean;         // 本分支条件求值结果 (executeElse 判断上一分支真假: 真→跳过链其余; 假→落入else/求值else-if)
 } | {
     type: 'while';
     start: number;
+    frameId?: number;   // 所属函数帧ID (顶层为 -1; 递归帧共享源码行, 按帧区分)
 } | {
     type: 'for';
     start: number;
     updateExpr: string;
     varName: string;
+    frameId?: number;   // 所属函数帧ID (顶层为 -1; 递归帧共享源码行, 按帧区分)
 } | {
     type: 'switch';
     condition: number | string;
@@ -347,6 +350,7 @@ var CONTROL_FLOW_STACK: ({
 } | {
     type: 'try';
     start: number;
+    varStart?: number;  // try 入口 LOCAL_VARS 长度 (endtry 清理时截断到该位置, 仅清本 try 块内局部变量)
 } | {
     type: 'function';
     funcName: string;             // 函数名
@@ -366,11 +370,13 @@ var CONTROL_FLOW_BROKEN_BLOCK_STACK: ({
 } | {
     type: 'while';
     start: number;
+    frameId?: number;   // 所属函数帧ID (顶层为 -1; 递归帧共享源码行, 按帧区分)
 } | {
     type: 'for';
     start: number;
     updateExpr: string;
     varName: string;
+    frameId?: number;   // 所属函数帧ID (顶层为 -1; 递归帧共享源码行, 按帧区分)
 } | {
     type: 'switch';
     condition: number | string;
@@ -678,6 +684,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         const_array_whole_assignment: '常量数组 {name} 不能被整体赋值',
         readonly_array_whole_assignment: '数组 {name} 是只读引用, 不能被整体赋值',
         str_take_out_of_range: '字符串越界: {func} start={start} count={count} 超出长度 {length}',
+        str_char_out_of_range: '码点越界: String.char 码点 {code} 超出 0..1114111 范围',
         func_needs_2_or_3_args: '{func} 需要 2 或 3 个参数',
         func_needs_3_or_4_args: '{func} 需要 3 或 4 个参数',
         // return / print
@@ -878,6 +885,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         dbg_calc_cond: '计算条件表达式: {expr} (行 {line})',
         dbg_cond_result: '条件表达式结果: {result} (类型: {type})',
         dbg_if_false_line: 'if 条件为假在第 {line} 行',
+        dbg_else_skip_chain: '分支已执行, 跳过本 else/else-if 链 (行 {line})',
         dbg_current_control_flow: '当前控制流: ',
         dbg_updated_control_flow: '更新后控制流: ',
         dbg_error_detail: '错误详情: {error}',
@@ -1103,6 +1111,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         const_array_whole_assignment: 'Constant array {name} cannot be assigned as a whole',
         readonly_array_whole_assignment: 'Array {name} is a readonly reference and cannot be assigned as a whole',
         str_take_out_of_range: 'String out of range: {func} start={start} count={count} exceeds length {length}',
+        str_char_out_of_range: 'Code point out of range: String.char code point {code} exceeds 0..1114111',
         func_needs_2_or_3_args: '{func} expects 2 or 3 arguments',
         func_needs_3_or_4_args: '{func} expects 3 or 4 arguments',
         // return / print
@@ -1303,6 +1312,7 @@ const LANG_PACKS: { [lang: string]: { [key: string]: string } } = {
         dbg_calc_cond: 'Evaluating condition expression: {expr} (line {line})',
         dbg_cond_result: 'Condition expression result: {result} (type: {type})',
         dbg_if_false_line: 'if condition is false at line {line}',
+        dbg_else_skip_chain: 'Branch already taken, skipping the rest of this else/else-if chain (line {line})',
         dbg_current_control_flow: 'Current control flow: ',
         dbg_updated_control_flow: 'Updated control flow: ',
         dbg_error_detail: 'Error details: {error}',
@@ -3094,6 +3104,27 @@ class Interpreter {
         MODULE_OUTPUT_CTX = savedOutputCtx;
     }
 
+    // §3.3 入口文件 global 声明预建立: 与模块加载期 (loadModule 阶段全文件统一建立私有全局) 语义一致 —
+    // 入口文件执行前按源码顺序执行全部 global 声明行 (跳过函数定义区间), 使头部区 autoinit 可直接引用正文
+    // 声明的 global (与书写位置无关); 建立后主循环与 NSVM 编译期跳过 global 行防重复声明 (addVariable 重复声明会报错)。
+    static preestablishEntryGlobals(): void {
+        for (let i = 0; i < programLines.length; i++) {
+            const info = LINE_INFO[i];
+            const line = info.content;
+            // 函数定义区间: 与主循环一致跳过 (函数体内不允许 global, 预建立不触碰函数区间)
+            if (line.indexOf(':') === 0 && line.match(/^:[a-zA-Z0-9_]+\s*\(.*\)/)) {
+                for (let j = i + 1; j < programLines.length; j++) {
+                    if (LINE_INFO[j].isEndTag) { i = j; break; }
+                }
+                continue;
+            }
+            if (info.stmt.type === StmtType.GLOBAL) {
+                currentLinePointer = i;
+                Interpreter.executeCommand(info.stmt, line);
+            }
+        }
+    }
+
     // M4 加载入口 (两阶段, 设计稿 §7.2): 阶段1 依赖图构建与检查 → 阶段2 按依赖顺序批量加载 + 挂载主程序对象名表。
     // 幂等: MODULE_SYSTEM_READY (同程序防重复) / MODULE_REGISTRY + 源码缓存 (跨程序/跨文件 §2.2)。
     // 加载期错误 (模块不存在/循环/语法错误) → MODULE_LOAD_FAILED = true, 主程序整体不执行 (§7.4 不可 try-catch)。
@@ -3184,8 +3215,9 @@ class Interpreter {
     // 辅助方法: 解析值并进行类型检查
     // 解析字面量/变量引用为指定类型的值 (阶段3 NSVM 的 FORINIT 复用)
     static parseValue(valueStr: string, expectedType: DataType): any {
-        // 处理字符串 (必须带双引号) 
-        if (valueStr.startsWith('"') && valueStr.endsWith('"')) {
+        // 处理字符串 (必须带双引号, 且引号计数为 2 — 防止把 "a" + b + "c" 这类以引号开头结尾的拼接
+        // 表达式误判为单个字符串字面量 (拼接表达式将落入后续分支最终报 value_unresolvable, 不静默给错值))
+        if (valueStr.startsWith('"') && valueStr.endsWith('"') && (valueStr.match(/"/g) || []).length === 2) {
             const strValue = valueStr.substring(1, valueStr.length - 1);
 
             if (expectedType !== DataType.STRING) {
@@ -3245,6 +3277,33 @@ class Interpreter {
                 throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_var_type', {expected: expectedType, actual: varType}) } as Exception;
             }
             return varValue;
+        }
+
+        // 处理数组元素引用 (arr[i], 支持 global. 前缀; 索引为字面量/整型变量, 语义复刻 evalTree 'arrayAccess')
+        const arrayMatch = valueStr.match(/^(global\.)?([a-zA-Z_][a-zA-Z0-9_]*)\[([^\]]+)\]$/);
+        if (arrayMatch) {
+            const arrName = arrayMatch[2];
+            const isGlobal = !!arrayMatch[1];
+            const index = Interpreter.parseValue(arrayMatch[3], DataType.INT);
+            if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
+                throw { type: ExceptionType.RANGE_ERROR, message: t('array_index_not_nonneg_int', {pos: 0}) } as Exception;
+            }
+            const arrayVar = ScopeManager.getVariable(arrName, currentLinePointer, true, isGlobal);
+            if (!arrayVar || arrayVar.type !== DataType.ARRAY) {
+                throw { type: ExceptionType.TYPE_ERROR, message: t('array_var_not_array', {name: arrName, pos: 0}) } as Exception;
+            }
+            if (index >= (arrayVar.arrayLength || 0)) {
+                throw { type: ExceptionType.RANGE_ERROR, message: t('array_index_out_of_range_access', {index: index, name: arrName, max: arrayVar.arrayLength ? arrayVar.arrayLength - 1 : -1, pos: 0}) } as Exception;
+            }
+            const elements = arrayVar.arrayElements;
+            if (elements && index < elements.length) {
+                const elemType = elements[index].type;
+                if (elemType !== expectedType) {
+                    throw { type: ExceptionType.TYPE_ERROR, message: t('type_mismatch_var_type', {expected: expectedType, actual: elemType}) } as Exception;
+                }
+                return elements[index].value;
+            }
+            throw { type: ExceptionType.UNKNOWN_ERROR, message: t('array_element_access_error', {name: arrName, index: index, pos: 0}) } as Exception;
         }
 
         throw { type: ExceptionType.SYNTAX_ERROR, message: t('value_unresolvable', {value: valueStr}) } as Exception;
@@ -3344,6 +3403,14 @@ class Interpreter {
                 }
             }
 
+            // §3.3 入口文件 global 声明预建立 (与模块加载期语义一致, 使头部区 autoinit 可直接引用正文 global);
+            // 建立后主循环与 NSVM 编译期跳过 global 声明行, 预建立不改动执行起点
+            {
+                const entryStart = currentLinePointer;
+                Interpreter.preestablishEntryGlobals();
+                currentLinePointer = entryStart;
+            }
+
             // 首次执行: 尝试 NSVM (寄存器虚拟机) 加速; 编译失败整体回退行解释器 (双模式回退)
             if (NSVMExecutor.prepare()) {
                 NSVMExecutor.run();
@@ -3404,6 +3471,12 @@ class Interpreter {
                         Interpreter.executeCommand(info.stmt, line); // 先遇到函数结束标签可能处于无返回值函数中, 需要特殊处理
                     }
 
+                    currentLinePointer++;
+                    continue;
+                }
+
+                // global 声明行: 执行前已预扫描全文件统一建立 (§3.3), 主循环跳过防重复声明
+                if (info.stmt.type === StmtType.GLOBAL) {
                     currentLinePointer++;
                     continue;
                 }
@@ -3530,7 +3603,7 @@ class Interpreter {
             case 'jump': return { type: StmtType.JUMP, params };
             case 'print': return { type: StmtType.PRINT, params };
             case 'if': return { type: StmtType.IF, params };
-            case 'else': return { type: StmtType.ELSE, params: '' };
+            case 'else': return { type: StmtType.ELSE, params };
             case 'endif': return { type: StmtType.ENDIF, params: '' };
             case 'while': return { type: StmtType.WHILE, params };
             case 'endwhl': return { type: StmtType.ENDWHL, params: '' };
@@ -3599,7 +3672,7 @@ class Interpreter {
                 Interpreter.executeIf(stmt.params);
                 return;
             case StmtType.ELSE:
-                Interpreter.executeElse();
+                Interpreter.executeElse(stmt.params);
                 return;
             case StmtType.ENDIF:
                 // 弹出if控制块
@@ -5045,34 +5118,18 @@ class Interpreter {
                 return;
             }
 
-            // 先将if信息压栈, 防止break等语句出错
+            // 先将if信息压栈, 防止break等语句出错 (记录本分支条件真假, 供 executeElse 判断链走向)
             CONTROL_FLOW_STACK.push({
-                type: 'if'
+                type: 'if',
+                cond: condition
             })
 
             if (!condition) {
-                // 跳过if块
+                // 跳过if块 (scanIfChain 链式感知): 停在深度1的下一个链元素 (else/else-if) 让主循环执行,
+                // 或链已尽时停在匹配 endif 并弹出本帧。
                 debugLog(1, () => t('dbg_if_false_line', { line: currentLinePointer + 1 }));
-                let nestedLevel = 1;
-                let i = currentLinePointer + 1;
-                while (i < programLines.length && nestedLevel > 0) {
-                    const line = programLines[i].trim();
-                    if (line.toLowerCase().startsWith('if ')) {
-                        nestedLevel++;
-                    } else if (line === 'else' || line === 'endif') {
-                        nestedLevel--;
-                        if (nestedLevel === 0) {
-                            currentLinePointer = i; // 不减1是因为主循环会加1跳过 execElse 避免无法正常执行 else 块
-                            debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
-                            if (line === 'endif') {
-                                CONTROL_FLOW_STACK.pop();
-                            }
-                            debugLog(2, () => t('dbg_updated_control_flow'), CONTROL_FLOW_STACK);
-                            break;
-                        }
-                    }
-                    i++;
-                }
+                Interpreter.scanIfChain(true);
+                debugLog(2, () => t('dbg_updated_control_flow'), CONTROL_FLOW_STACK);
             }
         } catch (error) {
             // 自定义异常 (如ReferenceError) 重新抛出, 供try-catch捕获
@@ -5084,14 +5141,13 @@ class Interpreter {
         }
     }
 
-    // 执行else语句
-    static executeElse(): void {
-        // 执行到else说明if条件为真且if块体已执行完毕, 弹出if帧
-        // (条件为假时由executeIf直接跳转到else行, 主循环会跳过else命令; 该帧由后续endif弹出)
-        if (CONTROL_FLOW_STACK.length > 0 && CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1].type === 'if') {
-            CONTROL_FLOW_STACK.pop();
-        }
-        // 跳过else块
+    // 扫描本 if/else-if 链 (从 currentLinePointer+1 起):
+    //  stopAtChainElement=true  (假分支跳过): 停在深度1的下一个链元素 (else/else-if) 前一行,
+    //    由主循环执行该链元素 (executeElse 继续判定); 若链已尽则停在匹配 endif 并弹出本 if 帧。
+    //  stopAtChainElement=false (真分支跳过): 跳过其余链元素及其体, 直停匹配的 endif (帧由调用方弹出)。
+    // 嵌套 if 计数: 深度1的 else/else-if 不改深度 (整个 else-if 链由最终单个 endif 收束);
+    // 旧实现对深度1的 else 也递减, 当被跳过体内含"带 else 的嵌套 if"时提前停在内层 endif, 错执行外体残余语句。
+    static scanIfChain(stopAtChainElement: boolean): void {
         let nestedLevel = 1;
         let i = currentLinePointer + 1;
         while (i < programLines.length && nestedLevel > 0) {
@@ -5101,12 +5157,85 @@ class Interpreter {
             } else if (line === 'endif') {
                 nestedLevel--;
                 if (nestedLevel === 0) {
-                    currentLinePointer = i; // 是否减1目前影响不大, endif语句仅用于静态闭合检查, 为避免无用判断不做减1处理
-                    break;
+                    currentLinePointer = i; // 停在 endif: 主循环跳过它
+                    if (stopAtChainElement) {
+                        // 链已尽 (无 else 可落入): 帧在此弹出
+                        CONTROL_FLOW_STACK.pop();
+                    }
+                    return;
                 }
+            } else if (stopAtChainElement && nestedLevel === 1 && (line === 'else' || /^else\s+if\b/.test(line))) {
+                // 深度1链元素: 停在它前一行, 主循环执行该 else/else-if 行
+                currentLinePointer = i - 1;
+                return;
             }
             i++;
         }
+    }
+
+    // 执行else语句 (params: '' = 普通 else; 'if (expr)' = else-if 链元素)
+    static executeElse(params: string): void {
+        const top = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
+        if (!top || top.type !== 'if') return;
+
+        // 链上已有分支被执行 (cond=true): 弹出本 if 帧, 跳过其余 else/else-if 链至匹配 endif
+        if (top.cond === true) {
+            debugLog(1, () => t('dbg_else_skip_chain', { line: currentLinePointer + 1 }));
+            CONTROL_FLOW_STACK.pop();
+            debugLog(2, () => t('dbg_updated_control_flow'), CONTROL_FLOW_STACK);
+            Interpreter.scanIfChain(false);
+            return;
+        }
+
+        // 链上前缀分支均未命中 (cond=false): 判定本链元素
+        const trimmedParams = params.trim();
+        if (trimmedParams.startsWith('if')) {
+            // else-if: 求值新条件, 语义与 executeIf 一致; 复用本 if 帧记录当前分支真假, 帧由最终 endif 弹出
+            const rest = trimmedParams.substring(2).trim();
+            if (!rest.startsWith('(') || !rest.endsWith(')')) {
+                reportError(ExceptionType.SYNTAX_ERROR, t('cond_need_parentheses'));
+                return;
+            }
+            const conditionExpr = rest.substring(1, rest.length - 1);
+            debugLog(2, () => t('dbg_calc_cond', { expr: conditionExpr, line: currentLinePointer + 1 }));
+            try {
+                const condition = Interpreter.evaluateExpression(conditionExpr);
+                debugLog(2, () => t('dbg_cond_result', { result: condition, type: typeof condition }));
+                if (typeof condition !== 'boolean') {
+                    reportError(ExceptionType.TYPE_ERROR, t('cond_must_be_bool', {actualType: typeof condition}));
+                    return;
+                }
+                top.cond = condition;
+                if (!condition) {
+                    // 跳过本 else-if 块: 停在下个链元素 (else/else-if) 或链尽时停 endif 并弹帧
+                    debugLog(1, () => t('dbg_if_false_line', { line: currentLinePointer + 1 }));
+                    Interpreter.scanIfChain(true);
+                    debugLog(2, () => t('dbg_updated_control_flow'), CONTROL_FLOW_STACK);
+                }
+            } catch (error) {
+                // 自定义异常 (如ReferenceError) 重新抛出, 供try-catch捕获
+                if (error && typeof error === 'object' && (error as Exception).type !== undefined) {
+                    throw error;
+                }
+                reportError(ExceptionType.SYNTAX_ERROR, t('cond_invalid', {expr: conditionExpr}));
+                debugLog(1, () => t('dbg_error_detail', { error }));
+            }
+            return;
+        }
+
+        // 普通 else: 落入 else 块执行; 本 if 帧由最终 endif 弹出
+    }
+
+    // 当前执行上下文所属函数帧ID (顶层返回 -1): 流程控制块按所属帧区分,
+    // 避免递归函数共享源码行时 (如 while 同起点) 把父帧的块误判为当前帧已有
+    static getOwnerFrameId(): number {
+        for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
+            const block = CONTROL_FLOW_STACK[i];
+            if (block.type === 'function') {
+                return block.frameId;
+            }
+        }
+        return -1;
     }
 
     // 执行while语句
@@ -5123,8 +5252,10 @@ class Interpreter {
 
         try {
             // break/continue 标记检查: 空栈快路径 (绝大多数循环无 break/continue, 避免 .some 闭包扫描)
+            // 按所属帧匹配: 递归帧共享源码行, 父帧的 break 标记不得压制子帧循环
+            const ownerFrameId = Interpreter.getOwnerFrameId();
             const brokenexists = CONTROL_FLOW_BROKEN_BLOCK_STACK.length > 0 && CONTROL_FLOW_BROKEN_BLOCK_STACK.some(item =>
-                item.type === 'while' && item.start === currentLinePointer
+                item.type === 'while' && item.start === currentLinePointer && item.frameId === ownerFrameId
             );
             DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
@@ -5144,19 +5275,21 @@ class Interpreter {
             // 先将while循环信息压栈, 防止首次循环条件不满足。
             // exists 判断: 栈顶 O(1) 快路径 (while 帧在循环体执行时即栈顶), 不命中再回退线性扫描,
             // 且本次结果供条件真假两个分支共用, 去掉原 else 分支中重复的第二次扫描。
+            // 按所属帧匹配: 递归帧共享源码行, 父帧的同行 while 帧不得抑制子帧压栈
             let exists: boolean;
             const topBlock = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
-            if (topBlock && topBlock.type === 'while' && topBlock.start === currentLinePointer) {
+            if (topBlock && topBlock.type === 'while' && topBlock.start === currentLinePointer && topBlock.frameId === ownerFrameId) {
                 exists = true;
             } else {
                 exists = CONTROL_FLOW_STACK.some(item =>
-                    item.type === 'while' && item.start === currentLinePointer
+                    item.type === 'while' && item.start === currentLinePointer && item.frameId === ownerFrameId
                 );
             }
             if (!exists) {
                 CONTROL_FLOW_STACK.push({
                     type: 'while',
-                    start: currentLinePointer
+                    start: currentLinePointer,
+                    frameId: ownerFrameId
                 });
             }
 
@@ -5200,8 +5333,9 @@ class Interpreter {
         DEBUG_LEVEL >= 2 && debugLog(2, () => t('dbg_current_control_flow'), CONTROL_FLOW_STACK);
         // 栈顶快路径: endwhl 执行时本循环的 while 帧必然在栈顶 (内层块均已弹栈), O(1) 回跳,
         // 免去向后逐行扫描 (programLines[i].trim() 每行分配字符串)。
+        // 按所属帧匹配: 递归帧共享源码行, 仅回跳本帧的 while 帧
         const topBlock = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
-        if (topBlock && topBlock.type === 'while' && topBlock.start < currentLinePointer) {
+        if (topBlock && topBlock.type === 'while' && topBlock.start < currentLinePointer && topBlock.frameId === Interpreter.getOwnerFrameId()) {
             currentLinePointer = topBlock.start - 1; // 减1是因为主循环会加1
             return;
         }
@@ -5293,7 +5427,8 @@ class Interpreter {
                 item.type === 'for' &&
                 item.start === currentLinePointer &&
                 item.updateExpr === updateExpr &&
-                item.varName === varName
+                item.varName === varName &&
+                item.frameId === Interpreter.getOwnerFrameId()
             );
             debugLog(2, () => t('dbg_broken_block_stack'), CONTROL_FLOW_BROKEN_BLOCK_STACK);
 
@@ -5316,7 +5451,8 @@ class Interpreter {
                 item.type === 'for' &&
                 item.start === currentLinePointer &&
                 item.updateExpr === updateExpr &&
-                item.varName === varName
+                item.varName === varName &&
+                item.frameId === Interpreter.getOwnerFrameId()
             );
 
             if (!exists) {
@@ -5324,7 +5460,8 @@ class Interpreter {
                     type: 'for',
                     start: currentLinePointer,
                     updateExpr: updateExpr,
-                    varName: varName
+                    varName: varName,
+                    frameId: Interpreter.getOwnerFrameId()
                 });
             }
 
@@ -5548,9 +5685,12 @@ class Interpreter {
             lineNumber: currentLinePointer
         });
         // 同时压入控制流栈, 以便异常跳转时清理嵌套帧, 并让catch块内的局部变量声明能找到所属代码块
+        // varStart: try 入口 LOCAL_VARS 长度 — endtry 清理时截断到该位置, 仅清本 try 块内声明的局部变量 (含 catch 异常变量),
+        // 不再按声明行过滤 (旧方案 startLine >= try 起始行 会误删外层函数帧变量, 其声明行号可能 >= try 起始行)
         CONTROL_FLOW_STACK.push({
             type: 'try',
-            start: currentLinePointer
+            start: currentLinePointer,
+            varStart: LOCAL_VARS.length
         });
     }
 
@@ -5677,8 +5817,14 @@ class Interpreter {
         // 注意: 仅异常进入catch后执行到endtry的情况 (正常跳过catch时不会到达本行)
         const topFrame = CONTROL_FLOW_STACK[CONTROL_FLOW_STACK.length - 1];
         if (topFrame && topFrame.type === 'try') {
-            const blockStart = topFrame.start;
-            LOCAL_VARS = LOCAL_VARS.filter(v => !(v.startLine >= blockStart && !v.isGlobal));
+            // 截断到 try 入口位置: 仅清理本 try 块内声明的局部变量 (含 catch 异常变量, 均在 try 入口后压栈)。
+            // 外层函数帧变量在 try 入口前已压栈, 保留。旧方案按 startLine >= blockStart 过滤会误删外层帧变量。
+            if (typeof (topFrame as any).varStart === 'number') {
+                LOCAL_VARS.length = (topFrame as any).varStart;
+            } else {
+                const blockStart = topFrame.start;
+                LOCAL_VARS = LOCAL_VARS.filter(v => !(v.startLine >= blockStart && !v.isGlobal));
+            }
             rebuildSlotIndex(); // 槽位索引同步 (try块内局部变量已清理)
         }
         // 清除异常栈栈顶的一个try/catch标记 (一个endtry只对应一个try-catch结构, 不能弹出外层标记)
@@ -6601,14 +6747,17 @@ class ExpressionEvaluator {
         try {
             // 表达式树缓存: 树为纯结构 (不含运行时值), 同一表达式首次执行时解析建树, 之后每次执行直接遍历求值。
             // 树节点携带静态槽位绑定 (依赖当前程序的符号表), 故缓存按程序指纹 (PROGRAM_ID) 隔离;
-            // 变量/数组访问/函数调用等节点的运行时值仍在求值时实时查作用域。
-            // 两级 Map (programId → 表达式 → 树): 免每次求值的 key 字符串拼接 (热路径分配)。
+            // 绑定还依赖行号 (同名变量按作用域行区间解析), 故缓存再按行隔离 (同表达式不同行 → 不同树)。
             let programTrees = ExpressionEvaluator.treeCacheByProgram.get(PROGRAM_ID);
             if (programTrees === undefined) {
-                programTrees = new Map<string, ExprNode>();
+                programTrees = new Map<number, Map<string, ExprNode>>();
                 ExpressionEvaluator.treeCacheByProgram.set(PROGRAM_ID, programTrees);
             }
-            let tree = programTrees.get(expression);
+            let lineTrees = programTrees.get(currentLine);
+            let tree: ExprNode | undefined;
+            if (lineTrees !== undefined) {
+                tree = lineTrees.get(expression);
+            }
             if (tree === undefined) {
                 // 树缓存未命中: 需要词法分析 + 建树 (词法结果同样缓存, 供建树失败需重复解析的场景复用)
                 let cachedTokens = ExpressionEvaluator.tokenCache.get(expression);
@@ -6633,10 +6782,14 @@ class ExpressionEvaluator {
                     throw { type: ExceptionType.SYNTAX_ERROR, message: t('unexpected_token_after_parse', {token: this.tokens[this.currentTokenIndex]}), lineNumber: this.currentLine } as Exception;
                 }
 
-                if (programTrees.size >= ExpressionEvaluator.MAX_TREE_CACHE) {
-                    programTrees.clear();
+                if (lineTrees === undefined) {
+                    lineTrees = new Map<string, ExprNode>();
+                    programTrees.set(currentLine, lineTrees);
                 }
-                programTrees.set(expression, tree);
+                if (lineTrees.size >= ExpressionEvaluator.MAX_TREE_CACHE) {
+                    lineTrees.clear();
+                }
+                lineTrees.set(expression, tree);
             }
 
             // 阶段2: 表达式字节码路径 — 可编译表达式 (字面量/变量/一元/二元, 含赋值右值) 走
@@ -7720,6 +7873,14 @@ class ExpressionEvaluator {
                 if (args.length !== 0) throw { type: ExceptionType.TYPE_ERROR, message: t('func_no_arg_expected', {func: 'Math.random'}), lineNumber: this.currentLine } as Exception;
                 return Math.random();
             // ============ String.* 字符串操作 (借用宿主 JS String 能力, 命名按语言自身风格, 与 Math.* 同源) ============
+            case 'String.char':
+                // 码点 → 字符 (映射 JS String.fromCodePoint): 因字符串字面量不转义, 由此构造换行/制表等控制字符
+                if (args.length !== 1) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_1_arg', {func: 'String.char'}), lineNumber: this.currentLine } as Exception;
+                this.checkNumberArg('String.char', args, 0);
+                if (args[0] < 0 || args[0] > 0x10FFFF) {
+                    throw { type: ExceptionType.RANGE_ERROR, message: t('str_char_out_of_range', {code: args[0]}), lineNumber: this.currentLine } as Exception;
+                }
+                return String.fromCodePoint(args[0]);
             case 'String.take':
                 if (args.length !== 3) throw { type: ExceptionType.TYPE_ERROR, message: t('func_needs_3_args', {func: 'String.take'}), lineNumber: this.currentLine } as Exception;
                 {
@@ -7925,10 +8086,12 @@ class ExpressionEvaluator {
     private static tokenCache: Map<string, string[]> = new Map();
     private static readonly MAX_TOKEN_CACHE = 1000;
 
-    // 表达式树缓存 (两级: programId → 表达式 → 树): 树为纯结构 (不含运行时值), 首次执行时解析建树, 之后每次执行直接遍历求值。
-    // 变量/数组/函数调用等节点在求值时实时查作用域, 故缓存树跨执行共享是安全的 (与 token 缓存同批安全原则)。
-    // 两级 Map 免每次求值的 key 字符串拼接; 程序指纹 PROGRAM_ID 隔离 (树节点携带静态槽位绑定, 跨程序不可共享)。
-    private static treeCacheByProgram: Map<number, Map<string, ExprNode>> = new Map();
+    // 表达式树缓存 (三级: programId → 行 → 表达式 → 树): 树为纯结构 (不含运行时值), 首次执行时解析建树, 之后每次执行直接遍历求值。
+    // 树节点携带静态槽位绑定 (lookupSlotBinding 按行号解析同名变量的作用域声明), 行不同绑定可能不同:
+    // 仅按表达式字符串键控会让不同函数中相同文本 (如 `ok = false`/`i = i + 1`/`r = 0`) 复用同一棵树,
+    // 槽位绑定指向先前函数帧 → 写穿仍存活的父帧 (静默错写, 被写入变量的原函数帧变量保持 undefined)。
+    // 故缓存须按行隔离 (三级 Map 免 key 字符串拼接); 程序指纹 PROGRAM_ID 隔离 (绑定跨程序不可共享)。
+    private static treeCacheByProgram: Map<number, Map<number, Map<string, ExprNode>>> = new Map();
     private static readonly MAX_TREE_CACHE = 1000;
 
     // ===== 求值 (运行期): 遍历表达式树求值, 变量/数组/函数调用实时查作用域 =====
@@ -8338,6 +8501,7 @@ if (typeof require !== 'undefined') {
 // 能力对象约束与 registerGlobal 一致: 成员为函数 → 收录为 JS 注入函数; 返回类型限四类
 // (number/string/boolean/Array, 见 isValidJSReturn); void 操作返回 true 表示成功; 失败抛异常 (NS 可 try-catch)。
 function buildFsCapability(): any {
+    const cp = require('child_process');
     return {
         readFile(p: string): string { return fs.readFileSync(String(p), 'utf8'); },
         writeFile(p: string, c: string): boolean { fs.writeFileSync(String(p), String(c)); return true; },
@@ -8349,7 +8513,79 @@ function buildFsCapability(): any {
         rename(from: string, to: string): boolean { fs.renameSync(String(from), String(to)); return true; },
         copyFile(from: string, to: string): boolean { fs.copyFileSync(String(from), String(to)); return true; },
         cwd(): string { return process.cwd(); },
-        join(...parts: string[]): string { return path.join(...parts.map(String)); }
+        join(...parts: string[]): string { return path.join(...parts.map(String)); },
+        // M7 模块管理器: 同步解压 zip (spawnSync unzip, 与 http.download 互补); 失败抛异常 (NS 可 try-catch)
+        unzip(zipPath: string, destDir: string): boolean {
+            const r = cp.spawnSync('unzip', ['-q', '-o', String(zipPath), '-d', String(destDir)], { encoding: 'utf8' });
+            if (r.error || r.status !== 0) {
+                throw new Error('解压失败: ' + String(zipPath) + (r.status !== null ? ' (unzip 退出码 ' + r.status + ')' : ' (unzip 未安装?)'));
+            }
+            return true;
+        },
+        // M7 打包工具 nsmp: 同步打包目录为 zip (spawnSync zip, 与 unzip 对称); 打包 packDir 目录自身
+        // (zip 内顶层 = 目录 basename, 兼容 nsm install 的 {tmp}/{pkg}/manifest 定位); 失败抛异常 (NS 可 try-catch)
+        zip(packDir: string, zipPath: string): boolean {
+            const r = cp.spawnSync('zip', ['-q', '-r', String(zipPath), path.basename(String(packDir))], { cwd: path.dirname(String(packDir)), encoding: 'utf8' });
+            if (r.error || r.status !== 0) {
+                throw new Error('打包失败: ' + String(zipPath) + (r.status !== null ? ' (zip 退出码 ' + r.status + ')' : ' (zip 未安装?)'));
+            }
+            return true;
+        },
+        // M7 模块管理器: 读 JSON 标量字段 (manifest 的 package/version/ns/source/description; NS 无 JSON 解析,
+        // 结构化字段由本能力代取; 缺失/解析失败抛异常)
+        readJsonField(p: string, key: string): string {
+            const obj = JSON.parse(fs.readFileSync(String(p), 'utf8'));
+            const v = obj[String(key)];
+            if (v === undefined || v === null) throw new Error('JSON 缺少字段: ' + String(p) + ' -> ' + String(key));
+            return String(v);
+        },
+        // M7 模块管理器: 读 JSON 数组字段 (manifest 的 command/modules), 返回 string[] (四类返回值允许)
+        readJsonArray(p: string, key: string): string[] {
+            const obj = JSON.parse(fs.readFileSync(String(p), 'utf8'));
+            const v = obj[String(key)];
+            if (!Array.isArray(v)) throw new Error('JSON 字段非数组: ' + String(p) + ' -> ' + String(key));
+            return v.map((x: any) => String(x));
+        },
+        // M7 打包工具 nsmp: 读 JSON 对象数组字段的指定字段集合 (仓库清单 packages 表: 每项的 package/version/ns/zip),
+        // 返回 string[] (与 packages 数组顺序一致)
+        readJsonTable(p: string, arrayKey: string, field: string): string[] {
+            const obj = JSON.parse(fs.readFileSync(String(p), 'utf8'));
+            const arr = obj[String(arrayKey)];
+            if (!Array.isArray(arr)) throw new Error('JSON 字段非数组: ' + String(p) + ' -> ' + String(arrayKey));
+            return arr.map((x: any) => String(x === null || x === undefined ? '' : x[String(field)]));
+        },
+        // M7 打包工具 nsmp: 生成并写入包 manifest JSON (结构固定: package/version/ns/source/description/modules/command;
+        // description/command 传空数组/空串则省略字段) — NS 字符串字面量不转义、引号字符无法用字面量表达,
+        // JSON 组装无法在 NS 侧完成, 由本能力代做 (与 readJsonField 同类的专用能力)
+        writeManifest(p: string, pkg: string, ver: string, nsv: string, src: string, dsc: string,
+            mods: string[], nMods: number, cmds: string[], nCmds: number): boolean {
+            const mf: any = { package: String(pkg), version: String(ver), ns: String(nsv), source: String(src) };
+            if (String(dsc) !== '') mf.description = String(dsc);
+            mf.modules = mods.slice(0, nMods).map(String);
+            if (nCmds > 0) mf.command = cmds.slice(0, nCmds).map(String);
+            fs.writeFileSync(String(p), JSON.stringify(mf, null, 2) + '\n');
+            return true;
+        },
+        // M7 仓库维护: 生成仓库清单 catalog/{源}.manifest.json — 结构固定 {packages:[{package,version,ns,zip}]},
+        // 按 package 字典序排序 (清单稳定输出, diff 友好); JSON 组装无法在 NS 侧完成 (字符串字面量不转义), 由本能力代做
+        writeCatalog(p: string, pkgs: string[], vers: string[], nss: string[], zips: string[], n: number): boolean {
+            const arr: any[] = [];
+            const cnt = Math.floor(n);
+            for (let i = 0; i < cnt; i++) {
+                arr.push({ package: String(pkgs[i]), version: String(vers[i]), ns: String(nss[i]), zip: String(zips[i]) });
+            }
+            arr.sort((a: any, b: any) => (a.package < b.package ? -1 : a.package > b.package ? 1 : 0));
+            fs.writeFileSync(String(p), JSON.stringify({ packages: arr }, null, 2) + '\n');
+            return true;
+        },
+        // M7 模块管理器: 当前时间 (epoch 毫秒, DNF 式缓存 TTL 判断用)
+        now(): number { return Date.now(); },
+        // M7 模块管理器: 当前模块目录 (命令行 --modules 配置值; nsm 安装目标基准)
+        moduleDir(): string { return MODULE_DIR; },
+        // M7 模块管理器: 当前解释器版本 (适配检查: 前两段匹配)
+        interpVersion(): string { return NSIVersion; },
+        // M7 模块管理器: 文件修改时间 (epoch 毫秒整数, 与 now() 的 Date.now() 整数语义一致; mtimeMs 为浮点, NS int 变量拒收小数)
+        mtime(p: string): number { return Math.floor(fs.statSync(String(p)).mtimeMs); }
     };
 }
 function buildHttpCapability(): any {
@@ -8381,6 +8617,28 @@ function injectNodeCapabilities(names: string[]): boolean {
         nsiRegisterGlobal(name, factory());
     }
     return true;
+}
+
+// M7 命令包装 (设计稿 §9.1): 命令别名 = manifest 声明的主模块脚本路径别名 (如 nsm → modules/main/nsm/nsm/nsm.ns)。
+// filename 不是现存文件时, 遍历模块目录各来源 (main/extra/custom) 的包 manifest, 若 command 字段含该名字 → 解析为主模块路径;
+// 解析成功返回主模块脚本绝对路径, 找不到返回 null (维持"无法读取文件"原行为)。
+function resolveCommandAlias(filename: string): string | null {
+    try {
+        for (const src of ['main', 'extra', 'custom']) {
+            const srcDir = path.join(MODULE_DIR, src);
+            if (!fs.existsSync(srcDir)) continue;
+            for (const pkg of fs.readdirSync(srcDir)) {
+                const mfPath = path.join(srcDir, pkg, 'manifest');
+                if (!fs.existsSync(mfPath)) continue;
+                let mf: any;
+                try { mf = JSON.parse(fs.readFileSync(mfPath, 'utf8')); } catch (e) { continue; }
+                if (mf && Array.isArray(mf.command) && mf.command.indexOf(filename) !== -1) {
+                    return path.join(srcDir, pkg, pkg, pkg + '.ns');
+                }
+            }
+        }
+    } catch (e) { /* 目录读取/解析异常 → 按未命中处理 */ }
+    return null;
 }
 
 // 打印使用帮助 (双语, 跟随当前输出语言)
@@ -8514,6 +8772,16 @@ function main() {
         // 未知能力名 → 报错退出 (显式性, 不静默忽略)
         if (injectList.length > 0 && !injectNodeCapabilities(injectList)) {
             process.exit(1);
+        }
+
+        // M7 命令包装 (设计稿 §9.1): filename 非现存文件时按命令别名解析 (如 nsm → modules/main/nsm/nsm/nsm.ns);
+        // 解析成功自动注入 fs/http (管理器刚需, 设计运行方式 `node <解释器> nsm -- <子命令>` 不含 --inject)
+        if (!fs.existsSync(filename)) {
+            const aliasPath = resolveCommandAlias(filename);
+            if (aliasPath !== null) {
+                filename = aliasPath;
+                injectNodeCapabilities(['fs', 'http']);
+            }
         }
 
         // 输出语言切换提示 (第一行, 用与当前输出语言不同的语言书写, 便于用户发现切换方式)
@@ -8834,6 +9102,7 @@ interface NSVMStruct {
     condK?: number;
     hasElse?: boolean;
     endJmpIdx?: number;
+    chain?: boolean; // else-if 链帧标记: ENDIF 时与链上其余帧共享同一 endif 后目标, 一并回填 (NSVM 编译期 else-if 支持)
     // while / for
     topInstr?: number;
     breaks?: number[];
@@ -9103,10 +9372,13 @@ class NSVMCompiler {
                     break;
                 }
                 case StmtType.GLOBAL:
+                    // 入口文件 global 声明: run() 预扫描已全文件统一建立 (§3.3, 与模块加载期一致),
+                    // 编译期跳过防重复声明 (行解释器回退路径在主循环同样跳过 global 行)
+                    break;
                 case StmtType.LOCAL: {
-                    // NEWARRAY 指令化: 仅数组声明 (global/local array ...[..]:type = ...) 且静态部分可完整
+                    // NEWARRAY 指令化: 仅数组声明 (local array ...[..]:type = ...) 且静态部分可完整
                     // 预解析时发射 NEWARRAY; 其余声明 (普通变量/格式不符) 回退 STMT 由行解释器运行期报错
-                    const declMeta = this.parseArrayDecl(stmt.params, stmt.type === StmtType.GLOBAL);
+                    const declMeta = this.parseArrayDecl(stmt.params, false);
                     if (declMeta !== null) {
                         const metaK = this.constIndex(declMeta);
                         this.emit(NSVMOp.NEWARRAY, metaK, 0, 0);
@@ -9202,22 +9474,35 @@ class NSVMCompiler {
                 case StmtType.ELSE: {
                     const top = stack[stack.length - 1];
                     if (!top || top.type !== 'if') return null;
-                    // 先发射 then 尾的 JMP, 再回填 JZ 假跳目标为 else 体首条指令 (JMP 之后),
+                    // 先发射 then 尾的 JMP, 再回填 JZ 假跳目标为下一分支首条指令 (JMP 之后),
                     // 顺序错误会导致 JZ 假跳指向 JMP 本身 (差一指令)
                     top.endJmpIdx = this.emit(NSVMOp.JMP, -1, 0, 0);
-                    this.patch(top.jzIdx!, null, this.curInstr(), null); // 假 → else 开始
+                    this.patch(top.jzIdx!, null, this.curInstr(), null); // 假 → 下一分支开始
                     top.hasElse = true;
+                    // else-if 链: params 为 "if (条件)" — 发射新 JZ (假跳下一分支) 并压链帧;
+                    // 与行解释器 executeElse 的 else-if 语义等价 (链上分支逐个求值, 命中则 then 尾 JMP 跳过其余链元素)
+                    const elseIfMatch = stmt.params ? stmt.params.match(/^if\s*\((.*)\)$/) : null;
+                    if (elseIfMatch) {
+                        const cond2 = elseIfMatch[1];
+                        const condK2 = this.constIndex(cond2);
+                        const jzIdx2 = this.emit(NSVMOp.JZ, condK2, -1, 0);
+                        stack.push({ type: 'if', jzIdx: jzIdx2, condK: condK2, hasElse: false, endJmpIdx: -1, chain: true });
+                    }
                     break;
                 }
                 case StmtType.ENDIF: {
-                    const top = stack[stack.length - 1];
-                    if (!top || top.type !== 'if') return null;
-                    if (top.hasElse) {
-                        this.patch(top.endJmpIdx as number, this.curInstr(), null, null); // then 尾 → endif 后
-                    } else {
-                        this.patch(top.jzIdx as number, null, this.curInstr(), null);      // 假 → endif 后
+                    // else-if 链: 顶帧回填后, 链上所有 chain 帧共享同一 endif 后目标, 继续向上回填;
+                    // 普通 if 帧 (无 chain) 保持嵌套结构, 回填即止
+                    while (stack.length > 0 && stack[stack.length - 1].type === 'if') {
+                        const top = stack[stack.length - 1];
+                        if (top.hasElse) {
+                            this.patch(top.endJmpIdx as number, this.curInstr(), null, null); // then 尾 → endif 后
+                        } else {
+                            this.patch(top.jzIdx as number, null, this.curInstr(), null);      // 假 → endif 后
+                        }
+                        stack.pop();
+                        if (!top.chain) break;
                     }
-                    stack.pop();
                     break;
                 }
                 case StmtType.WHILE: {
@@ -9772,8 +10057,16 @@ class NSVMExecutor {
                             // 失败路径 (报错后继续执行函数体, 如 return 非声明返回变量) 不弹帧 —
                             // 用 frameId 是否仍在栈中区分, 复刻主循环"报错后继续执行"语义
                             let funcFrameId = -1;
+                            let funcFrameIdx = -1;
                             for (let i = CONTROL_FLOW_STACK.length - 1; i >= 0; i--) {
-                                if (CONTROL_FLOW_STACK[i].type === 'function') { funcFrameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId; break; }
+                                if (CONTROL_FLOW_STACK[i].type === 'function') { funcFrameId = (CONTROL_FLOW_STACK[i] as { frameId: number }).frameId; funcFrameIdx = i; break; }
+                            }
+                            // NSVM 跳转指令 (break/continue 编译为 JMP 直跳) 不维护 CONTROL_FLOW_STACK 的循环帧 —
+                            // 行解释器 executeBreak/executeContinue 会弹对应 while/for 帧, NSVM 直跳遗留帧阻塞函数返回
+                            // (executeReturn/executeFunctionEndTag 要求栈顶为 function 帧, 残留帧导致"未知的函数闭合标记");
+                            // 函数返回前清理本函数帧之上残留的循环/分支帧
+                            if (funcFrameIdx !== -1) {
+                                while (CONTROL_FLOW_STACK.length > funcFrameIdx + 1) CONTROL_FLOW_STACK.pop();
                             }
                             // 直接调 executeReturn/executeFunctionEndTag (跳过 executeCommand switch 分发), 保留"执行指令"调试输出逐字节一致
                             if (DEBUG_LEVEL >= 2) debugLog(2, () => t('dbg_execute_instr', { content: LINE_INFO[a].content }));

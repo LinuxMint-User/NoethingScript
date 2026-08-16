@@ -98,29 +98,20 @@ Sum of primes: 41
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 2, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 3, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 32] 执行操作指令: found = true
@@ -152,56 +143,38 @@ Found 7 in primes: true
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=0, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 2, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 3, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 4, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 5, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 31] 获取数组 primes (全局): 长度=6, 类型=array, 行号=31
 [DEBUG 1] [Line 31] if 条件为假在第 31 行
 [DEBUG 1] [Line 35] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=28-38, 行号=35
 [DEBUG 1] [Line 35] 获得解析结果
 [DEBUG 1] [Line 35] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 35] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=28-38, 行号=35
-[DEBUG 1] [Line 35] 验证数据类型: 值 6, 类型 int
 [DEBUG 1] [Line 30] 获取变量信息 primes (全局): 值=请使用arrayElements属性访问数组元素, 类型=array, 作用域=9-末行, 行号=30
 [DEBUG 1] [Line 37] 验证数据类型: 值 false, 类型 bool
 [DEBUG 1] [Line 55] 获取变量信息 flag (全局): 值=false, 类型=bool, 作用域=6-末行, 行号=55
@@ -262,11 +235,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=1, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 2, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -316,11 +286,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=2, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 3, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -374,11 +341,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=3, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 4, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -436,11 +400,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=4, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 5, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -502,11 +463,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=5, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 6, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -572,11 +530,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=6, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=6, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 7, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -646,11 +601,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=7, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=7, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 8, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -724,11 +676,8 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=8, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=8, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 9, 类型 int
 [DEBUG 1] [Line 77] 尝试添加变量: j, 值: 1, 类型: int, 作用域: 77-81, 是否全局: false
 [DEBUG 1] [Line 77] 验证数据类型: 值 1, 类型 int
 [DEBUG 1] [Line 77] 局部变量 j 添加成功
@@ -806,10 +755,7 @@ counter mod 3 = 2
 [DEBUG 1] [Line 81] 处理普通变量赋值 (type: assignment) : j = j + 1
 [DEBUG 1] [Line 81] 获取变量信息 j (局部): 值=10, 类型=int, 作用域=77-81, 行号=81
 [DEBUG 1] [Line 82] 执行操作指令: i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=9, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 82] 获得解析结果
 [DEBUG 1] [Line 82] 处理普通变量赋值 (type: assignment) : i = i + 1
-[DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=9, 类型=int, 作用域=76-82, 行号=82
-[DEBUG 1] [Line 82] 验证数据类型: 值 10, 类型 int
 [DEBUG 1] [Line 82] 获取变量信息 i (局部): 值=10, 类型=int, 作用域=76-82, 行号=82
 [DEBUG 1] [Line 84] 程序执行完毕

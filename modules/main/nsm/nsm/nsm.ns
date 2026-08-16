@@ -1,0 +1,1260 @@
+// modules/main/nsm/nsm/nsm.ns — NoethingScript 模块管理器 (设计稿 §9.1, M7)
+// 运行: node dist/noethingScript-Interpreter.js nsm -- <子命令> [参数] [--force|-y] [--repo <基址[,基址...]>]
+//   (解释器把命令别名 nsm 解析为主模块路径 modules/main/nsm/nsm/nsm.ns, 并自动注入 fs/http 能力)
+// 功能: install (远程清单/本地 zip) / update / upgrade / check-update / check-upgrade /
+//       refresh / list / search / remove; 仓库清单缓存 TTL 7 天 (DNF 式); 依赖自动递归安装。
+// 确认: 交互式 [y/N]; --force 跳过安全检查; -y/--yes 对所有确认自动答 y (自动化友好)。
+// 约束: 全部数据操作经 fs/http 注入能力 (返回值限四类); 无字典 → 键值用平行数组 + 线性查找。
+
+cmdargs
+param cmd:string = "help"
+param p1:string = ""
+param p2:string = ""
+param p3:string = ""
+param repo:string = ""
+param force:bool = false as "f"
+param yes:bool = false as "y"
+endcmdargs
+
+// 初始化 (头部块; autoinit 无局部作用域, 初始化逻辑抽到正文函数 :initConfig)
+autoinit
+call initConfig()
+endautoinit
+
+// ===== 配置 =====
+// MOD: 模块目录 (fs.moduleDir())
+// REPO: 默认主镜像基址 (help 展示用); MIRROR[]: 镜像基址列表 (默认 GitHub 主 + Gitee 镜像, 设计稿 §9.1 "GitHub 主 / Gitee 镜像: 网络失败可切换";
+//   --repo 覆盖: 支持逗号分隔多基址, 拉取失败按序回退; 单基址则只用它)
+// TTL: 清单缓存有效期 7 天 (毫秒, DNF 式); MAX_DEPTH: 依赖递归深度上限; CAT_MAX: 清单表容量上限
+global MOD:string = ""
+global REPO:string = ""
+global array MIRROR[4]:string = arrfill
+global MIRR_CNT:int = 0
+// LAST_URL: downloadRetry 最近一次成功拉取的 URL (供调用方打印实际来源)
+global LAST_URL:string = ""
+global const TTL:int = 604800000
+global const MAX_DEPTH:int = 10
+global const CAT_MAX:int = 256
+
+// 初始化配置 (autoinit 调用; 也可作模块被 use 时保持初始化)
+// 镜像加载顺序: --repo 命令行 > 配置文件 {MOD}/.nsm-mirrors.json > 内置默认 (GitHub 主 + Gitee 镜像占位)
+:initConfig () -> :void
+local mdir:string = ""
+call fs.moduleDir() -> mdir
+MOD = mdir
+local b:bool = false
+if (repo != "")
+    call splitMirrors(repo)
+else
+    call loadMirrorConfig() -> b
+    if (!b)
+        MIRROR[0] = "https://raw.githubusercontent.com/NoethingScript/NSModules/main"
+        MIRROR[1] = "https://gitee.com/NoethingScript/NSModules/raw/main"
+        MIRR_CNT = 2
+    endif
+endif
+REPO = MIRROR[0]
+:end
+
+// 从配置文件 {MOD}/.nsm-mirrors.json 读镜像列表 → MIRROR[] (格式: {"mirrors": ["url1", "url2"]}, 上限 4 截断;
+// 文件缺失/解析失败/为空 → 返回 false 由调用方回退内置默认)
+:loadMirrorConfig () -> ok:bool
+ok = false
+local cf:string = ""
+call fs.join(MOD, ".nsm-mirrors.json") -> cf
+local b:bool = false
+call fs.exists(cf) -> b
+if (!b)
+    print "[提示] 未配置仓库镜像, 使用内置默认 (" + cf + " 可配置镜像列表, nsm -- repos 查看)"
+    return ok
+endif
+local array ms[4]:string = arrfill
+try
+    call fs.readJsonArray(cf, "mirrors") -> ms
+catch (Exception e)
+    print "[提示] 仓库镜像配置解析失败, 回退内置默认 (" + e + ")"
+    return ok
+endtry
+MIRR_CNT = 0
+local i:int = 0
+while (i < len(ms) && MIRR_CNT < 4)
+    MIRROR[MIRR_CNT] = ms[i]
+    MIRR_CNT = MIRR_CNT + 1
+    i = i + 1
+endwhl
+if (MIRR_CNT == 0)
+    print "[提示] 仓库镜像配置为空, 回退内置默认"
+    return ok
+endif
+ok = true
+return ok
+:end
+
+// 显示当前生效的仓库镜像列表 (排查用; 顺序即回退顺序)
+:cmdRepos () -> ok:bool
+ok = true
+local i:int = 0
+while (i < MIRR_CNT)
+    print "  [" + str(i + 1) + "] " + MIRROR[i]
+    i = i + 1
+endwhl
+print "[信息] 生效镜像 " + str(MIRR_CNT) + " 个 (顺序即回退顺序; --repo 临时覆盖; " + MOD + "/.nsm-mirrors.json 持久配置)"
+return ok
+:end
+
+// 拆分逗号分隔镜像基址 → MIRROR[] (上限 4, 超限截断)
+:splitMirrors (s:string) -> :void
+MIRR_CNT = 0
+local rest:string = ""
+rest = s
+local seg:string = ""
+local idx:int = 0
+while (MIRR_CNT < 4)
+    if (rest == "")
+        break
+    endif
+    if (String.has(rest, ","))
+        idx = String.findFirst(rest, ",")
+        seg = String.take(rest, 0, idx)
+        MIRROR[MIRR_CNT] = seg
+        MIRR_CNT = MIRR_CNT + 1
+        rest = String.take(rest, idx + 1, len(rest) - idx - 1)
+    else
+        MIRROR[MIRR_CNT] = rest
+        MIRR_CNT = MIRR_CNT + 1
+        break
+    endif
+endwhl
+:end
+
+// 镜像 URL 拼接: {基址}/{rel} (设计稿 §9.1: 两镜像 URL 结构相同)
+:mirrorUrl (idx:int, rel:string) -> u:string
+u = MIRROR[idx] + "/" + rel
+return u
+:end
+
+// 带镜像回退的下载: 按 MIRROR[] 顺序尝试 http.download, 失败切下一个镜像; 全部失败返回 false
+// (设计稿 §9.1 "GitHub 主 / Gitee 镜像: 网络失败可切换"; 成功后 LAST_URL 记录实际来源)
+:downloadRetry (rel:string, dest:string) -> ok:bool
+ok = false
+local i:int = 0
+local url:string = ""
+while (i < MIRR_CNT)
+    call mirrorUrl(i, rel) -> url
+    try
+        call http.download(url, dest)
+        ok = true
+        LAST_URL = url
+        return ok
+    catch (Exception e)
+        if (MIRR_CNT > 1)
+            print "[提示] 镜像不可达, 尝试下一个: " + url + " (" + e + ")"
+        else
+            print "[错误] 镜像不可达: " + url + " (" + e + ")"
+            return ok
+        endif
+    endtry
+    i = i + 1
+endwhl
+print "[错误] 全部镜像拉取失败: " + rel
+return ok
+:end
+
+// 清单表 (loadCatalog 填充, 所有来源统一)
+global array CAT_PKG[CAT_MAX]:string = arrfill
+global array CAT_VER[CAT_MAX]:string = arrfill
+global array CAT_NS[CAT_MAX]:string = arrfill
+global array CAT_ZIP[CAT_MAX]:string = arrfill
+global CAT_CNT:int = 0
+
+// 已安装表 (scanInstalled 填充)
+global array INST_PKG[CAT_MAX]:string = arrfill
+global array INST_SRC[CAT_MAX]:string = arrfill
+global array INST_VER[CAT_MAX]:string = arrfill
+global INST_CNT:int = 0
+
+// 依赖/引用收集表
+// USES: use 目标 (scanPkgDeps); REFED: 被引用的包名 (孤立检测); FILES: 包内 .ns 文件 (walkFiles)
+global array USES[128]:string = arrfill
+global USES_CNT:int = 0
+global array REFED[CAT_MAX]:string = arrfill
+global REFED_CNT:int = 0
+global array FILES[128]:string = arrfill
+global FILES_CNT:int = 0
+// V_A/V_B: 版本拆分缓冲
+global array V_A[3]:int = arrfill
+global array V_B[3]:int = arrfill
+
+// ==================== 公共工具 ====================
+
+// 版本 "x.y.z" 拆三段 → V_A 全局 (缺段补 0)
+// 注: 直接写全局避免 mut 数组实参 — 经排查 mut 数组实参调用在 nsm 大脚本中触发执行状态污染
+// (函数帧/控制流栈错乱, 报"未知的函数闭合标记"/"未知 NSVM 指令"; 最小复现与模块最小复现均正常, 待查解释器根因)
+:splitVerA (v:string) -> :void
+V_A[0] = 0
+V_A[1] = 0
+V_A[2] = 0
+local i:int = 0
+local start:int = 0
+local seg:string = ""
+while (i < 3)
+    if (start >= len(v))
+        break
+    endif
+    seg = String.take(v, start, len(v) - start)
+    if (String.has(seg, "."))
+        V_A[i] = int(String.take(seg, 0, String.findFirst(seg, ".")))
+        start = start + String.findFirst(seg, ".") + 1
+    else
+        V_A[i] = int(seg)
+        break
+    endif
+    i = i + 1
+endwhl
+:end
+
+// 版本 "x.y.z" 拆三段 → V_B 全局 (缺段补 0)
+:splitVerB (v:string) -> :void
+V_B[0] = 0
+V_B[1] = 0
+V_B[2] = 0
+local i:int = 0
+local start:int = 0
+local seg:string = ""
+while (i < 3)
+    if (start >= len(v))
+        break
+    endif
+    seg = String.take(v, start, len(v) - start)
+    if (String.has(seg, "."))
+        V_B[i] = int(String.take(seg, 0, String.findFirst(seg, ".")))
+        start = start + String.findFirst(seg, ".") + 1
+    else
+        V_B[i] = int(seg)
+        break
+    endif
+    i = i + 1
+endwhl
+:end
+
+// 版本比较: a<b → -1, a>b → 1, 相等 → 0
+:cmpVer (a:string, b:string) -> r:int
+call splitVerA(a)
+call splitVerB(b)
+r = 0
+if (V_A[0] < V_B[0])
+    r = -1
+else if (V_A[0] > V_B[0])
+    r = 1
+else if (V_A[1] < V_B[1])
+    r = -1
+else if (V_A[1] > V_B[1])
+    r = 1
+else if (V_A[2] < V_B[2])
+    r = -1
+else if (V_A[2] > V_B[2])
+    r = 1
+else
+    r = 0
+endif
+return r
+:end
+
+// 适配检查: 解释器版本前两段 == 适配版本前两段
+:verMatches (a:string, b:string) -> ok:bool
+call splitVerA(a)
+call splitVerB(b)
+if (V_A[0] == V_B[0] && V_A[1] == V_B[1])
+    ok = true
+else
+    ok = false
+endif
+return ok
+:end
+
+// 确认 (--force/-y 跳过): 输出提示读 stdin, y/yes 确认
+// --force 语义 = 跳过安全检查/适配检查; -y/--yes 语义 = 对所有确认自动答 y (自动化/脚本友好)
+:confirm (msg:string, force:bool) -> ok:bool
+if (force || yes)
+    ok = true
+    return ok
+endif
+print msg + " [y/N]"
+local ans:string = ""
+ans = input()
+if (ans == "y" || ans == "Y" || ans == "yes")
+    ok = true
+else
+    ok = false
+endif
+return ok
+:end
+
+// 路径工具 (fs.join 是过程级注入函数, 只能 call)
+:cacheDir () -> d:string
+call fs.join(MOD, ".cache") -> d
+call fs.mkdir(d)
+return d
+:end
+
+:srcDir (src:string) -> d:string
+call fs.join(MOD, src) -> d
+return d
+:end
+
+:pkgDir (src:string, pkg:string) -> d:string
+call fs.join(MOD, src, pkg) -> d
+return d
+:end
+
+// 包 manifest 文件路径
+:pkgManifest (src:string, pkg:string) -> mf:string
+call pkgDir(src, pkg) -> mf
+call fs.join(mf, "manifest") -> mf
+return mf
+:end
+
+:repoUrl (rel:string) -> u:string
+u = REPO + "/" + rel
+return u
+:end
+
+// 包是否已安装: 返回所在来源 (未安装返回 "")
+:pkgInstalledSrc (pkg:string) -> s:string
+s = ""
+local array srcs[3]:string = ["main", "extra", "custom"]
+local i:int = 0
+local d:string = ""
+local mf:string = ""
+local b:bool = false
+while (i < 3)
+    call srcDir(srcs[i]) -> d
+    call fs.join(d, pkg, "manifest") -> mf
+    call fs.exists(mf) -> b
+    if (b)
+        s = srcs[i]
+        break
+    endif
+    i = i + 1
+endwhl
+return s
+:end
+
+// 扫描已安装模块 → INST 表
+:scanInstalled () -> :void
+INST_CNT = 0
+local array srcs[3]:string = ["main", "extra", "custom"]
+local i:int = 0
+local d:string = ""
+local mf:string = ""
+local array items[CAT_MAX]:string = arrfill
+local j:int = 0
+local ver:string = ""
+local b:bool = false
+while (i < 3)
+    call srcDir(srcs[i]) -> d
+    call fs.isDir(d) -> b
+    if (b)
+        call fs.listDir(d) -> items
+        j = 0
+        while (j < len(items))
+            call fs.join(d, items[j], "manifest") -> mf
+            call fs.exists(mf) -> b
+            if (b)
+                INST_PKG[INST_CNT] = items[j]
+                INST_SRC[INST_CNT] = srcs[i]
+                call fs.readJsonField(mf, "version") -> ver
+                INST_VER[INST_CNT] = ver
+                INST_CNT = INST_CNT + 1
+            endif
+            j = j + 1
+        endwhl
+    endif
+    i = i + 1
+endwhl
+:end
+
+// 递归收集目录下 .ns 文件 → FILES 表
+:walkFiles (dir:string) -> :void
+local array items[CAT_MAX]:string = arrfill
+local j:int = 0
+local p:string = ""
+local b:bool = false
+call fs.listDir(dir) -> items
+while (j < len(items))
+    call fs.join(dir, items[j]) -> p
+    call fs.isDir(p) -> b
+    if (b)
+        call walkFiles(p)
+    else
+        if (String.has(items[j], ".ns"))
+            FILES[FILES_CNT] = p
+            FILES_CNT = FILES_CNT + 1
+        endif
+    endif
+    j = j + 1
+endwhl
+:end
+
+// 扫描单个文件头部的 use 目标 → USES 表
+:scanFileUses (file:string) -> :void
+local s:string = ""
+call fs.readFile(file) -> s
+local nl:string = ""
+// 换行字符 (字符串字面量不转义, 由码点构造)
+nl = String.char(10)
+local frm:int = 0
+local pos:int = 0
+local line:string = ""
+local trimmed:string = ""
+local sp:int = 0
+local target:string = ""
+while (true)
+    if (frm >= len(s))
+        break
+    endif
+    if (String.has(String.take(s, frm, len(s) - frm), nl))
+        pos = String.findFirst(s, nl, frm)
+        line = String.take(s, frm, pos - frm)
+        frm = pos + 1
+    else
+        line = String.take(s, frm, len(s) - frm)
+        frm = len(s)
+    endif
+    trimmed = String.trim(line)
+    if (len(trimmed) >= 4 && String.take(trimmed, 0, 4) == "use " && !String.has(trimmed, "use inner"))
+        if (String.has(String.take(trimmed, 4, len(trimmed) - 4), " "))
+            sp = String.findFirst(trimmed, " ", 4)
+            target = String.take(trimmed, 4, sp - 4)
+        else
+            target = String.take(trimmed, 4, len(trimmed) - 4)
+        endif
+        USES[USES_CNT] = target
+        USES_CNT = USES_CNT + 1
+    endif
+endwhl
+:end
+
+// 扫描包内所有 .ns 的 use 目标 → USES 表
+:scanPkgDeps (src:string, pkg:string) -> :void
+USES_CNT = 0
+FILES_CNT = 0
+local d:string = ""
+call pkgDir(src, pkg) -> d
+call walkFiles(d)
+local i:int = 0
+while (i < FILES_CNT)
+    call scanFileUses(FILES[i])
+    i = i + 1
+endwhl
+:end
+
+// 清单线性查找: 返回下标 (-1 未找到)
+:findPkg (name:string) -> idx:int
+idx = -1
+local i:int = 0
+while (i < CAT_CNT)
+    if (CAT_PKG[i] == name)
+        idx = i
+        break
+    endif
+    i = i + 1
+endwhl
+return idx
+:end
+
+// 引用收集 (去重): 已在表中返回 true, 新增返回 false
+:addRefed (name:string) -> ok:bool
+ok = false
+local i:int = 0
+while (i < REFED_CNT)
+    if (REFED[i] == name)
+        ok = true
+        return ok
+    endif
+    i = i + 1
+endwhl
+REFED[REFED_CNT] = name
+REFED_CNT = REFED_CNT + 1
+return ok
+:end
+
+:isRefed (name:string) -> ok:bool
+ok = false
+local i:int = 0
+while (i < REFED_CNT)
+    if (REFED[i] == name)
+        ok = true
+        break
+    endif
+    i = i + 1
+endwhl
+return ok
+:end
+
+// ==================== 清单 ====================
+
+// 拉取远程清单写缓存 (main/extra)
+:fetchCatalog (src:string) -> ok:bool
+ok = false
+call fs.mkdir(MOD)
+local cd:string = ""
+call cacheDir() -> cd
+local cache:string = ""
+call fs.join(cd, src + ".manifest") -> cache
+local rel:string = ""
+rel = "catalog/" + src + ".manifest.json"
+call downloadRetry(rel, cache) -> ok
+if (ok)
+    print "[信息] 已刷新 " + src + " 仓库清单 (" + LAST_URL + ")"
+else
+    print "[错误] 拉取清单失败 (已尝试全部镜像): " + rel
+endif
+return ok
+:end
+
+// 扫描本地 custom 包 → CAT 表
+:scanCustom () -> ok:bool
+ok = false
+CAT_CNT = 0
+local cd:string = ""
+local b:bool = false
+call srcDir("custom") -> cd
+call fs.isDir(cd) -> b
+if (!b)
+    return ok
+endif
+local array items[CAT_MAX]:string = arrfill
+call fs.listDir(cd) -> items
+local j:int = 0
+local mf:string = ""
+local v:string = ""
+local ns:string = ""
+while (j < len(items))
+    call fs.join(cd, items[j], "manifest") -> mf
+    call fs.exists(mf) -> b
+    if (b)
+        CAT_PKG[CAT_CNT] = items[j]
+        call fs.readJsonField(mf, "version") -> v
+        CAT_VER[CAT_CNT] = v
+        call fs.readJsonField(mf, "ns") -> ns
+        CAT_NS[CAT_CNT] = ns
+        CAT_ZIP[CAT_CNT] = ""
+        CAT_CNT = CAT_CNT + 1
+    endif
+    j = j + 1
+endwhl
+ok = true
+return ok
+:end
+
+// 从缓存文件读清单 → CAT 表
+:loadCatalogCache (src:string) -> ok:bool
+ok = false
+local cd:string = ""
+call cacheDir() -> cd
+local cache:string = ""
+call fs.join(cd, src + ".manifest") -> cache
+local array items[CAT_MAX]:string = arrfill
+call fs.readJsonTable(cache, "packages", "package") -> items
+CAT_CNT = len(items)
+local i:int = 0
+while (i < CAT_CNT)
+    CAT_PKG[i] = items[i]
+    i = i + 1
+endwhl
+call fs.readJsonTable(cache, "packages", "version") -> items
+i = 0
+while (i < CAT_CNT)
+    CAT_VER[i] = items[i]
+    i = i + 1
+endwhl
+call fs.readJsonTable(cache, "packages", "ns") -> items
+i = 0
+while (i < CAT_CNT)
+    CAT_NS[i] = items[i]
+    i = i + 1
+endwhl
+call fs.readJsonTable(cache, "packages", "zip") -> items
+i = 0
+while (i < CAT_CNT)
+    CAT_ZIP[i] = items[i]
+    i = i + 1
+endwhl
+ok = true
+return ok
+:end
+
+// 加载来源清单 → CAT 表 (main/extra 读缓存, 缺失自动拉取; 缓存过期自动重拉; custom 实时扫描)
+:loadCatalog (src:string) -> ok:bool
+ok = false
+if (src == "custom")
+    call scanCustom() -> ok
+    return ok
+endif
+local cd:string = ""
+local b:bool = false
+local fetched:bool = false
+call cacheDir() -> cd
+local cache:string = ""
+call fs.join(cd, src + ".manifest") -> cache
+call fs.exists(cache) -> b
+if (!b)
+    call fetchCatalog(src) -> fetched
+    if (!fetched)
+        print "[错误] 仓库清单不可用: " + src + " (网络失败或缓存缺失)"
+        return ok
+    endif
+endif
+call loadCatalogCache(src) -> ok
+if (!ok)
+    return ok
+endif
+local mt:int = 0
+call fs.mtime(cache) -> mt
+local now:int = 0
+call fs.now() -> now
+if (now - mt > TTL)
+    print "[提示] " + src + " 清单缓存超过 7 天, 自动重拉..."
+    call fetchCatalog(src) -> fetched
+    if (fetched)
+        call loadCatalogCache(src) -> ok
+    else
+        print "[提示] 自动刷新失败, 使用过期缓存 (refresh " + src + " 手动重试)"
+    endif
+endif
+ok = true
+return ok
+:end
+
+// ==================== 安装核心 ====================
+
+// 远程安装核心: 下载/解压/校验(包名+来源)/移动/依赖递归 (调用方已做过确认)
+:installPkgRemote (pkg:string, src:string, zipName:string, ver:string, nsAdapt:string, force:bool, depth:int) -> ok:bool
+ok = false
+local r:bool = false
+if (depth > MAX_DEPTH)
+    print "[错误] 依赖递归过深 (存在循环依赖?): " + pkg
+    return ok
+endif
+// 适配检查
+local iv:string = ""
+call fs.interpVersion() -> iv
+local mv:bool = false
+call verMatches(nsAdapt, iv) -> mv
+if (!mv && !force)
+    print "[错误] 适配不匹配: " + pkg + " 需要 NS " + nsAdapt + "+, 当前解释器 " + iv + " (--force 强制)"
+    return ok
+endif
+local dl:string = ""
+call cacheDir() -> dl
+call fs.join(dl, "dl") -> dl
+call fs.mkdir(dl)
+local zipPath:string = ""
+call fs.join(dl, pkg + ".zip") -> zipPath
+local url:string = ""
+local rel:string = ""
+rel = "packages/" + zipName
+local dk:bool = false
+call downloadRetry(rel, zipPath) -> dk
+if (!dk)
+    print "[错误] 下载失败: " + pkg + "@" + ver + " (全部镜像不可达)"
+    return ok
+endif
+url = LAST_URL
+print "[信息] 下载 " + pkg + "@" + ver + " <- " + url
+local tmpDir:string = ""
+call fs.join(dl, pkg + ".tmp") -> tmpDir
+call fs.remove(tmpDir)
+call fs.mkdir(tmpDir)
+try
+    call fs.unzip(zipPath, tmpDir)
+catch (Exception e)
+    print "[错误] 解压失败: " + pkg + " (" + e + ")"
+    return ok
+endtry
+local mf:string = ""
+local b:bool = false
+call fs.join(tmpDir, pkg, "manifest") -> mf
+call fs.exists(mf) -> b
+if (!b)
+    print "[错误] 压缩包内无包根 " + pkg + "/manifest, 不是合法模块包"
+    return ok
+endif
+local mpkg:string = ""
+local msrc:string = ""
+call fs.readJsonField(mf, "package") -> mpkg
+call fs.readJsonField(mf, "source") -> msrc
+if (mpkg != pkg)
+    print "[错误] 包名不一致: 压缩包声明 " + mpkg + ", 期望 " + pkg
+    return ok
+endif
+if (msrc != src)
+    print "[警告] 来源不一致: 压缩包声明 source=" + msrc + ", 拉取来源=" + src
+    if (!force)
+        print "[错误] 已阻止安装 (来源不匹配); 使用 --force 强制"
+        return ok
+    endif
+endif
+// 移动到安装位置
+local target:string = ""
+call pkgDir(src, pkg) -> target
+call fs.remove(target)
+// 目标父目录可能不存在 (如 modules/extra/), fs.rename 不创建父目录 → 先 mkdir
+local parentDir:string = ""
+call fs.join(MOD, src) -> parentDir
+call fs.mkdir(parentDir)
+local fromPath:string = ""
+call fs.join(tmpDir, pkg) -> fromPath
+try
+    call fs.rename(fromPath, target)
+catch (Exception e)
+    print "[错误] 安装失败: " + pkg + " (" + e + ")"
+    return ok
+endtry
+call fs.remove(tmpDir)
+print "[信息] 已安装 " + pkg + "@" + ver + " (source: " + src + ")"
+// 依赖递归: 扫描包内 use, 未安装的依赖从同来源清单递归安装
+call scanPkgDeps(src, pkg)
+local u:int = 0
+local nd:int = 0
+while (u < USES_CNT)
+    nd = depth + 1
+    call installDep(USES[u], src, force, nd) -> r
+    u = u + 1
+endwhl
+ok = true
+return ok
+:end
+
+// 依赖安装: 已安装则跳过; 否则查清单并递归安装
+:installDep (pkg:string, src:string, force:bool, depth:int) -> ok:bool
+ok = false
+local r:bool = false
+if (depth > MAX_DEPTH)
+    print "[错误] 依赖递归过深 (存在循环依赖?): " + pkg
+    return ok
+endif
+local curSrc:string = ""
+call pkgInstalledSrc(pkg) -> curSrc
+if (curSrc != "")
+    ok = true
+    return ok
+endif
+call loadCatalog(src) -> loaded
+if (!loaded)
+    return ok
+endif
+local idx:int = 0
+call findPkg(pkg) -> idx
+if (idx == -1)
+    print "[错误] 依赖 " + pkg + " 不在 " + src + " 仓库清单中"
+    return ok
+endif
+call installPkgRemote(pkg, src, CAT_ZIP[idx], CAT_VER[idx], CAT_NS[idx], force, depth) -> r
+return ok
+:end
+
+// 本地 zip 安装 (custom 来源)
+:doLocalInstall (zipPath:string, force:bool) -> ok:bool
+ok = false
+local r:bool = false
+local b:bool = false
+call fs.exists(zipPath) -> b
+if (!b)
+    print "[错误] 本地压缩包不存在: " + zipPath
+    return ok
+endif
+local dl:string = ""
+call cacheDir() -> dl
+call fs.join(dl, "dl") -> dl
+call fs.mkdir(dl)
+local tmpDir:string = ""
+call fs.join(dl, "local.tmp") -> tmpDir
+call fs.remove(tmpDir)
+call fs.mkdir(tmpDir)
+try
+    call fs.unzip(zipPath, tmpDir)
+catch (Exception e)
+    print "[错误] 解压失败: " + zipPath + " (" + e + ")"
+    return ok
+endtry
+local array items[CAT_MAX]:string = arrfill
+call fs.listDir(tmpDir) -> items
+if (len(items) != 1)
+    print "[错误] 压缩包根应仅含一个包目录 (当前 " + len(items) + " 项)"
+    return ok
+endif
+local pkg:string = ""
+pkg = items[0]
+local mf:string = ""
+local b:bool = false
+call fs.join(tmpDir, pkg, "manifest") -> mf
+call fs.exists(mf) -> b
+if (!b)
+    print "[错误] 压缩包内无包根 " + pkg + "/manifest, 不是合法模块包"
+    return ok
+endif
+local mpkg:string = ""
+local msrc:string = ""
+local ver:string = ""
+call fs.readJsonField(mf, "package") -> mpkg
+call fs.readJsonField(mf, "source") -> msrc
+call fs.readJsonField(mf, "version") -> ver
+if (mpkg != pkg)
+    print "[错误] 包名不一致: 压缩包声明 " + mpkg + ", 目录 " + pkg
+    return ok
+endif
+if (msrc != "custom")
+    print "[警告] 本地安装包声明 source=" + msrc + ", 将按 custom 来源安装"
+    if (!force)
+        print "[错误] 已阻止 (source 非 custom); 使用 --force 强制"
+        return ok
+    endif
+endif
+local curSrc:string = ""
+local c:bool = false
+local msg:string = ""
+call pkgInstalledSrc(pkg) -> curSrc
+if (curSrc != "")
+    if (curSrc != "custom")
+        msg = pkg + " 已从 " + curSrc + " 来源安装, 本地安装继续?"
+        call confirm(msg, force) -> c
+        if (!c)
+            print "已取消"
+            return ok
+        endif
+    else
+        local curMf:string = ""
+        local curVer:string = ""
+        call pkgManifest("custom", pkg) -> curMf
+        call fs.readJsonField(curMf, "version") -> curVer
+        local cv:int = 0
+        call cmpVer(ver, curVer) -> cv
+        if (cv < 0)
+            msg = "降级安装: " + pkg + "@" + ver + " < 已装 " + curVer + "?"
+            call confirm(msg, force) -> c
+            if (!c)
+                print "已取消"
+                return ok
+            endif
+        endif
+    endif
+endif
+// 安装
+local cd:string = ""
+call srcDir("custom") -> cd
+call fs.mkdir(cd)
+local fromPath:string = ""
+local target:string = ""
+call fs.join(tmpDir, pkg) -> fromPath
+call fs.join(cd, pkg) -> target
+call fs.remove(target)
+try
+    call fs.rename(fromPath, target)
+catch (Exception e)
+    print "[错误] 安装失败: " + pkg + " (" + e + ")"
+    return ok
+endtry
+call fs.remove(tmpDir)
+print "[信息] 已安装 " + pkg + "@" + ver + " (custom, 本地压缩包)"
+// 依赖递归
+call scanPkgDeps("custom", pkg)
+local u:int = 0
+while (u < USES_CNT)
+    call installDep(USES[u], "custom", force, 0) -> r
+    u = u + 1
+endwhl
+ok = true
+return ok
+:end
+
+// ==================== 命令 ====================
+
+// 通用可更新收集: pkgFilter 空 = 全部; onlyCheck 只报告不安装;
+// allowCross 允许跨适配段 (upgrade, 含确认), 否则适配不匹配跳过 (update 安全更新)
+:collectUpdatable (pkgFilter:string, onlyCheck:bool, allowCross:bool) -> :void
+call scanInstalled()
+local i:int = 0
+local idx:int = 0
+local updated:int = 0
+local ok:bool = false
+local r:bool = false
+local iv:string = ""
+local c:bool = false
+local cv:int = 0
+local mv:bool = false
+while (i < INST_CNT)
+    if (INST_SRC[i] == "custom")
+        i = i + 1
+        continue
+    endif
+    if (pkgFilter != "" && INST_PKG[i] != pkgFilter)
+        i = i + 1
+        continue
+    endif
+    call loadCatalog(INST_SRC[i]) -> ok
+    if (!ok)
+        i = i + 1
+        continue
+    endif
+    call findPkg(INST_PKG[i]) -> idx
+    if (idx == -1)
+        print INST_SRC[i] + ": " + INST_PKG[i] + " 不在仓库清单中 (仓库已移除?)"
+        i = i + 1
+        continue
+    endif
+    call cmpVer(CAT_VER[idx], INST_VER[i]) -> cv
+    if (cv > 0)
+        call fs.interpVersion() -> iv
+        call verMatches(CAT_NS[idx], iv) -> mv
+        if (mv)
+            print "可更新: " + INST_PKG[i] + "@" + INST_VER[i] + " -> " + CAT_VER[idx] + " (" + INST_SRC[i] + ")"
+            if (!onlyCheck)
+                call installPkgRemote(INST_PKG[i], INST_SRC[i], CAT_ZIP[idx], CAT_VER[idx], CAT_NS[idx], force, 0) -> r
+                updated = updated + 1
+            endif
+        else
+            print "跨适配更新: " + INST_PKG[i] + "@" + INST_VER[i] + " -> " + CAT_VER[idx] + " (需 NS " + CAT_NS[idx] + "+, 当前 " + iv + ")"
+            if (!onlyCheck)
+                if (allowCross)
+                    // 拼接先算到局部变量再传实参 (NS call 实参仅字面量/变量/数组元素, 不解析拼接表达式)
+                    local cfmMsg:string = ""
+                    cfmMsg = "跨适配段升级 " + INST_PKG[i] + " 继续?"
+                    call confirm(cfmMsg, force) -> c
+                    if (!c)
+                        print "已取消: " + INST_PKG[i]
+                    else
+                        call installPkgRemote(INST_PKG[i], INST_SRC[i], CAT_ZIP[idx], CAT_VER[idx], CAT_NS[idx], true, 0) -> r
+                        updated = updated + 1
+                    endif
+                else
+                    print "跳过 (update 仅安全更新; 跨适配段请用 upgrade)"
+                endif
+            endif
+        endif
+    else if (cv < 0)
+        print "已超前: " + INST_PKG[i] + "@" + INST_VER[i] + " > 仓库 " + CAT_VER[idx] + " (降级需 install 并确认)"
+    else
+        print "最新: " + INST_PKG[i] + "@" + INST_VER[i]
+    endif
+    i = i + 1
+endwhl
+if (!onlyCheck && updated > 0)
+    print "已更新 " + str(updated) + " 个模块"
+endif
+:end
+
+:cmdInstall (pkg:string, srcArg:string, verTag:string, force:bool) -> ok:bool
+ok = false
+local r:bool = false
+if (pkg == "")
+    print "用法: install <包名 [来源]> [@版本] | <本地压缩包路径>"
+    return ok
+endif
+// 本地压缩包 (设计稿: 不带 from/@版本, 写了报错; 来源由包内 manifest.source 决定)
+if (String.has(pkg, ".zip"))
+    if (srcArg != "" || verTag != "")
+        print "[错误] 本地压缩包安装不接受来源或版本参数 (来源由包内 manifest 决定)"
+        return ok
+    endif
+    call doLocalInstall(pkg, force) -> r
+    return ok
+endif
+// 来源解析
+local src:string = ""
+if (srcArg == "")
+    src = "main"
+else
+    src = srcArg
+endif
+if (src != "main" && src != "extra" && src != "custom")
+    print "[错误] 未知来源: " + src + " (支持 main/extra/custom)"
+    return ok
+endif
+call loadCatalog(src) -> loaded
+if (!loaded)
+    return ok
+endif
+local idx:int = 0
+call findPkg(pkg) -> idx
+if (idx == -1)
+    print "[错误] 仓库清单中无此包: " + pkg + " (可先 refresh " + src + ") 或用 custom 本地安装"
+    return ok
+endif
+// 适配检查
+local iv:string = ""
+call fs.interpVersion() -> iv
+local mv:bool = false
+call verMatches(CAT_NS[idx], iv) -> mv
+if (!mv && !force)
+    print "[错误] 适配不匹配: " + pkg + " 需要 NS " + CAT_NS[idx] + "+, 当前解释器 " + iv + " (--force 强制)"
+    return ok
+endif
+// 版本: verTag 可指定 (必须等于清单版本)
+local ver:string = ""
+ver = CAT_VER[idx]
+if (verTag != "")
+    local vt:string = String.replace(verTag, "@", "", false)
+    if (vt != ver)
+        print "[错误] 版本不存在: " + pkg + "@" + vt + " (仓库仅提供 " + ver + ")"
+        return ok
+    endif
+endif
+// 已安装检查 (覆盖/降级/换源确认)
+local curSrc:string = ""
+local c:bool = false
+call pkgInstalledSrc(pkg) -> curSrc
+if (curSrc != "")
+    local curMf:string = ""
+    local curVer:string = ""
+    call pkgManifest(curSrc, pkg) -> curMf
+    call fs.readJsonField(curMf, "version") -> curVer
+    local cv:int = 0
+    call cmpVer(ver, curVer) -> cv
+    if (curSrc != src)
+        print "[警告] " + pkg + " 已从 " + curSrc + " 来源安装, 现改为 " + src
+        call confirm("换源安装继续?", force) -> c
+        if (!c)
+            print "已取消"
+            return ok
+        endif
+    else if (cv < 0)
+        print "[警告] 降级安装: " + pkg + "@" + ver + " < 已装 " + curVer
+        call confirm("降级安装继续?", force) -> c
+        if (!c)
+            print "已取消"
+            return ok
+        endif
+    else if (cv == 0)
+        print "[信息] " + pkg + "@" + ver + " 已安装, 重新覆盖安装"
+    endif
+endif
+call installPkgRemote(pkg, src, CAT_ZIP[idx], ver, CAT_NS[idx], force, 0) -> r
+ok = true
+return ok
+:end
+
+:cmdList () -> ok:bool
+ok = false
+call scanInstalled()
+if (INST_CNT == 0)
+    print "无已安装模块"
+    return ok
+endif
+// 孤立检测: 收集所有已装包 ns 文件的 use 目标
+REFED_CNT = 0
+local i:int = 0
+local u:int = 0
+local added:bool = false
+while (i < INST_CNT)
+    call scanPkgDeps(INST_SRC[i], INST_PKG[i])
+    u = 0
+    while (u < USES_CNT)
+        call addRefed(USES[u]) -> added
+        u = u + 1
+    endwhl
+    i = i + 1
+endwhl
+print "已安装模块 (来源: 包@版本):"
+i = 0
+local refed:bool = false
+while (i < INST_CNT)
+    print "  " + INST_SRC[i] + ": " + INST_PKG[i] + "@" + INST_VER[i]
+    call isRefed(INST_PKG[i]) -> refed
+    if (!refed)
+        print "      [孤立]"
+    endif
+    i = i + 1
+endwhl
+ok = true
+return ok
+:end
+
+:cmdSearch (kw:string) -> ok:bool
+ok = false
+if (kw == "")
+    print "用法: search <关键词>"
+    return ok
+endif
+local array srcs[2]:string = ["main", "extra"]
+local i:int = 0
+local j:int = 0
+local found:int = 0
+local ok:bool = false
+while (i < 2)
+    call loadCatalog(srcs[i]) -> ok
+    if (ok)
+        j = 0
+        while (j < CAT_CNT)
+            if (String.has(CAT_PKG[j], kw) || String.has(CAT_VER[j], kw) || String.has(CAT_NS[j], kw))
+                print "  " + srcs[i] + ": " + CAT_PKG[j] + "@" + CAT_VER[j] + " (NS " + CAT_NS[j] + ") " + CAT_ZIP[j]
+                found = found + 1
+            endif
+            j = j + 1
+        endwhl
+    endif
+    i = i + 1
+endwhl
+if (found == 0)
+    print "仓库中无匹配: " + kw + " (先 refresh 更新清单?)"
+endif
+ok = true
+return ok
+:end
+
+:cmdRefresh (target:string) -> ok:bool
+ok = false
+local r:bool = false
+if (target == "" || target == "all")
+    call fetchCatalog("main") -> r
+    call fetchCatalog("extra") -> r
+    call scanCustom() -> r
+    print "已刷新: main, extra, custom (" + str(CAT_CNT) + " 个 custom 包)"
+    return ok
+endif
+if (target == "main" || target == "extra")
+    call fetchCatalog(target) -> r
+    return ok
+endif
+if (target == "custom")
+    call scanCustom() -> r
+    print "已刷新 custom: " + str(CAT_CNT) + " 个包"
+    return ok
+endif
+print "[错误] 未知目标: " + target + " (支持 main/extra/custom/all)"
+ok = true
+return ok
+:end
+
+:cmdRemove (pkg:string, srcArg:string, force:bool) -> ok:bool
+ok = false
+if (pkg == "")
+    print "用法: remove <包名> [来源]"
+    return ok
+endif
+local src:string = ""
+local c:bool = false
+local msg:string = ""
+if (srcArg == "")
+    call pkgInstalledSrc(pkg) -> src
+    if (src == "")
+        print "[错误] 未安装: " + pkg
+        return ok
+    endif
+else
+    src = srcArg
+    local mf:string = ""
+    local b:bool = false
+    call pkgManifest(src, pkg) -> mf
+    call fs.exists(mf) -> b
+    if (!b)
+        print "[错误] " + src + " 下未安装: " + pkg
+        return ok
+    endif
+endif
+msg = "卸载 " + pkg + " (source: " + src + ")?"
+call confirm(msg, force) -> c
+if (!c)
+    print "已取消"
+    return ok
+endif
+local d:string = ""
+call pkgDir(src, pkg) -> d
+call fs.remove(d)
+print "已卸载 " + pkg + " (source: " + src + ")"
+ok = true
+return ok
+:end
+
+:cmdUpdate (pkg:string, force:bool) -> ok:bool
+ok = false
+if (pkg == "")
+    // 设计稿: update 无参 = 全部模块安全更新
+    call collectUpdatable("", false, false)
+    return ok
+endif
+call collectUpdatable(pkg, false, false)
+ok = true
+return ok
+:end
+
+:cmdUpgrade (pkg:string, force:bool) -> :void
+// 设计稿: upgrade = 跨适配段大升级 (含确认, --force 跳过)
+call collectUpdatable(pkg, false, true)
+:end
+
+:cmdCheckUpdate (pkg:string) -> :void
+// 设计稿: check 系列默认强制刷新清单
+local r:bool = false
+call fetchCatalog("main") -> r
+call fetchCatalog("extra") -> r
+call collectUpdatable(pkg, true, false)
+:end
+
+:cmdCheckUpgrade (pkg:string) -> :void
+local r:bool = false
+call fetchCatalog("main") -> r
+call fetchCatalog("extra") -> r
+call collectUpdatable(pkg, true, true)
+:end
+
+:cmdHelp () -> :void
+print "NoethingScript 模块管理器 (设计稿 §9.1, M7)"
+print ""
+print "用法: node dist/noethingScript-Interpreter.js nsm -- <命令> [参数] [--force|-y] [--repo <基址[,基址...]>]"
+print ""
+print "  install <包名 [来源]> [@版本]    安装模块 (默认来源 main; 来源: main/extra/custom)"
+print "  install <本地压缩包路径>         从本地 zip 安装 (custom 来源)"
+print "  update [包名]                   检查/更新指定模块"
+print "  upgrade [包名]                  更新指定或全部已安装模块"
+print "  check-update [包名]             仅检查可更新项"
+print "  check-upgrade [包名]            仅检查全部可更新项"
+print "  refresh <main|extra|custom|all> 刷新仓库清单 (main/extra 拉远程, custom 重扫本地)"
+print "  list                            列出已安装模块 (含孤立标记)"
+print "  search <关键词>                 搜索仓库包"
+print "  remove <包名> [来源]            卸载模块"
+print "  repos                          显示当前生效的仓库镜像列表 (顺序即回退顺序)"
+print "  help                           显示本帮助"
+print "  --force / -y                     --force 跳过安全检查/适配检查; -y (--yes) 对所有确认自动答 y"
+print "  --repo <基址[,基址...]>          覆盖仓库镜像列表, 逗号分隔多镜像按序回退"
+print "  仓库镜像: " + MOD + "/.nsm-mirrors.json 持久配置 (JSON 对象, mirrors 数组字段, 上限 4), 缺省内置默认 (当前 " + REPO + " 主 + Gitee 镜像)"
+:end
+
+// ==================== 入口 ====================
+
+:main () -> :void
+local r:bool = false
+try
+    if (cmd == "list")
+        call cmdList() -> r
+    else if (cmd == "refresh")
+        call cmdRefresh(p1) -> r
+    else if (cmd == "search")
+        call cmdSearch(p1) -> r
+    else if (cmd == "install")
+        call cmdInstall(p1, p2, p3, force) -> r
+    else if (cmd == "update")
+        call cmdUpdate(p1, force) -> r
+    else if (cmd == "upgrade")
+        call cmdUpgrade(p1, force)
+    else if (cmd == "check-update")
+        call cmdCheckUpdate(p1)
+    else if (cmd == "check-upgrade")
+        call cmdCheckUpgrade(p1)
+    else if (cmd == "remove")
+        call cmdRemove(p1, p2, force) -> r
+    else if (cmd == "repos")
+        call cmdRepos() -> r
+    else if (cmd == "help")
+        call cmdHelp()
+    else
+        print "[错误] 未知命令: " + cmd
+        call cmdHelp()
+    endif
+catch (Exception e)
+    print "[nsm 错误] " + e
+endtry
+:end
+
+call main()
